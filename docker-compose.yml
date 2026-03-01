@@ -1,0 +1,29 @@
+services:
+  pgvector:
+    image: ankane/pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./agent_memory/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U agent -d agent_os" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  openclaw-tools-node:
+    build:
+      context: ./openclaw-tools-node
+      dockerfile: Dockerfile
+    ports:
+      - "5100:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+
+volumes:
+  pgdata:

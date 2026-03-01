@@ -1,0 +1,16 @@
+{
+    "name": "hugging-face-tool-builder",
+    "description": "Builds and deploys tools and pipelines using Hugging Face Transformers, Inference API, and Spaces.",
+    "author": "Antigravity",
+    "version": "1.0.0",
+    "tags": [
+        "huggingface",
+        "ml-ops",
+        "api"
+    ],
+    "eval_lift": 0.0,
+    "dependencies": [
+        "transformers",
+        "huggingface_hub"
+    ]
+}

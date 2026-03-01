@@ -1,0 +1,8 @@
+{
+  "name": "reward-shaper",
+  "description": "Designs reinforcement learning reward functions given an environment description.",
+  "author": "Antigravity",
+  "version": "1.0.0",
+  "tags": ["rl", "reward-design"],
+  "dependencies": []
+}
