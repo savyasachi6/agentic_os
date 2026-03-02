@@ -8,13 +8,13 @@ The appliance is structured as a coordinated set of specialized subsystems, each
 
 ```mermaid
 graph TD
-    User((User)) -->|WebSocket/API| Core[Agent OS Core]
-    Core -->|Semantic Query| Memory[Memory & RAG]
-    Core -->|Process CMD| Sandbox[Tool Sandbox]
-    Core -->|Reasoning| LLM[LLM Router]
-    Memory -->|Vector Search| pgvector[(Postgres + pgvector)]
-    LLM -->|Batched Inference| Ollama[Ollama/Local LLM]
-    Sandbox -->|Restricted Ops| FS[Filesystem/System]
+    User(("User")) -->|WebSocket/API| Core["Agent OS Core"]
+    Core -->|Semantic Query| Memory["Memory & RAG"]
+    Core -->|Process CMD| Sandbox["Tool Sandbox"]
+    Core -->|Reasoning| LLM["LLM Router"]
+    Memory -->|Vector Search| pgvector[("Postgres + pgvector")]
+    LLM -->|Batched Inference| Ollama["Ollama/Local LLM"]
+    Sandbox -->|Restricted Ops| FS["Filesystem/System"]
 ```
 
 ## Core Subsystems

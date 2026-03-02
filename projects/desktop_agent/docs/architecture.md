@@ -6,10 +6,10 @@ The `desktop-agent` is an application-layer service that orchestrates core-level
 
 ```mermaid
 graph TD
-    User((User)) -->|Commands| Core[Agent OS Core]
-    Core -->|Policy Check| DeskAgent[Desktop Agent Logic]
-    DeskAgent -->|Tool Call| FileTools[File I/O Tools]
-    DeskAgent -->|Tool Call| BackupTools[Backup Tools]
+    User(("User")) -->|Commands| Core["Agent OS Core"]
+    Core -->|Policy Check| DeskAgent["Desktop Agent Logic"]
+    DeskAgent -->|Tool Call| FileTools["File I/O Tools"]
+    DeskAgent -->|Tool Call| BackupTools["Backup Tools"]
     
     FileTools -->|Confirm| User
     BackupTools -->|Status| User

@@ -6,9 +6,9 @@ The `robotics-rl-console` bridges the gap between high-level reasoning and physi
 
 ```mermaid
 graph TD
-    Agent[Agent Core] -->|Thought| Planning[Command Planner]
-    Planning -->|ROS 2| Bridge[ROS 2 Node]
-    Bridge -->|Topic/Service| Sim[Gazebo / Isaac Sim]
+    Agent["Agent Core"] -->|Thought| Planning["Command Planner"]
+    Planning -->|ROS 2| Bridge["ROS 2 Node"]
+    Bridge -->|Topic/Service| Sim["Gazebo / Isaac Sim"]
     Sim -->|Telemetry| Bridge
     Bridge -->|Observation| Agent
 ```

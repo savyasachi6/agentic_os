@@ -8,18 +8,18 @@ The `productivity` module enables the agent to act as a "Personal Assistant". it
 
 ```mermaid
 graph TD
-    Agent[Agent Core] -->|Tool Call| Briefing[Briefing Engine]
-    Agent -->|Tool Call| Todo[Todo Manager]
-    Agent -->|Tool Call| Notes[Note Manager]
-    Agent -->|Tool Call| Planner[Task Planner]
+    Agent["Agent Core"] -->|Tool Call| Briefing["Briefing Engine"]
+    Agent -->|Tool Call| Todo["Todo Manager"]
+    Agent -->|Tool Call| Notes["Note Manager"]
+    Agent -->|Tool Call| Planner["Task Planner"]
     
-    Notes -->|RAG| VS[Vector Store]
+    Notes -->|RAG| VS["Vector Store"]
     Todo -->|Search| VS
     
     Briefing -->|Aggregate| Todo
-    Briefing -->|Aggregate| Cal[Calendar Connector]
+    Briefing -->|Aggregate| Cal["Calendar Connector"]
     
-    Planner -->|Decompose| LLM[Ollama/reasoning]
+    Planner -->|Decompose| LLM["Ollama/reasoning"]
     Planner -->|Execute| Agent
 ```
 

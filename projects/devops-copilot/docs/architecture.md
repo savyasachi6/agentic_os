@@ -6,12 +6,12 @@ The DevOps Copilot is a specialized agent for CI/CD and system maintenance.
 
 ```mermaid
 graph TD
-    CI[(CI Failure)] -->|Webhook| Bridge[devops_auto ChatBridge]
-    Bridge -->|Alert| Agent[Copilot Agent]
-    Agent -->|Retrieve| Logs[Log Analyzer]
-    Agent -->|Action| Sandbox[Sandbox Shell]
+    CI[("(CI Failure)")] -->|Webhook| Bridge["devops_auto ChatBridge"]
+    Bridge -->|Alert| Agent["Copilot Agent"]
+    Agent -->|Retrieve| Logs["Log Analyzer"]
+    Agent -->|Action| Sandbox["Sandbox Shell"]
     
-    Sandbox -->|Apply Fix| Repo[Git Repo]
+    Sandbox -->|Apply Fix| Repo["Git Repo"]
     Repo -->|Trigger| CI
 ```
 

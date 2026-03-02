@@ -9,21 +9,21 @@ Agent OS is structured as a series of nested layers, ensuring separation between
 ```mermaid
 graph TD
     subgraph Layer 3: Application (External Projects)
-        P1[devops-copilot]
-        P2[knowledge-orchestrator]
-        P3[llm-lab]
+        P1["devops-copilot"]
+        P2["knowledge-orchestrator"]
+        P3["llm-lab"]
     end
 
     subgraph Layer 2: Platform (Subsystems)
-        AC[agentos_core]
-        AM[agentos_memory]
-        AS[agentos_skills]
+        AC["agentos_core"]
+        AM["agentos_memory"]
+        AS["agentos_skills"]
     end
 
     subgraph Layer 1: Infrastructure
-        O[Ollama / LPX]
-        DB[PostgreSQL + pgvector]
-        S[Sandboxes / Docker]
+        O["Ollama / LPX"]
+        DB["PostgreSQL + pgvector"]
+        S["Sandboxes / Docker"]
     end
 
     AC --> AM

@@ -8,21 +8,21 @@ The `devops_auto` module provides the agent with "Engineer" capabilities. It han
 
 ```mermaid
 graph TD
-    Agent[Agent Core] -->|Tool Call| CI[CI Runner]
-    Agent -->|Tool Call| Dep[Deploy Orchestrator]
-    Agent -->|Tool Call| PR[PR Manager]
-    Agent -->|Tool Call| Notifier[Notifier]
+    Agent["Agent Core"] -->|Tool Call| CI["CI Runner"]
+    Agent -->|Tool Call| Dep["Deploy Orchestrator"]
+    Agent -->|Tool Call| PR["PR Manager"]
+    Agent -->|Tool Call| Notifier["Notifier"]
     
-    CI -->|Subprocess| Shell[Shell/Tests]
-    Dep -->|Docker CLI| Containers[Containers]
-    PR -->|Git CLI| Repo[Repositories]
+    CI -->|Subprocess| Shell["Shell/Tests"]
+    Dep -->|Docker CLI| Containers["Containers"]
+    PR -->|Git CLI| Repo["Repositories"]
     
-    Bridge[Chat Bridge] -->|Webhook| Telegram[Telegram API]
-    Bridge -->|Webhook| Slack[Slack Webhook]
+    Bridge["Chat Bridge"] -->|Webhook| Telegram["Telegram API"]
+    Bridge -->|Webhook| Slack["Slack Webhook"]
     Telegram -->|Message| Agent
     Slack -->|Message| Agent
     
-    Notifier -->|Poll| Metrics[System Metrics]
+    Notifier -->|Poll| Metrics["System Metrics"]
     Notifier -->|Alert| Bridge
 ```
 
