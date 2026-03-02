@@ -1,0 +1,72 @@
+services:
+  agent-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - TOOLS_API_URL=http://tools-api:9100
+      - LLM_MODEL=llama3.2
+      - EMBED_MODEL=nomic-embed-text
+      # Note: For Ollama to work locally within docker compose, 
+      # we assume you map the Ollama base URL or run Ollama on the host machine.
+      # If running Ollama on host (mac/windows), use host.docker.internal:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    networks:
+      - agent-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./skills:/app/skills
+      - ./projects:/app/projects
+      - ./certs:/app/certs
+
+  tools-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    expose:
+      - "9100"
+    environment:
+      - WORKER_PORT=9100
+    networks:
+      - agent-net
+    # Drop capabilities for security
+    cap_drop:
+      - ALL
+    # Read-only root filesystem where possible
+    read_only: true
+    tmpfs:
+      - /tmp
+    command: [ "python", "sandbox/worker.py", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global" ]
+    volumes:
+      - ./projects:/sandbox/projects # Only mount allowable workspaces
+
+  postgres:
+    image: ankane/pgvector
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+    networks:
+      - agent-net
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../agentos_memory/agent_memory/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U agent -d agent_os" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+networks:
+  agent-net:
+    driver: bridge
+
+volumes:
+  pgdata:
