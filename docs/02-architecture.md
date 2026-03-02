@@ -8,14 +8,14 @@ Local Agent OS is architected as a set of decoupled services coordinated by a ce
 
 ```mermaid
 graph TD
-    UI[Browser/Voice UI] <--> App[Agent App Orchestrator]
-    App <--> Router[LLM Router/Batcher]
-    Router <--> LLM[LLM Server (vLLM/Ollama)]
-    App <--> Skills[Skill Manager]
-    App <--> Memory[Memory/RAG Backend]
-    Memory <--> PG[Postgres + pgvector]
-    App <--> ToolsAPI[Tools API Node]
-    ToolsAPI <--> OS[Local OS/Filesystem]
+    UI["Browser/Voice UI"] <--> App["Agent App Orchestrator"]
+    App <--> Router["LLM Router/Batcher"]
+    Router <--> LLM["LLM Server (vLLM/Ollama)"]
+    App <--> Skills["Skill Manager"]
+    App <--> Memory["Memory/RAG Backend"]
+    Memory <--> PG["Postgres + pgvector"]
+    App <--> ToolsAPI["Tools API Node"]
+    ToolsAPI <--> OS["Local OS/Filesystem"]
 ```
 
 ### Component Details
