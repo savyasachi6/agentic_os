@@ -1,3 +1,8 @@
+"""
+Tests for the Memory/RAG integration via Productivity modules.
+
+Validates the 'Semantic Memory' and 'Resilient RAG Pipeline' skills in [skill.md](../../skill.md).
+"""
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from productivity.todo_manager import TodoManager

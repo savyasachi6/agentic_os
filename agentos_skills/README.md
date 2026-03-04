@@ -1,6 +1,6 @@
 # AgentOS Skills Management
 
-Skill discovery, chunking, and semantic context orchestration for the Agent OS. This component transforms reasoning recipes (Upskill packages) into structured knowledge for the agent loop.
+Skill discovery, chunking, and semantic context orchestration for the **[Agentic OS](..//README.md)**. This component transforms reasoning recipes (Upskill packages) into structured knowledge for the agent loop.
 
 ## Purpose
 

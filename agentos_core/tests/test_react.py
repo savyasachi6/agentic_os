@@ -1,4 +1,9 @@
-"""Tests for the LocalAgent ReAct loop and tool dispatch."""
+"""
+Tests for the LocalAgent ReAct loop and tool dispatch.
+
+This test suite validates the 'ReAct Reasoning' skill as documented in [skill.md](../../skill.md).
+Documentation: [Agent OS Core Architecture](../../agentos_core/README.md)
+"""
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -17,7 +22,11 @@ from agent_core.loop import LocalAgent
 class TestReActLoop:
 
     def test_direct_final_answer(self, MockLLM, MockVS, MockRetriever, MockCmdStore, MockSandbox):
-        """If LLM returns a normal response without tools, it just returns."""
+        """
+        Validates the 'Simple Reasoning' flow.
+        Flow: User Request -> ReAct Agent -> LLM Direct Answer -> Final Response.
+        Linked Skill: [ReAct Reasoning](../../skill.md#react-reasoning)
+        """
         mock_llm = MockLLM.return_value
         mock_llm.generate.return_value = "Paris is the capital of France."
 
@@ -31,7 +40,11 @@ class TestReActLoop:
 
     @patch("agent_core.loop.ToolClient")
     def test_tool_dispatch_shell(self, MockToolClient, MockLLM, MockVS, MockRetriever, MockCmdStore, MockSandbox):
-        """LLM calls a shell tool, gets observation appended."""
+        """
+        Validates the 'Tool Execution' flow involving shell commands.
+        Flow: User Request -> ReAct Agent -> LLM Tool Call -> Tool Execution (Sandbox) -> Observation -> Final Response.
+        Linked Skill: [ReAct Reasoning](../../skill.md#react-reasoning)
+        """
         mock_llm = MockLLM.return_value
         mock_llm.generate.return_value = 'I will run a command.\nTOOL: RUN_SHELL echo hello'
 

@@ -1,36 +1,107 @@
 # Agentic OS: The System of Systems
 
-Welcome to the root of the **Agentic OS** ecosystem. This repository serves as the coordination hub and entry point for a distributed, modular AI operating system designed for local execution with high concurrency and strong security.
+Welcome to the **Agentic OS** ecosystem. This project provides a distributed, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
 
-## 🏛️ High-Level Architecture
+## 🏛️ Architecture Overview
 
-Agentic OS is structured as a "System of Systems," where specialized services handle distinct responsibilities. This decoupling allows for independent scaling and clear domain boundaries.
+Agentic OS is structured as a "System of Systems," decoupling core reasoning from memory and capability management.
 
-### Core Services (Primary Repositories)
+```mermaid
+graph TD
+    User([User/Client]) <-->|WebSocket/API| Core[Agent OS Core]
+    
+    subgraph "Core Intelligence"
+        Core <-->|Internal Protocol| Router[LLM Router]
+        Core <-->|Async Tasks| Queue[Lane-Based Queue]
+    end
 
-1. **[Agent OS Core](agentos_core/)**: The central reasoning and execution engine. Manages ReAct loops, lane-based command queues, and secure tool sandboxing.
-2. **[Agent Memory](agentos_memory/)**: The semantic and relational storage layer. Handles `pgvector`-based RAG, entity extraction, and long-term conversation history.
-3. **[Agent Skills](agentos_skills/)**: The capability management layer. Indexes and retrieves `SKILL.md` packages that define agent behaviors and tool usage.
+    subgraph "Knowledge & Capability"
+        Core <-->|Context| Memory[Agent Memory & RAG]
+        Core <-->|Retrieval| Skills[Agent Skills]
+        Core <-->|Optimization| RLRouter[RL Router]
+    end
 
-### Internal vs. External Boundaries
+    Memory <-->|pgvector| DB[(PostgreSQL)]
+    Core -->|Tool Invocation| Sandbox[Subprocess Sandbox]
+```
 
-* **External Surfaces**: The `Core` service exposes the primary WebSocket/API surface for users. `Projects/` represent pre-packaged solutions built on top of the OS.
-* **Internal Protocols**: Services communicate via secure internal protocols (gRPC/mTLS). Modules like `devops_auto` and `productivity` are **Internal Domain Modules** housed within the Core to minimize orchestration overhead.
+### Main Components
+
+- **[Agent OS Core](agentos_core/)**: The reasoning hub. Manages ReAct loops and secure tool sandboxing.
+- **[Agent Memory](agentos_memory/)**: The semantic storage layer. Handles `pgvector` RAG and long-term history.
+- **[Agent Skills](agentos_skills/)**: The capability registry. Indexes and retrieves specialized behaviors.
+- **[RL Router](agentic_rl_router/)**: Multi-objective contextual bandit for dynamic RAG depth optimization.
 
 ---
 
-## 🚀 Getting Started
+## 🌟 Key Features & Skills
+
+- **Centralized LLM Router**: Micro-batching for high-throughput local inference (Ollama/vLLM).
+- **Resilient RAG**: Multi-tiered retrieval (Fractal, GraphRAG) with explicit validation layers.
+- **Lane-Based Execution**: Durable, ordered command processing via DB-backed queues.
+- **Capability Discovery**: Automatic indexing of `SKILL.md` packages for modular expansion.
+- **Secure Sandboxing**: Isolated subprocess execution for risky filesystem and shell operations.
+
+---
+
+## 🌊 Main Flows
+
+### 1. User Request Flow
+
+`User` → `WebSocket (/chat)` → `ReAct Agent (Core)` → `Skill/Memory Retrieval` → `Reasoning Step` → `Tool Execution (Sandbox)` → `Streaming Response`.
+
+### 2. Skill Lifecycle
+
+`Local SKILL.md` → `Skill Indexer` → `Vector Store (pgvector)` → `Semantic Discovery` → `Context Injection`.
+
+---
+
+## 🔌 API Endpoints (Core)
+
+| Path | Method | Purpose | Example |
+| :--- | :--- | :--- | :--- |
+| `/chat` | `WS` | Streaming ReAct chat with session persistence | `{"message": "Check docker status"}` |
+| `/health` | `GET` | Service readiness check | `curl localhost:8000/health` |
+| `/embed` | `POST` | Generate embeddings for arbitrary text | `{"text": "Hello world"}` |
+| `/skills/reindex` | `POST` | Trigger recursive skill discovery | `curl -X POST .../reindex` |
+
+---
+
+## 🚀 Quickstart
 
 1. **Environment Setup**:
-    Copy `.env.example` to `.env` and configure your `OLLAMA_URL` and `POSTGRES_URL`.
-2. **Orchestration**: Start the full stack via Docker:
 
-    ```bash
-    docker-compose up -d
-    ```
+   ```bash
+   cp .env.example .env
+   # Configure LLM_MODEL, OLLAMA_URL, and POSTGRES_URL
+   ```
 
-3. **Connect**: The agent is ready at `ws://localhost:8000/chat`.
+2. **Start Infrastructure**:
 
-## 📜 Design Records
+   ```bash
+   docker-compose up -d
+   ```
 
-We use ADRs to track major design decisions. See **[docs/adr/](docs/adr/)**.
+3. **Run the OS**:
+
+   ```bash
+   cd agentos_core
+   python main.py serve
+   ```
+
+---
+
+## 📚 Navigation & Docs
+
+- **[Capabilities Registry](skill.md)**: Full list of system skills and their implementation.
+- **[Architecture Decision Records](docs/adr/)**: History of major design choices.
+- **[Data Model & RAG](docs/03-data-model-and-rag.md)**: Deep dive into the memory schema.
+- **[RL Router Specs](docs/06-rl-router.md)**: Details on the contextual bandit logic.
+- **[Internal API Reference](docs/api.md)**: Full API documentation.
+- **[Security & Sandboxing](docs/04-security-and-sandboxing.md)**: Isolation protocols.
+
+---
+
+## 🛠️ Development
+
+See [development setup](agentos_core/docs/architecture.md#development-setup) for details on testing, linting, and local debugging.

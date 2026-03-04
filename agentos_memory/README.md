@@ -1,6 +1,6 @@
 # AgentOS Memory & RAG
 
-Durable, queryable, and semantic memory layer for the Agent OS. Built on PostgreSQL with `pgvector` for high-performance vector similarity search and a resilient RAG verification system.
+Durable, queryable, and semantic memory layer for the **[Agentic OS](..//README.md)**. Built on PostgreSQL with `pgvector` for high-performance vector similarity search and a resilient RAG verification system.
 
 ## Purpose
 

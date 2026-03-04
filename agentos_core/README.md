@@ -1,6 +1,6 @@
 # Agent OS Core
 
-The central reasoning engine and orchestration layer of the Agent OS. This repository houses the core agent loop, the centralized LLM Router for batched inference, the lane-based command queue, and secure toolbox sandboxing.
+The central reasoning engine and orchestration layer of the **[Agentic OS](..//README.md)**. This repository houses the core agent loop, the centralized LLM Router for batched inference, the lane-based command queue, and secure toolbox sandboxing.
 
 ## Purpose
 
