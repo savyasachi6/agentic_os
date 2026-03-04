@@ -35,10 +35,10 @@ def test_skill_registry_completeness():
         content = f.read()
     
     required_sections = [
-        "Core Reasoning",
-        "Memory & Knowledge",
-        "Capability Management",
-        "Automation & Productivity"
+        "Core Skills",
+        "Advanced / Experimental Skills",
+        "Skill Graph and Dependencies",
+        "Extension and Integration Points"
     ]
     
     for section in required_sections:
