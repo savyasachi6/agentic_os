@@ -59,7 +59,6 @@ class LLMRouterSettings(BaseSettings):
     max_batch_size: int = Field(default=8, alias="ROUTER_MAX_BATCH_SIZE")
     backend: str = Field(default="ollama", alias="ROUTER_BACKEND")
     ollama_base_url: str = Field(default="http://localhost:11434", alias="OLLAMA_BASE_URL")
-    llama_cpp_model_path: str = Field(default="models/qwen3-vl-8b.gguf", alias="LLAMA_CPP_MODEL_PATH")
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

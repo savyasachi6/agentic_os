@@ -1,0 +1,37 @@
+[
+  {
+    "input": "Write a recursive CTE for a Postgres database to find all ancestors of a person with ID 42 in a table 'people' with columns 'id' and 'parent_id'.",
+    "context": null,
+    "expected": {
+      "contains": "WITH RECURSIVE"
+    }
+  },
+  {
+    "input": "How do I perform a 3-hop traversal in a Postgres graph schema containing 'nodes' and 'edges' tables to find all nodes reachable from node_id 'A'?",
+    "context": null,
+    "expected": {
+      "contains": "JOIN edges"
+    }
+  },
+  {
+    "input": "Generate a SQL query to find the second-degree connections (friends of friends) of user 'Alice' in a social network table 'friendships' with columns 'user_id' and 'friend_id'.",
+    "context": null,
+    "expected": {
+      "contains": "JOIN friendships"
+    }
+  },
+  {
+    "input": "Write a Postgres query to find the manager of the manager for employee 'John Smith' using a self-join on the 'employees' table which has 'name' and 'manager_id' columns.",
+    "context": null,
+    "expected": {
+      "contains": "manager_id"
+    }
+  },
+  {
+    "input": "In a Postgres knowledge base of product parts, write a query to list every sub-component of 'Laptop' regardless of depth using a recursive common table expression.",
+    "context": null,
+    "expected": {
+      "contains": "UNION ALL"
+    }
+  }
+]

@@ -1,0 +1,1 @@
+SELECT count(*) FROM edges WHERE source_id = :id OR target_id = :id;

@@ -24,12 +24,12 @@ Use **pgvector** with **HNSW** indexes.
 
 ## Consequences
 
-- Embedding dimension is fixed at schema creation (768 for `nomic-embed-text`). Changing models requires re-embedding.
+- Embedding dimension is fixed at schema creation (1024 for `qwen:0.5b`). Changing models requires re-embedding.
 - No built-in hybrid search (keyword + vector). If needed, add a separate `tsvector` column.
 
 ---
 
-# ADR-002: Local Embeddings via Ollama (nomic-embed-text)
+# ADR-002: Local Embeddings via Ollama (qwen:0.5b)
 
 **Status:** Accepted  
 **Date:** 2026-03-01
@@ -39,19 +39,19 @@ Use **pgvector** with **HNSW** indexes.
 Need an embedding model for skill chunks, thoughts, and queries. Options:
 
 - **OpenAI text-embedding-3** (1536-dim, API call)
-- **nomic-embed-text** via Ollama (768-dim, local)
+- **qwen:0.5b** via Ollama (1024-dim, local)
 - **all-MiniLM-L6-v2** via sentence-transformers (384-dim, local)
 
 ## Decision
 
-Use **nomic-embed-text** via Ollama.
+Use **qwen:0.5b** via Ollama.
 
 ## Rationale
 
 - Runs fully local — no API keys, no network dependency, no cost.
-- 768-dim provides good quality/speed tradeoff for our document sizes.
+- 1024-dim provides good quality/speed tradeoff for our document sizes.
 - Ollama is already required for the LLM, so no new infrastructure.
-- `nomic-embed-text` benchmarks well on MTEB for retrieval tasks.
+- `qwen:0.5b` benchmarks well on MTEB for retrieval tasks.
 
 ## Consequences
 

@@ -1,12 +1,7 @@
 import httpx
-from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
-
-class LLMBackend(ABC):
-    @abstractmethod
-    async def generate_batch(self, messages_batch: List[List[Dict[str, str]]], model: str, max_tokens: int, temperature: float) -> List[str]:
-        """Generate responses for a batch of messages."""
-        pass
+import asyncio
+from typing import List, Dict
+from llm_router.backends.base import LLMBackend
 
 class OllamaBackend(LLMBackend):
     def __init__(self, base_url: str = "http://localhost:11434"):
@@ -17,11 +12,7 @@ class OllamaBackend(LLMBackend):
         Ollama doesn't currently support a single batched API endpoint in the same way vLLM does.
         However, the Ollama server can handle concurrent requests natively. 
         We mimic batching here by firing concurrent async requests to Ollama.
-        When moving to vLLM, this would be replaced by a single batched payload.
         """
-        import asyncio
-        import json
-        
         async def fetch(client: httpx.AsyncClient, messages: List[Dict[str, str]]) -> str:
             payload = {
                 "model": model,

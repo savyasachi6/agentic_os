@@ -8,7 +8,6 @@ Endpoints:
   POST /skills/reindex  — trigger skill re-indexing
 """
 
-import os
 import json
 import asyncio
 from typing import Optional
@@ -16,16 +15,12 @@ from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from agent_core.loop.coordinator import CoordinatorAgent
-from agent_core.agents.sql_agent import SQLAgentWorker
-from agent_core.agents.code_agent import CodeAgentWorker
-from agent_core.agents.research_agent import ResearcherAgentWorker
-from agent_core.llm import LLMClient
+from agent_core.loop import LocalAgent
 from agent_memory.db import init_schema
 from agent_memory.vector_store import VectorStore
 from agent_skills.indexer import SkillIndexer
 from llm_router import LLMRouter
-from config import server_settings
+from .config import server_settings
 
 
 app = FastAPI(
@@ -34,11 +29,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Store active sessions: session_id → CoordinatorAgent
-_sessions: dict[str, CoordinatorAgent] = {}
-
-# Background worker tasks (sql, research, code ...)
-_worker_tasks: list[asyncio.Task] = []
+# Store active sessions: session_id → LocalAgent
+_sessions: dict[str, LocalAgent] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -50,32 +42,11 @@ async def startup():
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
-    
-    # Start specialist agent workers as background tasks.
-    # They all share the same event loop, polling the TreeStore independently.
-    sql_worker = SQLAgentWorker()
-    _worker_tasks.append(asyncio.create_task(sql_worker.run_forever(), name="sql_agent_worker"))
-    
-    code_worker = CodeAgentWorker(workspace_root=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    _worker_tasks.append(asyncio.create_task(code_worker.run_forever(), name="code_agent_worker"))
-    
-    research_worker = ResearcherAgentWorker()
-    _worker_tasks.append(asyncio.create_task(research_worker.run_forever(), name="research_agent_worker"))
-    
-    print("[server] Agent OS ready (LLM Router started, workers running).")
+    print("[server] Agent OS ready (LLM Router started).")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    # Cancel all background workers
-    for task in _worker_tasks:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-    _worker_tasks.clear()
-    
     # Stop the LLM Router
     router = LLMRouter.get_instance()
     router.stop()
@@ -134,24 +105,6 @@ async def reindex_skills():
 
 
 # ---------------------------------------------------------------------------
-# Chat History Endpoint
-# ---------------------------------------------------------------------------
-@app.get("/chat/{session_id}/history")
-async def get_chat_history(session_id: str):
-    """Retrieve the chronological chat and reasoning history from pgvector."""
-    try:
-        vs = VectorStore()
-        history = vs.get_session_history(session_id)
-        # Convert datetime objects to ISO format strings for JSON serialization
-        for entry in history:
-            if 'created_at' in entry and hasattr(entry['created_at'], 'isoformat'):
-                entry['created_at'] = entry['created_at'].isoformat()
-        return {"status": "success", "session_id": session_id, "history": history}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
-# ---------------------------------------------------------------------------
 # WebSocket chat
 # ---------------------------------------------------------------------------
 @app.websocket("/chat")
@@ -187,25 +140,18 @@ async def chat_ws(ws: WebSocket):
                 agent = _sessions[requested_session]
                 session_id = requested_session
             elif requested_session:
-                agent = CoordinatorAgent(session_id=requested_session)
+                agent = LocalAgent(session_id=requested_session)
                 _sessions[requested_session] = agent
                 session_id = requested_session
             elif agent is None:
-                agent = CoordinatorAgent()
+                agent = LocalAgent()
                 session_id = agent.state.session_id
                 _sessions[session_id] = agent
 
             await ws.send_json({"type": "session", "session_id": session_id})
 
-            # Define a callback to stream thoughts and tool events back to the UI
-            async def ws_callback(event_type: str, content: str):
-                try:
-                    await ws.send_json({"type": event_type, "content": content})
-                except Exception as e:
-                    print(f"[server] Failed to push callback to WS: {e}")
-
             # Run the ReAct turn asynchronously (leverages LLMRouter batching)
-            response = await agent.run_turn_async(user_msg, status_callback=ws_callback)
+            response = await agent.run_turn_async(user_msg)
 
             await ws.send_json({"type": "final", "content": response})
 

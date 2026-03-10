@@ -1,0 +1,154 @@
+{
+  "skill_name": "postgres-multi-hop-traversal",
+  "model": "gemini-flash-latest",
+  "with_skill_results": [
+    {
+      "test_case": {
+        "input": "Write a recursive CTE for a Postgres database to find all ancestors of a person with ID 42 in a table 'people' with columns 'id' and 'parent_id'.",
+        "context": null,
+        "expected": {
+          "contains": "WITH RECURSIVE"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "How do I perform a 3-hop traversal in a Postgres graph schema containing 'nodes' and 'edges' tables to find all nodes reachable from node_id 'A'?",
+        "context": null,
+        "expected": {
+          "contains": "JOIN edges"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "Generate a SQL query to find the second-degree connections (friends of friends) of user 'Alice' in a social network table 'friendships' with columns 'user_id' and 'friend_id'.",
+        "context": null,
+        "expected": {
+          "contains": "JOIN friendships"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "Write a Postgres query to find the manager of the manager for employee 'John Smith' using a self-join on the 'employees' table which has 'name' and 'manager_id' columns.",
+        "context": null,
+        "expected": {
+          "contains": "manager_id"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "In a Postgres knowledge base of product parts, write a query to list every sub-component of 'Laptop' regardless of depth using a recursive common table expression.",
+        "context": null,
+        "expected": {
+          "contains": "UNION ALL"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    }
+  ],
+  "with_skill_success_rate": 0.0,
+  "with_skill_total_tokens": 0,
+  "with_skill_avg_turns": 0.0,
+  "baseline_results": [
+    {
+      "test_case": {
+        "input": "Write a recursive CTE for a Postgres database to find all ancestors of a person with ID 42 in a table 'people' with columns 'id' and 'parent_id'.",
+        "context": null,
+        "expected": {
+          "contains": "WITH RECURSIVE"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "How do I perform a 3-hop traversal in a Postgres graph schema containing 'nodes' and 'edges' tables to find all nodes reachable from node_id 'A'?",
+        "context": null,
+        "expected": {
+          "contains": "JOIN edges"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "Generate a SQL query to find the second-degree connections (friends of friends) of user 'Alice' in a social network table 'friendships' with columns 'user_id' and 'friend_id'.",
+        "context": null,
+        "expected": {
+          "contains": "JOIN friendships"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "Write a Postgres query to find the manager of the manager for employee 'John Smith' using a self-join on the 'employees' table which has 'name' and 'manager_id' columns.",
+        "context": null,
+        "expected": {
+          "contains": "manager_id"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    },
+    {
+      "test_case": {
+        "input": "In a Postgres knowledge base of product parts, write a query to list every sub-component of 'Laptop' regardless of depth using a recursive common table expression.",
+        "context": null,
+        "expected": {
+          "contains": "UNION ALL"
+        }
+      },
+      "success": false,
+      "output": null,
+      "tokens_used": 0,
+      "turns": 0,
+      "error": "\"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the `X-Api-Key` or `Authorization` headers to be explicitly omitted\""
+    }
+  ],
+  "baseline_success_rate": 0.0,
+  "baseline_total_tokens": 0,
+  "baseline_avg_turns": 0.0
+}

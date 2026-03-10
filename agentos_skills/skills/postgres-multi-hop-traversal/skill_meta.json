@@ -1,0 +1,10 @@
+{
+  "name": "postgres-multi-hop-traversal",
+  "description": "Execute multi-hop relationship discovery and pathfinding using SQL recursive CTEs.",
+  "version": "1.0",
+  "generated_by": "gemini-flash-latest",
+  "generated_at": "2026-03-05T19:41:10.088375+00:00",
+  "source_task": "graph-based reasoning: traversing multi-hop relationships in a Postgres knowledge base",
+  "test_pass_rate": 0.0,
+  "eval_lift": 0.0
+}

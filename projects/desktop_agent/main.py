@@ -4,15 +4,11 @@ import asyncio
 import argparse
 from dotenv import load_dotenv
 
-# Ensure we can import from core and projects
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))) # agentic_os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../agentos_core")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../agentos_memory")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../agentos_skills")))
+
 
 from projects.desktop_agent.organizer import FileOrganizer
-from agentos_core.lane_queue.store import CommandStore
-from agentos_core.lane_queue.models import RiskLevel
+from lane_queue.store import CommandStore
+from lane_queue.models import RiskLevel
 from llm_router import LLMRouter
 
 load_dotenv()

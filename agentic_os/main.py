@@ -2,9 +2,9 @@
 Agent OS entry point.
 
 Usage:
-    python main.py cli    — interactive REPL
-    python main.py serve  — start FastAPI server
-    python main.py index  — re-index all skills into pgvector
+    python -m agentic_os.main cli    — interactive REPL
+    python -m agentic_os.main serve  — start FastAPI server
+    python -m agentic_os.main index  — re-index all skills into pgvector
 """
 
 import sys
@@ -12,20 +12,23 @@ import os
 import argparse
 from dotenv import load_dotenv
 
-# Fix Windows console charmap encoding errors when the LLM generates unicode (e.g., '→')
-if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+# --- Monorepo Shim: Ensure subpackages are discoverable without pip install -e . ---
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+for subpkg in ["agentos_core", "agentos_memory", "agentos_skills", "agentic_rl_router"]:
+    _p = os.path.join(_ROOT, subpkg)
+    if os.path.exists(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
+# Also add root so 'agentic_os' is discoverable if run as a script
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+# ------------------------------------------------------------------------------------
 
-# Ensure project root is in Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
 
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
-    project_path = os.path.join(os.path.dirname(current_dir), "projects", project_name)
+    # Assuming projects are at the root
+    project_path = os.path.join(os.getcwd(), "projects", project_name)
     if os.path.exists(project_path):
         env_path = os.path.join(project_path, ".env")
         if os.path.exists(env_path):
@@ -34,15 +37,12 @@ def load_project_env(project_name: str):
             return project_path
     return None
 
-def cmd_run(args):
-    """Run the main agent loop in CLI mode."""
-    import asyncio
-    
-    # Imports specific to core runner
-    from agent_core.loop.coordinator import CoordinatorAgent
-    from llm_router.router import LLMRouter
-    from agent_memory.db import init_schema # Corrected from 'from db import get_db_connectionma()'
-    
+def cmd_cli(args):
+    """Start the interactive CLI agent loop."""
+    from agent_core.loop import LocalAgent
+    from agent_memory.db import init_schema
+    from llm_router import LLMRouter
+
     init_schema()
     
     # Load project env if specified
@@ -57,17 +57,9 @@ def cmd_run(args):
     router.start()
     
     try:
-        # Initialize the stateful CoordinatorAgent
-        print(f"Initializing CoordinatorAgent... (model={args.model})")
-        agent = CoordinatorAgent(model_name=args.model, project_name=args.project)
-
-        # Basic CLI REPL
-        print(f"\nWelcome to {os.environ.get('AGENT_NAME', 'Agent OS')} CLI.")
-        print("Type 'exit' or 'quit' to end the session.")
-        print("Type 'help' for available commands.")
-        
-        asyncio.run(agent.start_loop())
-
+        # Pass model and project info
+        agent = LocalAgent(model_name=args.model, project_name=args.project)
+        agent.serve()
     finally:
         router.stop()
 
@@ -75,14 +67,14 @@ def cmd_run(args):
 def cmd_serve(args):
     """Start the FastAPI server."""
     import uvicorn
-    from config import server_settings
+    from .config import server_settings
 
     if args.project:
         load_project_env(args.project)
 
     # LLMRouter will be started in server.py @app.on_event("startup")
     uvicorn.run(
-        "server:app",
+        "agentic_os.server:app",
         host=args.host or server_settings.host,
         port=args.port or server_settings.port,
         reload=args.reload,
@@ -93,7 +85,7 @@ def cmd_index(args):
     """Re-index all skills into pgvector."""
     from agent_skills.indexer import SkillIndexer
     from agent_memory.db import init_schema
-    from llm_router.router import LLMRouter
+    from llm_router import LLMRouter
 
     init_schema()
     
@@ -108,42 +100,6 @@ def cmd_index(args):
         router.stop()
 
 
-def cmd_worker(args):
-    """Start a background worker agent from the CLI."""
-    import asyncio
-    from agent_memory.db import init_schema
-    from llm_router.router import LLMRouter
-
-    init_schema()
-
-    # Load project env if specified
-    if args.project:
-        load_project_env(args.project)
-
-    async def run_worker():
-        router = LLMRouter.get_instance()
-        router.start()
-
-        try:
-            if args.agent == "sql":
-                from agent_core.agents.sql_agent import SQLAgentWorker
-                worker = SQLAgentWorker(model_name=args.model)
-            elif args.agent == "research":
-                from agent_core.agents.research_agent import ResearcherAgentWorker
-                worker = ResearcherAgentWorker(model_name=args.model)
-            else:
-                print(f"Unknown agent type: {args.agent}")
-                import sys
-                sys.exit(1)
-                
-            # Best way: await it directly since both worker processes are now async-native.
-            await worker.run_forever()
-        finally:
-            router.stop()
-
-    asyncio.run(run_worker())
-
-
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-os",
@@ -155,7 +111,7 @@ def main():
     # cli
     cli_parser = subparsers.add_parser("cli", help="Interactive REPL")
     cli_parser.add_argument("--model", default=None, help="Override LLM model name")
-    cli_parser.set_defaults(func=cmd_run)
+    cli_parser.set_defaults(func=cmd_cli)
 
     # serve
     serve_parser = subparsers.add_parser("serve", help="Start FastAPI server")
@@ -169,19 +125,13 @@ def main():
     index_parser.add_argument("--skills-dir", default="skills", help="Path to skills directory")
     index_parser.set_defaults(func=cmd_index)
 
-    # worker
-    worker_parser = subparsers.add_parser("worker", help="Start a specialist background worker")
-    worker_parser.add_argument("--agent", required=True, choices=["sql", "research", "code"], help="Type of agent to run")
-    worker_parser.add_argument("--model", default=None, help="Override LLM model name")
-    worker_parser.set_defaults(func=cmd_worker)
-
     args = parser.parse_args()
 
     if not args.command:
         if args.project:
             # Default to CLI mode when a project is specified without a subcommand
             args.command = "cli"
-            args.func = cmd_run
+            args.func = cmd_cli
             if not hasattr(args, "model"):
                 args.model = None
         else:

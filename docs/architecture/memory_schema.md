@@ -65,7 +65,7 @@ WHERE cs.skill_id IN (
 
 1. **Parse**: Extract document structure.
 2. **Chunk**: Generate structure-aware segments.
-3. **Embed**: Produce 768-dim vectors via Ollama.
+3. **Embed**: Produce 1024-dim vectors via Ollama.
 4. **Enrich**: Extract skills and entities using high-temp LLM calls.
 5. **Upsert**: Populate the schema atomically.
 

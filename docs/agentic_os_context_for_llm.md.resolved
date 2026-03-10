@@ -1,0 +1,62 @@
+# Agentic OS - System Context for LLMs
+
+*You are an AI assistant helping develop **Agentic OS**, a modular, multi-agent operating system built in Python. Use the following context to understand the project architecture, dependencies, and database schema.*
+
+## 1. Project Overview
+Agentic OS is a framework designed to manage autonomous agents, providing them with semantic memory, specialized reasoning skills, and multi-lane execution queues. 
+It connects LLMs (locally via Ollama/vLLM or via APIs like Google Gemini) to a PostgreSQL (`pgvector`) backend to store long-term memory and procedural knowledge.
+
+### Directory Structure:
+- `agentos_core/`: Core ReAct loop, LLM request router (micro-batching), and tool definitions.
+- `agentos_memory/`: Vector storage, session summaries, knowledge graph relations, and PostgreSQL schema.
+- `agentos_skills/`: The Skill Indexer and Retriever. Discovers [SKILL.md](file:///C:/Users/savya/projects/agentic_os/agentos_skills/skills/nl-to-sql-schema-aware/SKILL.md) files, chunks them, and stores them in pgvector.
+- `agentic_rl_router/`: Reinforcement learning router (Bandit) to dynamically select the best models or execution paths.
+- `upskill/` (pip package): A CLI tool to generate, test, and evaluate new skills synthetically using high-end models (like Gemini 2.0 Flash) before deploying them to the OS.
+
+---
+
+## 2. The Skill System (`upskill` & `agentos_skills`)
+A "Skill" is a structured directory containing instructions on how an agent should perform a specific, complex task.
+- **Generation**: The `upskill generate <task_name>` CLI tool uses a frontier model (e.g., Gemini) to generate a skill. It writes a [SKILL.md](file:///C:/Users/savya/projects/agentic_os/agentos_skills/skills/nl-to-sql-schema-aware/SKILL.md) (markdown instructions), a [skill_meta.json](file:///C:/Users/savya/projects/agentic_os/agentos_skills/skills/postgres-multi-hop-traversal/skill_meta.json) (metadata like `eval_lift`), tests, and optional SQL/Python scripts.
+- **Indexing**: `agent_skills.indexer` scans the [skills/](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#115-138) folder. It parses [SKILL.md](file:///C:/Users/savya/projects/agentic_os/agentos_skills/skills/nl-to-sql-schema-aware/SKILL.md) by H2/H3 headers, estimates token counts, embeds the text using `models/gemini-embedding-001` (truncated to 1024 dimensions), and upserts it into the [skill_chunks](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#87-93) and `knowledge_skills` Postgres tables.
+- **Retrieval**: When an agent needs to know how to do something, `agent_skills.retriever` does a cosine similarity search against `pgvector` to pull the exact markdown headers needed into the system prompt.
+
+---
+
+## 3. Database Schema (`pgvector`)
+All data lives in a PostgreSQL database with the `pgvector` extension. Here are the core tables:
+
+### Knowledge & Skills
+- `knowledge_skills`: Main registry for skills (ID, name, description, metadata_json, eval_lift, path).
+- [skill_chunks](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#87-93): Vectorized fragments of [SKILL.md](file:///C:/Users/savya/projects/agentic_os/agentos_skills/skills/nl-to-sql-schema-aware/SKILL.md). (skill_id, chunk_type, heading, content, embedding `VECTOR(1024)`, token_count).
+
+### RAG (Retrieval-Augmented Generation) & Knowledge Graph
+- `documents`: High-level source files/URLs ingested into the system.
+- [chunks](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#87-93): Vectorized segments of documents `VECTOR(1024)`. Also uses a `tsvector` column for hybrid (keyword + semantic) search.
+- `entities`: Extracted concepts (e.g., Tools, Organizations, People).
+- `entity_relations`: Graph edges connecting entities (source, target, relation_type, weight).
+
+### Workflow Execution
+- `lanes`: Concurrent execution queues for different agent sessions.
+- `commands`: Individual atomic actions (e.g., tool execution, LLM calls) queued within a lane.
+- `chains` / `nodes`: Multi-step reasoning trees for advanced planning.
+
+### Memory
+- [thoughts](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#156-188): Raw per-turn history of the agent's Thought-Act-Observation loop.
+- `session_summaries`: Compacted, vectorized summaries of long chat sessions to save context window space.
+
+---
+
+## 4. Current Tech Stack & Dependencies
+- **Database**: PostgreSQL 15+ with `pgvector` extension.
+- **Python**: 3.11+. Extensive use of `asyncio` for concurrent agent execution.
+- **Embeddings**: Google `gemini-embedding-001` (truncated to 1024D) with fallback to local `ollama` (`qwen:0.5b`).
+- **LLM APIs**: `google.generativeai` (Gemini), [openai](file:///C:/Users/savya/AppData/Roaming/Python/Python314/site-packages/upskill/evaluate.py#75-123) (Ollama/vLLM compatible), [anthropic](file:///C:/Users/savya/AppData/Roaming/Python/Python314/site-packages/upskill/evaluate.py#32-73).
+- **Validation**: `pydantic` heavily used for data modeling and structured JSON outputs from LLMs.
+
+## 5. Typical Agent Loop
+1. Agent receives a user prompt.
+2. The core router injects retrieved semantic context ([skill_chunks](file:///c:/Users/savya/projects/agentic_os/agentos_memory/agent_memory/vector_store.py#87-93) + `session_summaries`).
+3. Agent outputs a structured plan (React reasoning).
+4. System queues the actions into `commands` linked to a `lane`.
+5. Worker processes execute the tool calls, write results back to the DB, and prompt the LLM for the next step.

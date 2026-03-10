@@ -44,7 +44,7 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
   - Conversation memory retrieval.
   - Document/Context injection.
 - **Inputs**: Text fragments or structured metadata for logging/querying.
-- **Outputs**: Top-K ranked results based on cosine similarity of 768-d embeddings.
+- **Outputs**: Top-K ranked results based on cosine similarity of 1024-d embeddings.
 - **Preconditions / Assumptions**: PostgreSQL instance with `pgvector` enabled and `EMBED_MODEL` available in Ollama.
 - **Failure Modes**: Embedding service latency, vector space collisions (low dimensionality).
 - **Implementation**: [agent_memory/vector_store.py](agentos_memory/agent_memory/vector_store.py)

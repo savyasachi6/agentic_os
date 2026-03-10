@@ -8,8 +8,8 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - TOOLS_API_URL=http://tools-api:9100
-      - LLM_MODEL=llama3.2
-      - EMBED_MODEL=nomic-embed-text
+      - LLM_MODEL=qwen3-vl:8b
+      - EMBED_MODEL=qwen:0.5b
       # Note: For Ollama to work locally within docker compose, 
       # we assume you map the Ollama base URL or run Ollama on the host machine.
       # If running Ollama on host (mac/windows), use host.docker.internal:

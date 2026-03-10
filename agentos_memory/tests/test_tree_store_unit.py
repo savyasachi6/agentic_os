@@ -22,7 +22,7 @@ def mock_db():
 @pytest.fixture
 def mock_vector_store():
     mock = MagicMock()
-    mock.generate_embedding.return_value = [0.1] * 768
+    mock.generate_embedding.return_value = [0.1] * 1024
     return mock
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_add_node(tree_store, mock_db):
     saved_node = tree_store.add_node(node)
 
     assert saved_node.id == 10
-    assert saved_node.embedding == [0.1] * 768
+    assert saved_node.embedding == [0.1] * 1024
     mock_cur.execute.assert_called_once()
     mock_conn.commit.assert_called_once()
 
@@ -68,7 +68,7 @@ def test_get_next_pending_node(tree_store, mock_db):
     # Mock return row
     mock_cur.fetchone.return_value = (
         1, 1, None, "rag", "llm_call", "pending", 8, 
-        0, "content", [0.1]*768, None, datetime.now(), datetime.now()
+        0, "content", [0.1]*1024, None, datetime.now(), datetime.now()
     )
 
     node = tree_store.get_next_pending_node(1)

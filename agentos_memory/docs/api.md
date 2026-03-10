@@ -16,7 +16,7 @@ Context manager that yields a pooled database connection with `pgvector` pre-reg
 
 ### `generate_embedding(text: str) -> List[float]`
 
-Generates a 768-dimensional embedding vector via the local Ollama instance.
+Generates a 1024-dimensional embedding vector via the local Ollama instance.
 
 ### `upsert_skill(name, description, tags, path, eval_lift=0.0) -> int`
 

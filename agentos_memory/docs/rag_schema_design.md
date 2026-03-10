@@ -8,7 +8,7 @@ The schema is built around a multi-layered knowledge representative model:
 
 1. **Source Layer**: `documents` holds metadata about where data came from (files, specs, web).
 2. **Structural Layer**: `chunks` contains the raw and cleaned text segments, maintaining document order (`chunk_index`) and hierarchy (`section_path`).
-3. **Vector Layer**: `chunk_embeddings` stores high-dimensional representations for semantic search. Standardized to 768 dimensions.
+3. **Vector Layer**: `chunk_embeddings` stores high-dimensional representations for semantic search. Standardized to 1024 dimensions.
 4. **Semantic Layer**: `knowledge_skills` and `entities` represent the discrete concepts and real-world items extracted from the text.
 5. **Graph Layer**: `entity_relations` and `chunk_skills` link everything together, enabling multi-hop reasoning.
 

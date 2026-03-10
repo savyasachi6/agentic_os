@@ -35,7 +35,7 @@ def test_chunk_insertion_with_embedding(store, mock_db):
             "chunk_index": 0, 
             "raw_text": "This is a test chunk about machine learning.",
             "clean_text": "This is a test chunk about machine learning.",
-            "embedding": [0.1] * 768,
+            "embedding": [0.1] * 1024,
             "metadata": {"section": "intro"}
         }
     ]
@@ -47,7 +47,7 @@ def test_chunk_insertion_with_embedding(store, mock_db):
     ]
     
     # Verify via hybrid search
-    results = store.query_hybrid(query_vector=[0.1]*768, query_text="machine learning", top_k=1)
+    results = store.query_hybrid(query_vector=[0.1]*1024, query_text="machine learning", top_k=1)
     assert len(results) > 0
     assert "machine learning" in results[0]["raw_text"]
 
