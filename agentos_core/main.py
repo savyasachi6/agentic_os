@@ -3,8 +3,12 @@ Agent OS entry point.
 
 Usage:
     python main.py cli    — interactive REPL
-    python main.py serve  — start FastAPI server
+    python main.py serve  — start FastAPI server (used by the Streamlit UI)
     python main.py index  — re-index all skills into pgvector
+
+To run the Web UI (make sure `python main.py serve` is running first):
+    cd agentos_ui
+    streamlit run app.py
 """
 
 import sys
@@ -12,16 +16,18 @@ import os
 import argparse
 from dotenv import load_dotenv
 
-# Fix Windows console charmap encoding errors when the LLM generates unicode (e.g., '→')
+# Ensure project root is in Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+
+# Load root .env
+load_dotenv(os.path.join(os.path.dirname(current_dir), ".env"))
+
 if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
-
-# Ensure project root is in Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
 
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
@@ -41,44 +47,66 @@ def cmd_run(args):
     # Imports specific to core runner
     from agent_core.loop.coordinator import CoordinatorAgent
     from llm_router.router import LLMRouter
-    from agent_memory.db import init_schema # Corrected from 'from db import get_db_connectionma()'
+    from agent_memory.db import init_schema
+    from config import llm_router_settings
+    
+    # CLI mode defaults to native local inference (llama-cpp)
+    llm_router_settings.backend = "llama-cpp"
     
     init_schema()
     
     # Load project env if specified
-    project_dir = None
     if args.project:
         project_dir = load_project_env(args.project)
         if not project_dir:
             print(f"Warning: Project '{args.project}' not found or has no .env")
 
-    # Start the LLM Router
-    router = LLMRouter.get_instance()
-    router.start()
-    
-    try:
-        # Initialize the stateful CoordinatorAgent
-        print(f"Initializing CoordinatorAgent... (model={args.model})")
-        agent = CoordinatorAgent(model_name=args.model, project_name=args.project)
-
-        # Basic CLI REPL
-        print(f"\nWelcome to {os.environ.get('AGENT_NAME', 'Agent OS')} CLI.")
-        print("Type 'exit' or 'quit' to end the session.")
-        print("Type 'help' for available commands.")
+    async def run_main():
+        # Start the LLM Router
+        router = LLMRouter.get_instance()
+        router.start()
         
-        asyncio.run(agent.start_loop())
+        try:
+            # Initialize the stateful CoordinatorAgent
+            print(f"Initializing CoordinatorAgent... (model={args.model})")
+            agent = CoordinatorAgent(model_name=args.model, project_name=args.project)
 
-    finally:
-        router.stop()
+            # Basic CLI REPL
+            print(f"\nWelcome to {os.environ.get('AGENT_NAME', 'Agent OS')} CLI.")
+            print("Type 'exit' or 'quit' to end the session.")
+            
+            while True:
+                # Use a small loop to handle potential interrupts
+                try:
+                    user_msg = input("\nUser: ").strip()
+                    if user_msg.lower() in ["exit", "quit"]:
+                        break
+                    if not user_msg:
+                        continue
+                    
+                    response = await agent.run_turn(user_msg)
+                    print(f"\nAssistant: {response}")
+                except EOFError:
+                    break
+                except KeyboardInterrupt:
+                    break
+
+        finally:
+            router.stop()
+
+    asyncio.run(run_main())
 
 
 def cmd_serve(args):
     """Start the FastAPI server."""
     import uvicorn
-    from config import server_settings
+    from config import server_settings, llm_router_settings
 
     if args.project:
         load_project_env(args.project)
+        
+    # Server mode defaults to HTTP inference (ollama)
+    llm_router_settings.backend = "ollama"
 
     # LLMRouter will be started in server.py @app.on_event("startup")
     uvicorn.run(
@@ -147,7 +175,7 @@ def cmd_worker(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-os",
-        description="OpenClaw-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",
+        description="AgentOS-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",
     )
     parser.add_argument("--project", default=None, help="Run a specific project module (e.g. desktop_agent)")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

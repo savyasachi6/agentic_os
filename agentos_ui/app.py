@@ -64,7 +64,8 @@ def load_db_history(session_id: str):
 async def send_message_and_receive_stream(message: str, session_id: str, message_container):
     """Connect to the websocket, send the message, and stream the response to the UI."""
     try:
-        async with websockets.connect(CORE_WS_URL) as ws:
+        # Disable ping_interval to prevent silent disconnects on long-running agent tasks
+        async with websockets.connect(CORE_WS_URL, ping_interval=None) as ws:
             # Send the user message
             payload = json.dumps({"message": message, "session_id": session_id})
             await ws.send(payload)

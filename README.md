@@ -82,11 +82,19 @@ graph TD
    docker-compose up -d
    ```
 
-3. **Run the OS**:
+3. **Run the OS (Backend)**:
 
    ```bash
    cd agentos_core
    python main.py serve
+   ```
+
+4. **Run the Web UI**:
+   - In a new terminal, start the Streamlit frontend. This connects to the `main.py serve` backend via WebSocket:
+
+   ```bash
+   cd agentos_ui
+   streamlit run app.py
    ```
 
 ---

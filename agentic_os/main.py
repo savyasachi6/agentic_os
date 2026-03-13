@@ -103,7 +103,7 @@ def cmd_index(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-os",
-        description="OpenClaw-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",
+        description="AgentOS-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",
     )
     parser.add_argument("--project", default=None, help="Run a specific project module (e.g. desktop_agent)")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

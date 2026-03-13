@@ -13,7 +13,7 @@ We needed to decide on the agent execution model. Options:
 
 ## Decision
 
-We chose the **long-lived event loop** (OpenClaw-style).
+We chose the **long-lived event loop** (AgentOS-style).
 
 ## Rationale
 

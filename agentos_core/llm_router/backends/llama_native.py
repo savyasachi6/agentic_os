@@ -18,7 +18,7 @@ class LlamaCPPBackend(LLMBackend):
                 model_path=self.model_path,
                 n_gpu_layers=-1, 
                 n_ctx=4096, 
-                verbose=False
+                verbose=True
             )
             print(f"[LlamaCPPBackend] Model successfully loaded.")
         except ImportError:

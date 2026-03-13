@@ -37,6 +37,29 @@ The Core includes specialized modules that extend the agent's capabilities into 
 4. **Execute**: `LaneRunner` dispatches the command to the `Sandbox` with a signed JWT.
 5. **Observe**: Result is returned to the loop for the next reasoning step.
 
+## 🔄 Execution Flow (`main.py` -> `server.py`)
+
+When launching the Agent OS with `python main.py serve`, the system follows this boot sequence to orchestrate reasoning, routing, and tool execution:
+
+### 1. The CLI Entry Point (`main.py`)
+
+1. **Environment Initialization:** Loads `.env` using `dotenv` to ingest global settings like DB credentials and backend configuration early.
+2. **Command Parsing:** Interprets the user's subcommand (e.g., `serve`, `cli`, `index`) using `argparse`.
+3. **Backend Override:** Dynamically overrides `llm_router_settings.backend` to ensure `serve` utilizes `ollama` and `cli` utilizes `llama-cpp`.
+4. **Uvicorn Start:** Handoffs execution to `uvicorn`, instructing it to serve the FastAPI `app` defined in `server.py`.
+
+### 2. The FastAPI Server (`server.py`)
+
+1. **App Lifecycle Hook (`startup` event):** Before accepting web traffic, FastAPI initializes the core infrastructure:
+    - Calls `init_schema()` to guarantee the PostgreSQL DB and `pgvector` tables exist.
+    - Evokes `LLMRouter.get_instance().start()` to boot the background batched generation loop.
+    - Spawns background specialist agents (`SQLAgentWorker`, `CodeAgentWorker`, `ResearcherAgentWorker`) that continuously poll the durable Tree Store for work.
+2. **Chat Connection (`/chat` WebSocket):**
+    - When the Streamlit UI connects, it generates a stateful `CoordinatorAgent` session.
+    - User messages trigger `agent.run_turn_async()`, kicking off the ReAct reasoning loop.
+    - A `ws_callback` streams the Coordinator's internal thoughts and delegated task observations explicitly back to the UI in real-time.
+3. **Graceful Shutdown:** On interrupt (`CTRL+C`), the server drains and cancels the background worker agents and stops the LLM Router cleanly.
+
 ---
 
 ## Further Reading

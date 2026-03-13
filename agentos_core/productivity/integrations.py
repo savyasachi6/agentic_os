@@ -7,7 +7,7 @@ from typing import List, Optional
 class EmailConnector:
     """Stub for IMAP/SMTP integration."""
     def list_emails(self, folder: str = "INBOX", limit: int = 10) -> List[dict]:
-        return [{"subject": "Welcome to Agent OS", "from": "admin@openclaw.ai", "body": "..."}]
+        return [{"subject": "Welcome to Agent OS", "from": "admin@agentos.ai", "body": "..."}]
 
     def send_email(self, to: str, subject: str, body: str) -> bool:
         print(f"Mock email sent to {to}: {subject}")
@@ -27,4 +27,4 @@ class CalendarConnector:
 class WebSearchConnector:
     """Stub for DuckDuckGo/SerpAPI integration."""
     def search(self, query: str) -> List[dict]:
-        return [{"title": "Agentic OS Docs", "link": "https://docs.openclaw.ai", "snippet": "..."}]
+        return [{"title": "Agentic OS Docs", "link": "https://docs.agentos.ai", "snippet": "..."}]

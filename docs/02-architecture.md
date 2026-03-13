@@ -33,7 +33,7 @@ graph TD
     - Dynamically loads and indexes Markdown-based skill definitions.
     - Provides a retrieval interface to inject relevant "reasoning recipes" into the prompt context.
 
-4. **Tools API Node (`openclaw-tools-node`)**:
+4. **Tools API Node (`agentos-tools-node`)**:
     - An isolated .NET 8 service that executes system commands.
     - Enforces security via JWT-scoped permissions and mTLS.
 

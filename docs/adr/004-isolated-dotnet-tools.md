@@ -10,7 +10,7 @@ Executing system commands (shell, file I/O) directly from the Python core engine
 
 ## Decision
 
-We will implement an isolated "Tools Node" using .NET 8 (located in `agentos_core/openclaw-tools-node/`).
+We will implement an isolated "Tools Node" using .NET 8 (located in `agentos_core/agentos-tools-node/`).
 
 ## Alternatives Considered
 

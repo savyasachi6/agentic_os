@@ -6,3 +6,9 @@ sandbox/
 __pycache__/
 *.pyc
 .env
+
+# Large model files — store locally, never commit
+models/
+*.gguf
+*.bin
+*.safetensors

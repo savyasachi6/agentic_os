@@ -3,7 +3,8 @@ FastAPI server for the Agent OS.
 
 Endpoints:
   GET  /health          — readiness check
-  WS   /chat            — streaming ReAct chat with interrupt support
+  WS   /chat            — streaming ReAct chat with interrupt support (used by Streamlit UI)
+  GET  /chat/{id}/history - retrieve permanent session history
   POST /embed           — embed arbitrary text
   POST /skills/reindex  — trigger skill re-indexing
 """
@@ -15,6 +16,10 @@ from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Load root .env
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 from agent_core.loop.coordinator import CoordinatorAgent
 from agent_core.agents.sql_agent import SQLAgentWorker
