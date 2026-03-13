@@ -1,100 +1,89 @@
-# AgentOS Memory & RAG
+# Enterprise Fractal RAG: High-Performance Agentic Memory
 
-Durable, queryable, and semantic memory layer for the **[Agentic OS](..//README.md)**. Built on PostgreSQL with `pgvector` for high-performance vector similarity search and a resilient RAG verification system.
+[![Architecture: High-Complexity](https://img.shields.io/badge/Architecture-High--Complexity-blueviolet)](https://github.com/savyasachi6/agentic_os)
+[![Database: PostgreSQL+pgvector](https://img.shields.io/badge/Database-PostgreSQL%2Bpgvector-blue)](https://github.com/savyasachi6/agentic_os)
+[![Search: Hybrid+RRF](https://img.shields.io/badge/Search-Hybrid%2BRRF-green)](https://github.com/savyasachi6/agentic_os)
 
-## Purpose
+Enterprise Fractal RAG is a sophisticated cognitive memory architecture designed for high-cardinality agentic workloads. Unlike basic RAG implementations, this system prioritizes **adaptive learning**, **reasoning traceability**, and **write-optimized scaling**.
 
-The `agentos_memory` repository provides a robust foundation for an agent's long-term memory and knowledge retrieval. It bridges structure-aware document ingestion with LLM-based validation to eliminate hallucinations and ensure contextual consistency.
+## 🚀 Value Proposition
 
-## Key Features
+- **Adaptive Memory (RLHF):** Chunks learn their own "value" over time through auditor feedback loops, self-optimizing the retrieval hot path.
+- **Reasoning Traceability:** Fractal reasoning logs (Trees of Thought) allow for granular inspection of agent decision-making at any recursion depth.
+- **Production Scaling:** Range-partitioned observability tables ensure $O(1)$ data retention and index performance stability at multi-million query scales.
+- **High-Fidelity Ingestion (Docling):** Integrated IBM Docling for structure-aware parsing of complex PDFs/DOCX, preserving tables and headers perfectly.
+- **Deduplication Engine:** Integrated MD5 content hashing prevents "index drift" and redundant embedding generation for exact duplicates.
 
-- **Semantic Memory**: pgvector-based storage for thoughts, session summaries, and skill chunks.
-- **Resilient RAG**: High-level reasoning modules (Ingestion, Retrieval, Validation) for a scalable RAG architecture.
-- **Self-Compacting History**: Automatic summarization of old conversation turns to manage LLM context.
-- **Relational & Vector Search**: Hybrid retrieval synthesizing semantic vector search with lexical and relational graph traversals.
-- **Validation Engine**: Explicit safety layer (Gatekeeper, Auditor, Strategist) shield against unchecked LLM outputs.
+---
 
-## Target Users
+## 🧬 Schema Anatomy
 
-Developers building complex agentic systems that require a reliable, local-first memory subsystem and a high-fidelity RAG engine.
+### 1. High-Throughput Partitioning
 
-## Setup & Installation
+We employ **Time-Series Range Partitioning** on the `retrieval_events` and `event_chunks` tables. This strategy is critical for:
 
-### Prerequisites
+- **Partition-Wise Joins:** By aligning partition keys on the time dimension, the Postgres planner joins monthly child tables rather than the entire multi-TB log, drastically reducing CPU overhead.
+- **O(1) TTL Maintenance:** Expiring data is a metadata operation (`DROP TABLE partition_name`) rather than a heavy vacuum-inducing `DELETE`.
 
-- Python 3.11+
-- [Docker](https://www.docker.com/) (for PostgreSQL + pgvector)
-- [Ollama](https://ollama.ai/) (for `nomic-embed-text` embeddings)
+### 2. Deduplication using MD5
 
-### Database Setup
+To maintain an efficient index, every chunk is assigned an **MD5** content hash.
 
-Start the PostgreSQL instance with `pgvector` using Docker:
+- **Duplicate Detection:** During ingestion, we check the `chunks` table for any records with the same `document_id` and `content_hash`. Chunks with identical hashes are skipped during the embedding phase to save compute.
 
-```bash
-docker run -d \
-  --name pgvector \
-  -e POSTGRES_DB=agent_os \
-  -e POSTGRES_USER=agent \
-  -e POSTGRES_PASSWORD=password \
-  -p 5432:5432 \
-  ankane/pgvector
-```
+### 3. Decoupled Scoring Layer
 
-### Installation
+To prevent **Write Amplification** on fixed-dimension (1024d) vector indexes (HNSW), we decouple "hot" performance scores into a narrow `chunk_scores` table. This prevents frequent MVCC versioning of the heavy `chunk_embeddings` table.
 
-```bash
-git clone <repository-url>
-cd agentos_memory
-pip install -r requirements.txt
-```
+### 4. High-Fidelity Parsing (Docling)
 
-### Configuration
+The system uses **Docling** (by IBM) for the ingestion phase. It transforms complex, unstructured files into clean, structured Markdown while preserving:
 
-Create a `.env` file in the root directory:
+- **Tables & Formulas:** Maintained in LLM-readable Markdown format.
+- **Semantic Hierarchies:** Chunks respect document boundaries (headers, paragraphs) via a `HybridChunker`.
 
-```env
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=agent_os
-POSTGRES_USER=agent
-POSTGRES_PASSWORD=password
-EMBED_MODEL=nomic-embed-text
-```
+---
 
-## Basic Usage
+## 🔍 Search Logic: Adaptive Hybrid Retrieval
 
-### Memory Operations
+The system uses a custom `hybrid_search` procedure that blends three distinct signals:
 
-```python
-from agent_memory.vector_store import VectorStore
-from agent_memory.db import init_schema
+### 1. Semantic Vector Search (ANN)
 
-# Initialize Database Schema
-init_schema()
+Uses `pgvector` with **HNSW indexing** (`m=16, ef_construction=128`) for ultra-fast candidate generation in high-dimensional (1024d) space.
 
-vs = VectorStore()
+### 2. Lexical Keyword Search (BM25)
 
-# Log a Thought
-vs.log_thought(session_id="session-1", role="assistant", content="I should check if the server is running.")
+Utilizes GIN-indexed `tsvector` fields for precise keyword matching, ensuring factual recall where semantic distance might be ambiguous.
 
-# Semantic Search
-results = vs.search_thoughts("Is the server running?", session_id="session-1")
-for r in results:
-    print(f"[{r['score']:.2f}] {r['content']}")
-```
+### 3. Reciprocal Rank Fusion (RRF)
 
-### RAG Retrieval Example
+We merge semantic and keyword ranks using the RRF algorithm with a constant $k=60$:
 
-```python
-from agent_rag.retrieval.retriever import HybridRetriever
+$$RRF(d) = \sum_{s \in \{vector, lexical\}} \frac{1}{60 + rank(d, s)}$$
 
-retriever = HybridRetriever()
-context = retriever.retrieve("What are the system requirements for Agent OS?")
-print(context)
-```
+### 4. Adaptive Experience Boost
 
-## Internal Documentation
+The final score is augmented by an empirical `performance_score` cached from the RLHF loop:
 
-- [Architecture Overview](docs/architecture.md)
-- [API Reference](docs/api.md)
-- [Architecture Decision Records](docs/adr/)
+$$FinalScore = RRF(d) + (0.05 \times performance\_score)$$
+
+> [!IMPORTANT]
+> **The Matthew Effect Mitigation:** We use a calibrated boost multiplier ($0.05$). This ensures that while "proven" documents are prioritized, they do not suppress fresh, highly relevant context—preventing a feedback loop where the system only regurgitates old information.
+
+---
+
+## 🛠 Maintenance & Ops
+
+The system includes automated DDL management:
+
+- **`manage_retrieval_partitions()`:** A stored procedure for monthly partition pre-scaffolding.
+- **`mv_chunk_performance`:** An incrementally refreshable materialized view for long-term analytics.
+
+---
+
+## 🏁 Getting Started
+
+- **Initialize Schema:** Execute `schema.sql`.
+- **Configure HNSW:** Ensure `vector` extension is enabled.
+- **Tune Planner:** Set `enable_partitionwise_join = on` in `postgresql.conf`.

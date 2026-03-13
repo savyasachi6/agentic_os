@@ -9,9 +9,23 @@ from .parsers import parse_document_structure
 from .chunking import chunk_structured_doc
 from .enrichment import enrich_chunks
 
-def ingest_document(source_uri: str, source_type: str = "file", mime_type: Optional[str] = None) -> str:
+# Optional Docling Integrations
+try:
+    from .docling_parser import DoclingParser
+    from .docling_chunker import DoclingChunker
+    DOCLING_AVAILABLE = True
+except ImportError:
+    DOCLING_AVAILABLE = False
+
+def ingest_document(source_uri: str, source_type: str = "file", mime_type: Optional[str] = None, engine: str = "auto") -> str:
     """
-    High-level ingestion entrypoint for the production RAG schema.
+    High-level ingestion entrypoint with modular engine support.
+    
+    Args:
+        source_uri: Path or URL to document
+        source_type: Metadata category
+        mime_type: File type hint
+        engine: 'docling', 'classic', or 'auto'
     """
     rag_store = RagStore()
     vector_store = VectorStore()
@@ -20,20 +34,30 @@ def ingest_document(source_uri: str, source_type: str = "file", mime_type: Optio
     document_id = rag_store.save_document(
         source_uri=source_uri,
         source_type=source_type,
-        title=source_uri.split('/')[-1], # Basic fallback
-        metadata={"mime_type": mime_type}
+        title=source_uri.split('/')[-1],
+        metadata={"mime_type": mime_type, "ingestion_engine": engine}
     )
     
-    # 2. Structure Parse
-    structured = parse_document_structure(source_uri, mime_type=mime_type)
+    # 2. Determine Engine and Orchestrate
+    use_docling = (engine == "docling") or (engine == "auto" and DOCLING_AVAILABLE and source_uri.endswith(('.pdf', '.docx', '.pptx')))
     
-    # 3. Chunk (Structure-aware)
-    raw_chunks = chunk_structured_doc(structured)
+    if use_docling:
+        # --- Docling Modular Flow ---
+        parser = DoclingParser()
+        chunker = DoclingChunker()
+        
+        # Docling handles both structure parse and chunking in one semantic sweep
+        doc_obj = parser.get_document_object(source_uri)
+        processed_chunks = chunker.chunk_document(doc_obj)
+    else:
+        # --- Classic Modular Flow ---
+        structured = parse_document_structure(source_uri, mime_type=mime_type)
+        processed_chunks = chunk_structured_doc(structured)
     
-    # 4. Enrich (Summaries, Keywords, Skills)
-    enriched_chunks = enrich_chunks(raw_chunks)
+    # 3. Enrich (LLM Insights)
+    enriched_chunks = enrich_chunks(processed_chunks)
 
-    # 5. Save & Embed
+    # 4. Save & Embed
     _persist_chunks_and_embeddings(
         rag_store=rag_store,
         vector_store=vector_store,

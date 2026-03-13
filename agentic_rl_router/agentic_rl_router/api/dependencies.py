@@ -7,6 +7,7 @@ as FastAPI dependencies, keeping routers thin.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 from agentic_rl_router.application.services.feedback_service import FeedbackService
@@ -32,7 +33,7 @@ from agentic_rl_router.infrastructure.repositories import (
 
 @lru_cache(maxsize=1)
 def get_bandit() -> LinUCBBandit:
-    return LinUCBBandit(
+    bandit = LinUCBBandit(
         n_arms=bandit_settings.n_arms,
         d=bandit_settings.context_dim,
         alpha=bandit_settings.alpha,
@@ -42,6 +43,21 @@ def get_bandit() -> LinUCBBandit:
         drift_sensitivity=drift_settings.drift_sensitivity,
         drift_min_samples=drift_settings.min_samples_before_detection,
     )
+    
+    # Load weights if they exist (Warm Start)
+    # Resolve path relative to the package root (3 levels up from api/dependencies.py)
+    pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    weights_path = os.path.join(pkg_root, "bandit_weights.npz")
+    
+    if os.path.exists(weights_path):
+        try:
+            with open(weights_path, "rb") as f:
+                bandit.load_from_bytes(f.read())
+            print(f"[bandit] Loaded weights from {weights_path}")
+        except Exception as e:
+            print(f"[bandit] Failed to load weights: {e}")
+            
+    return bandit
 
 
 @lru_cache(maxsize=1)

@@ -24,14 +24,14 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["agentos_core", "agentos_memory", "agentos_skills", "agentic_rl_router", "."]
+where = ["agentos_core", "agentos_memory", "agentos_skills", "agentos_router", "agentos_gateway", "."]
 include = [
-    "agentic_os*",
+    "agentos_gateway*",
     "agent_core*",
     "agent_memory*",
     "agent_skills*",
     "agent_rag*",
-    "agentic_rl_router*",
+    "agentos_router*",
     "llm_router*",
     "lane_queue*",
     "sandbox*",
@@ -43,4 +43,4 @@ include = [
 ]
 
 [project.scripts]
-agent-os = "agentic_os.main:main"
+agent-os = "agentos_gateway.main:main"

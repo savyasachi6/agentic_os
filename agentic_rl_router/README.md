@@ -19,7 +19,7 @@ For detailed specs, see **[docs/06-rl-router.md](../docs/06-rl-router.md)**.
 
 ## Implementation
 
-The core logic is located in `agentic_rl_router/`:
+The core logic is located in `agentos_router/`:
 
 - `bandit.py`: LinUCB implementation.
 - `drift.py`: CUSUM drift detection.

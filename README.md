@@ -27,10 +27,11 @@ graph TD
 
 ### Main Components
 
-- **[Agent OS Core](agentos_core/)**: The reasoning hub. Manages ReAct loops and secure tool sandboxing.
+- **[Agent OS Gateway](agentos_gateway/)**: The orchestration and CLI hub.
+- **[Agent OS Core](agentos_core/)**: The reasoning engine. Manages ReAct loops and secure tool sandboxing.
 - **[Agent Memory](agentos_memory/)**: The semantic storage layer. Handles `pgvector` RAG and long-term history.
 - **[Agent Skills](agentos_skills/)**: The capability registry. Indexes and retrieves specialized behaviors.
-- **[RL Router](agentic_rl_router/)**: Multi-objective contextual bandit for dynamic RAG depth optimization.
+- **[Agent OS Router](agentos_router/)**: Multi-objective contextual bandit for dynamic RAG depth optimization.
 
 ---
 
@@ -85,8 +86,7 @@ graph TD
 3. **Run the OS (Backend)**:
 
    ```bash
-   cd agentos_core
-   python main.py serve
+   python -m agentos_gateway.main serve
    ```
 
 4. **Run the Web UI**:

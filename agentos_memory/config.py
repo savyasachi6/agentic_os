@@ -18,13 +18,21 @@ class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 class ModelSettings(BaseSettings):
-    embed_model: str = Field(default="nomic-embed-text", validation_alias="EMBED_MODEL")
+    embed_model: str = Field(default="mxbai-embed-large", validation_alias="EMBED_MODEL")
     drafter_model: str = Field(default="glm-4.7-9b", validation_alias="DRAFTER_MODEL")
     verifier_model: str = Field(default="qwen3-coder-next", validation_alias="VERIFIER_MODEL")
     fast_model: str = Field(default="qwen3-coder-next", validation_alias="FAST_MODEL")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+class DoclingSettings(BaseSettings):
+    chunk_size: int = Field(default=1024, validation_alias="DOCLING_CHUNK_SIZE")
+    tokenizer: str = Field(default="BAAI/bge-small-en-v1.5", validation_alias="DOCLING_TOKENIZER")
+    use_ocr: bool = Field(default=True, validation_alias="DOCLING_USE_OCR")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
 
 db_settings = DatabaseSettings()
 model_settings = ModelSettings()
+docling_settings = DoclingSettings()

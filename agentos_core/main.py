@@ -117,7 +117,7 @@ def cmd_serve(args):
     )
 
 
-def cmd_index(args):
+async def cmd_index(args):
     """Re-index all skills into pgvector."""
     from agent_skills.indexer import SkillIndexer
     from agent_memory.db import init_schema
@@ -130,6 +130,9 @@ def cmd_index(args):
     router.start()
     
     try:
+        # Since index_all is synchronous, we run it in an executor if we want to keep the loop alive,
+        # or just run it directly if the router work is handled in background tasks.
+        # However, for simplicity and since indexing is a CLI task, we can just call it.
         indexer = SkillIndexer(skills_dir=args.skills_dir)
         indexer.index_all()
     finally:
@@ -216,7 +219,11 @@ def main():
             parser.print_help()
             sys.exit(1)
 
-    args.func(args)
+    if args.command == "index" or args.command == "worker":
+        import asyncio
+        asyncio.run(args.func(args))
+    else:
+        args.func(args)
 
 
 if __name__ == "__main__":
