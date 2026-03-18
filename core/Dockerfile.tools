@@ -15,7 +15,7 @@ RUN useradd -m -s /bin/bash sandboxuser
 RUN chown -R sandboxuser:sandboxuser /sandbox
 
 # Install Python dependencies needed by the worker
-COPY core/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn pydantic
 
 # Copy only the sandbox code

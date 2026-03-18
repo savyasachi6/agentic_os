@@ -47,6 +47,10 @@ def main():
     status_parser = subparsers.add_parser("status", help="Check task status")
     status_parser.add_argument("id", type=int)
 
+    # Docker
+    subparsers.add_parser("docker-up", help="Start all services in Docker")
+    subparsers.add_parser("docker-down", help="Stop all Docker services")
+
     # Chat (Remote)
     chat_parser = subparsers.add_parser("chat", help="Terminal chat via REST API")
     chat_parser.add_argument("--host", default=None)
@@ -92,6 +96,14 @@ def main():
         if args.host: cmd.extend(["--host", args.host])
         if args.port: cmd.extend(["--port", str(args.port)])
         subprocess.run(cmd)
+
+    elif args.command == "docker-up":
+        print("[Docker] Starting all services...")
+        subprocess.run(["docker-compose", "up", "-d", "--build"])
+
+    elif args.command == "docker-down":
+        print("[Docker] Stopping all services...")
+        subprocess.run(["docker-compose", "down"])
 
     else:
         parser.print_help()

@@ -9,14 +9,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY ui/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all application code (monorepo structure)
-COPY . .
+# Copy UI code
+COPY ui/ .
 
-# Expose server port
-EXPOSE 8000
+# Expose Streamlit port
+EXPOSE 8501
 
-# Run the FastAPI server
-CMD ["python", "main.py", "server", "--host", "0.0.0.0", "--port", "8000"]
+# Run Streamlit
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
