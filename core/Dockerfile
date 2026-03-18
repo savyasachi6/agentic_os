@@ -18,5 +18,5 @@ COPY . .
 # Expose server port
 EXPOSE 8000
 
-# Run the indexer followed by the FastAPI server
-CMD ["sh", "-c", "python main.py index && python main.py server --host 0.0.0.0 --port 8000"]
+# Start indexer in the background, then launch the server immediately
+CMD ["sh", "-c", "python main.py index & python main.py server --host 0.0.0.0 --port 8000"]
