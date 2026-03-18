@@ -84,7 +84,7 @@ services:
       POSTGRES_PASSWORD: password
       # Point UI at the backend service, not localhost
       CORE_API_URL: http://agent-core:8000
-      CORE_WS_URL: ws://agent-core:8000/chat
+      CORE_WS_URL: ws://agent-core:8000/ws
       PYTHONPATH: /app
     depends_on:
       - agent-core

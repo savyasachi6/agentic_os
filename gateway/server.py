@@ -182,7 +182,7 @@ async def get_chat_history(session_id: str):
 # ---------------------------------------------------------------------------
 # WebSocket chat
 # ---------------------------------------------------------------------------
-@app.websocket("/chat")
+@app.websocket("/ws")
 async def chat_ws(ws: WebSocket):
     """
     Streaming ReAct chat over WebSocket.
