@@ -2,7 +2,7 @@
 
 ## Overview
 
-The **RL Router** (`agentic_rl_router`) is an independent, local-first service responsible for dynamic RAG depth routing. While the *LLM Router* proxies and batches core reasoning requests, the *RL Router* decides the optimal retrieval strategy for a given user query using a reinforcement learning contextual bandit (LinUCB).
+The **RL Router** (`rl_router`) is an independent, local-first service responsible for dynamic RAG depth routing. While the *LLM Router* proxies and batches core reasoning requests, the *RL Router* decides the optimal retrieval strategy for a given user query using a reinforcement learning contextual bandit (LinUCB).
 
 The objective is to balance retrieve correctness, latency cost, and hallucination risk, adapting to the user's workload over time.
 

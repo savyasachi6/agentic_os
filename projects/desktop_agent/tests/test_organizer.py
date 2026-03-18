@@ -47,7 +47,7 @@ async def test_categorize_calls_llm_with_correct_prompt():
     # Ensure FileOrganizer has categorize method
     mock_category = FileCategory(category="Documents", confidence=0.95, reasoning="Found PDF extension")
     
-    # The import path for generate_structured_output is in agentos_core.agent_core.llm
+    # The import path for generate_structured_output is in core.core.llm
     # We patch it directly in the organizer module to ensure the mock is caught.
     with patch("projects.desktop_agent.organizer.generate_structured_output", new_callable=AsyncMock) as mock_llm:
         mock_llm.return_value = mock_category
@@ -60,7 +60,7 @@ async def test_categorize_calls_llm_with_correct_prompt():
         assert "invoice.pdf" in kwargs["prompt"]
         assert kwargs["response_model"] == FileCategory
 
-from agentos_core.lane_queue.models import Command, CommandType, CommandStatus
+from lane_queue.models import Command, CommandType, CommandStatus
 
 def test_propose_move_enqueues_command():
     organizer = FileOrganizer()
@@ -68,7 +68,7 @@ def test_propose_move_enqueues_command():
     category = "Documents"
     lane_id = "test-lane"
     
-    with patch("agentos_core.lane_queue.store.CommandStore.enqueue") as mock_enqueue:
+    with patch("core.lane_queue.store.CommandStore.enqueue") as mock_enqueue:
         mock_command = Command(
             id="cmd-123", 
             lane_id=lane_id, 

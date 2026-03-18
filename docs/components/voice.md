@@ -1,6 +1,6 @@
 # Voice Domain
 
-The **Voice Domain** in `agentos_core` manages the audio interface for the Agent OS appliance, providing natural language STT (Speech-to-Text) and TTS (Text-to-Speech) capabilities.
+The **Voice Domain** in `core` manages the audio interface for the Agent OS appliance, providing natural language STT (Speech-to-Text) and TTS (Text-to-Speech) capabilities.
 
 ## Responsibility
 
@@ -21,7 +21,7 @@ It enables "eyes-free" interaction by processing raw audio streams into text tha
   - External hardware (Microphone/Speakers).
 - **Outbound**:
   - `agent_core.loop`: Provides transcribed text for reasoning.
-  - `agentos_core.llm`: Receives text to synthesize into speech.
+  - `core.llm`: Receives text to synthesize into speech.
 
 ## Design Patterns
 

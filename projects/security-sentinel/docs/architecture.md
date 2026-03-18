@@ -10,6 +10,6 @@ The `security-sentinel` is a proactive monitoring and threat hunting agent.
 
 ## Triage Workflow
 
-1. **Collection**: Ingests logs from disparate sources into `agentos_memory`.
+1. **Collection**: Ingests logs from disparate sources into `memory`.
 2. **Analysis**: Performs semantic search for known attack patterns (MITRE ATT&CK mapping).
 3. **Alerting**: Dispatches identified threats to the `notifier` for chat-platform delivery.

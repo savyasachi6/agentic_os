@@ -6,7 +6,7 @@ Internal services (Core, Memory, Skills) communicate over a local network, but e
 
 ### 1. Authentication (JWT)
 
-The `agentos_core` server acts as the gateway. All interactions require a signed JSON Web Token.
+The `core` server acts as the gateway. All interactions require a signed JSON Web Token.
 
 ### 2. Internal mTLS
 
@@ -31,4 +31,4 @@ Allowing an LLM to run `rm -rf` or access secrets directly on the host is a high
 
 ## Execution Boundaries
 
-Refer to `agentos_core/docs/components/sandbox.md` for the technical implementation of the worker pool.
+Refer to `core/docs/components/sandbox.md` for the technical implementation of the worker pool.

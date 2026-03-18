@@ -22,7 +22,7 @@ The **Security Domain** is the guardian of the Agent OS "Appliance". it ensures 
   - `agent_core.server`: Authenticates incoming requests.
   - `agent_core.llm_router`: Scopes model usage permissions.
 - **Outbound**:
-  - `agentos_memory.db`: Stores encrypted API keys and user credentials.
+  - `memory.db`: Stores encrypted API keys and user credentials.
 
 ## Design Patterns
 

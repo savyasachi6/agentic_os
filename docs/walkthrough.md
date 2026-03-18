@@ -4,7 +4,7 @@ Welcome to the **Agent OS Appliance**. This document provides a high-level walkt
 
 ## 1. The Core Lifecycle
 
-Every interaction starts at the **[Agent OS Core](file:///c:/Users/savya/projects/agentic_os/agentos_core/)**.
+Every interaction starts at the **[Agent OS Core](file:///c:/Users/savya/projects/agentic_os/core/)**.
 
 - **Entry**: Requests arrive via WebSocket (`server.py`) or CLI (`main.py`).
 - **Orchestration**: The `LocalAgent` manage session state and the ReAct reasoning loop.
@@ -13,20 +13,20 @@ Every interaction starts at the **[Agent OS Core](file:///c:/Users/savya/project
 
 The Core doesn't think in a vacuum. It leverages two specialized layers:
 
-- **[Skills Layer](file:///c:/Users/savya/projects/agentic_os/agentos_skills/)**: Provides the "playbooks" (e.g., how to debug a failing test).
-- **[Memory Subsystem](file:///c:/Users/savya/projects/agentic_os/agentos_memory/)**: Stores every thought and result in a pgvector-enabled Postgres database, allowing for cross-session recall and context compaction.
+- **[Skills Layer](file:///c:/Users/savya/projects/agentic_os/skills/)**: Provides the "playbooks" (e.g., how to debug a failing test).
+- **[Memory Subsystem](file:///c:/Users/savya/projects/agentic_os/memory/)**: Stores every thought and result in a pgvector-enabled Postgres database, allowing for cross-session recall and context compaction.
 
 ## 3. High-Performance Reasoning
 
-To maintain low latency on local hardware, the **[LLM Router](file:///c:/Users/savya/projects/agentic_os/agentos_core/llm_router/)** batches requests. Even if 10 agents are "thinking" at once, the router optimizes their token generation into efficient micro-batches for Ollama or vLLM.
+To maintain low latency on local hardware, the **[LLM Router](file:///c:/Users/savya/projects/agentic_os/core/llm_router/)** batches requests. Even if 10 agents are "thinking" at once, the router optimizes their token generation into efficient micro-batches for Ollama or vLLM.
 
 ## 4. Guarded Actions
 
 When the agent needs to touch the real world:
 
-- **Queueing**: Tasks are enqueued in **[Lanes](file:///c:/Users/savya/projects/agentic_os/agentos_core/lane_queue/)** to ensure order and persistence.
-- **Sandboxing**: Code execution happens in the **[Sandbox](file:///c:/Users/savya/projects/agentic_os/agentos_core/sandbox/)**, isolated from your main system.
-- **Security**: The **[Security Module](file:///c:/Users/savya/projects/agentic_os/agentos_core/security/)** issues single-use JWTs for every tool call, ensuring only authorized actions are performed.
+- **Queueing**: Tasks are enqueued in **[Lanes](file:///c:/Users/savya/projects/agentic_os/core/lane_queue/)** to ensure order and persistence.
+- **Sandboxing**: Code execution happens in the **[Sandbox](file:///c:/Users/savya/projects/agentic_os/core/sandbox/)**, isolated from your main system.
+- **Security**: The **[Security Module](file:///c:/Users/savya/projects/agentic_os/core/security/)** issues single-use JWTs for every tool call, ensuring only authorized actions are performed.
 
 ## 5. Domain-Specific Applications
 

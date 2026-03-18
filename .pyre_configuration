@@ -1,0 +1,35 @@
+{
+  "source_directories": [
+    "."
+  ],
+  "search_path": [
+    ".",
+    "core",
+    "agent_config",
+    "agent_core",
+    "agent_memory",
+    "agent_skills",
+    "agent_rag",
+    "agent_productivity",
+    "agent_sandbox",
+    "agent_security",
+    "agent_voice",
+    "gateway",
+    "llm_router",
+    "lane_queue",
+    "rl_router"
+  ],
+  "exclude": [
+    "**/node_modules/**",
+    "**/__pycache__/**",
+    ".pytest_cache/**",
+    ".venv/**"
+  ],
+  "python_version": "3.14",
+  "site_package_paths": [
+    "C:\\Users\\savya\\projects\\agentic_os\\.venv\\Lib\\site-packages",
+    "C:\\Python314\\Lib\\site-packages",
+    "C:\\Users\\savya\\AppData\\Roaming\\Python\\Python314\\site-packages"
+  ]
+}
+

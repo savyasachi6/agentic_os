@@ -15,7 +15,7 @@ The `desktop-agent` is a specialized application of the Agent OS designed to hel
 
 ## Setup & Installation
 
-This project depends on `agentos_core`.
+This project depends on `core`.
 
 ### Prerequisites
 

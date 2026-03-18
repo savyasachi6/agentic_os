@@ -1,6 +1,6 @@
 # DevOps & Automation Domain
 
-The **DevOps Domain** in `agentos_core` provides the agent with system-level control, cloud infrastructure management, and automated troubleshooting capabilities.
+The **DevOps Domain** in `core` provides the agent with system-level control, cloud infrastructure management, and automated troubleshooting capabilities.
 
 ## Responsibility
 
@@ -20,7 +20,7 @@ It enables the agent to safely interact with the host system and cloud providers
 - **Inbound**:
   - `agent_core.loop`: Directs the agent to perform system modifications.
 - **Outbound**:
-  - `agentos_core.sandbox`: Executes commands in isolated environments.
+  - `core.sandbox`: Executes commands in isolated environments.
 
 ## Security Controls
 

@@ -15,7 +15,7 @@ The `devops-copilot` leverages the `devops_auto` core module to provide a high-l
 
 ## Setup & Installation
 
-Depends on `agentos_core` and a functioning Docker environment.
+Depends on `core` and a functioning Docker environment.
 
 ### Prerequisites
 

@@ -33,7 +33,7 @@ We will adopt a **Coordinated Monorepo** structure. The root directory acts as t
 ## Consequences
 
 - **Pros**:
-  - Subsystems can be worked on independently (e.g., a memory expert can focus on `agentos_memory`).
+  - Subsystems can be worked on independently (e.g., a memory expert can focus on `memory`).
   - Clearer dependency graph.
   - Easier to test individual modules in isolation.
 - **Cons**:

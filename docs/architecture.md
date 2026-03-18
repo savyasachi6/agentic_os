@@ -19,7 +19,7 @@ graph TD
 
 ## Core Subsystems
 
-### 1. [Agent OS Core](file:///c:/Users/savya/projects/agentic_os/agentos_core/)
+### 1. [Agent OS Core](file:///c:/Users/savya/projects/agentic_os/core/)
 
 The central orchestration layer.
 
@@ -28,7 +28,7 @@ The central orchestration layer.
 - **LLM Router**: A high-performance proxy that batches token requests to the local inference engine.
 - **RL Router**: Multi-objective contextual bandit that dynamically selects optimal RAG depth strategies to balance latency against hallucination risks.
 
-### 2. [Memory & RAG](file:///c:/Users/savya/projects/agentic_os/agentos_memory/)
+### 2. [Memory & RAG](file:///c:/Users/savya/projects/agentic_os/memory/)
 
 The long-term storage and knowledge retrieval engine.
 
@@ -36,7 +36,7 @@ The long-term storage and knowledge retrieval engine.
 - **RAG Pipeline**: A resilient "Verify-before-Generate" pipeline (Ingest -> Retrieve -> Validate).
 - **History Compactor**: Summarizes conversation turns into stable session context.
 
-### 3. [Skills Layer](file:///c:/Users/savya/projects/agentic_os/agentos_skills/)
+### 3. [Skills Layer](file:///c:/Users/savya/projects/agentic_os/skills/)
 
 The "knowledge modules" used by agents.
 

@@ -1,0 +1,25 @@
+{
+    "include": [
+        "."
+    ],
+    "exclude": [
+        "**/node_modules",
+        "**/__pycache__",
+        "dist",
+        ".git",
+        ".venv"
+    ],
+    "reportMissingImports": true,
+    "reportMissingTypeStubs": false,
+    "pythonVersion": "3.13",
+    "pythonPlatform": "Windows",
+    "venvPath": ".",
+    "venv": ".venv",
+    "extraPaths": [
+        ".",
+        "core"
+    ]
+}
+
+
+

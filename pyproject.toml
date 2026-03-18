@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-os"
 version = "0.1.0"
-description = "Monorepo for Agentic OS"
+description = "Industrial-grade Agentic OS Monorepo"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -21,26 +21,27 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "pgvector>=0.2.4",
     "numpy>=1.26.0",
+    "pandas>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]
-where = ["agentos_core", "agentos_memory", "agentos_skills", "agentos_router", "agentos_gateway", "."]
+where = ["."]
 include = [
-    "agentos_gateway*",
+    "agent_config*",
     "agent_core*",
     "agent_memory*",
     "agent_skills*",
     "agent_rag*",
-    "agentos_router*",
+    "agent_productivity*",
+    "agent_sandbox*",
+    "agent_security*",
+    "agent_voice*",
+    "gateway*",
+    "rl_router*",
     "llm_router*",
     "lane_queue*",
-    "sandbox*",
-    "security*",
-    "voice*",
-    "productivity*",
-    "devops_auto*",
-    "projects*"
+    "ui*",
 ]
 
 [project.scripts]
-agent-os = "agentos_gateway.main:main"
+agent-os = "gateway.main:main"

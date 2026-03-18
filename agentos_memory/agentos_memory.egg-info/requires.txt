@@ -1,5 +1,0 @@
-psycopg2-binary>=2.9.9
-pgvector>=0.2.4
-ollama>=0.4.0
-pydantic>=2.7.0
-pydantic-settings>=2.2.0

@@ -35,4 +35,4 @@ graph TD
 1. Scheduled triggers invoke the backup plan.
 2. Agent verifies health of the target backup surface.
 3. Rsync/Robocopy is executed via the `sandbox`.
-4. Log summary is stored in `agentos_memory`.
+4. Log summary is stored in `memory`.

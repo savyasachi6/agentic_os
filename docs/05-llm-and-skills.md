@@ -15,7 +15,7 @@ To solve the "one-query-at-a-kind" bottleneck of local GPUs, the router groups i
 
 ## The Skills Engine
 
-Located in `agentos_skills/`, this system provides the "High-Level Intelligence" beyond core reasoning.
+Located in `skills/`, this system provides the "High-Level Intelligence" beyond core reasoning.
 
 ### Reasoning Recipes (`SKILL.md`)
 
@@ -31,7 +31,7 @@ Instead of a single massive system prompt, the agent *retrieves* the relevant sk
 
 1. **Introspection**: Agent analyzes the query.
 2. **Lookup**: Skills engine returns the `k` most relevant skill fragments.
-3. **Synthesis**: `agentos_core` assembles the final prompt for the LLM.
+3. **Synthesis**: `core` assembles the final prompt for the LLM.
 
 ---
-See `agentos_core/docs/components/llm_router.md` for internal routing logic.
+See `core/docs/components/llm_router.md` for internal routing logic.

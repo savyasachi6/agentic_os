@@ -5,8 +5,8 @@ The `llm-lab` provides a controlled environment for testing and optimizing agent
 ## Core Components
 
 - **Evaluator**: Benchmarks different models (via `llm_router`) against standardized reasoning traces (`chains`).
-- **Skill Optimizer**: Uses the `agentos_skills/upskill` integration to propose edits to `SKILL.md` payloads based on failed task attempts.
-- **Analytics Engine**: Aggregates metrics from the `agentos_memory.thoughts` table to analyze token density, cost, and "reasoning lift".
+- **Skill Optimizer**: Uses the `skills/upskill` integration to propose edits to `SKILL.md` payloads based on failed task attempts.
+- **Analytics Engine**: Aggregates metrics from the `memory.thoughts` table to analyze token density, cost, and "reasoning lift".
 
 ## Testing Workflow
 

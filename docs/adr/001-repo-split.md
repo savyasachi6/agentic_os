@@ -12,9 +12,9 @@ The "Agent OS" started as a monolithic codebase. As features like the LLM Router
 
 We decided to decouple the system into three primary internal projects:
 
-1. **agentos_core**: Orchestration and execution logic.
-2. **agentos_memory**: Data storage and vector RAG.
-3. **agentos_skills**: Behavioral indexing and prompt engineering.
+1. **core**: Orchestration and execution logic.
+2. **memory**: Data storage and vector RAG.
+3. **skills**: Behavioral indexing and prompt engineering.
 
 Initially, these projects are organized as subdirectories within a single monorepo for developer convenience, but each is structured to be independently publishable or moved to separate Git repositories in the future.
 

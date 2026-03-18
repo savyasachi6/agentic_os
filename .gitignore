@@ -3,6 +3,7 @@ agent_memory/
 agent_skills/
 lane_queue/
 sandbox/
+checkpoints/
 __pycache__/
 *.pyc
 .env

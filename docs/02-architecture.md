@@ -20,16 +20,16 @@ graph TD
 
 ### Component Details
 
-1. **Agent App Orchestrator (`agentos_core`)**:
+1. **Agent App Orchestrator (`core`)**:
     - Manage state machine for each session.
     - Coordinate with Memory and Skills layers during the ReAct loop.
     - Dispatches actions to the Tools API via a durable queue.
 
-2. **Memory & RAG Backend (`agentos_memory`)**:
+2. **Memory & RAG Backend (`memory`)**:
     - Handles vector embeddings and similarity search.
     - Implements the "Gatekeeper" pattern to validate RAG outputs against source documents.
 
-3. **Skill Manager (`agentos_skills`)**:
+3. **Skill Manager (`skills`)**:
     - Dynamically loads and indexes Markdown-based skill definitions.
     - Provides a retrieval interface to inject relevant "reasoning recipes" into the prompt context.
 
@@ -42,7 +42,7 @@ graph TD
 #### Reasoning Loop (Simplified)
 
 1. **User input** received via WebSocket.
-2. **Context Retrieval**: App pulls relevant memories (from `agentos_memory`) and skills (from `agentos_skills`).
+2. **Context Retrieval**: App pulls relevant memories (from `memory`) and skills (from `skills`).
 3. **Reasoning Turn**: App calls LLM through the Router to decide on the next action.
 4. **Action Dispatch**: App enqueues a tool call for the Tools API.
 5. **Execution**: Tools API runs the command and returns the result.

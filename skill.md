@@ -15,8 +15,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Discrete reasoning steps (thoughts), tool invocations, and final formulated response.
 - **Preconditions / Assumptions**: `LLMRouter` must be initialized and healthy.
 - **Failure Modes**: Hallucination in tool arguments, exceeding maximum reasoning turns.
-- **Implementation**: [agent_core/loop.py](agentos_core/agent_core/loop.py)
-- **Tests**: [test_react.py](agentos_core/tests/test_react.py)
+- **Implementation**: [agent_core/loop.py](core/agent_core/loop.py)
+- **Tests**: [test_react.py](core/tests/test_react.py)
 - **Related Skills**: [LLM Request Routing](#skill-llm-request-routing), [Semantic Storage](#skill-semantic-storage).
 - **Signals / Metrics**: Success rate (task completion), average reasoning turns, latency per turn.
 
@@ -31,8 +31,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Batched inference results mapped back to original request futures.
 - **Preconditions / Assumptions**: Local LLM provider (Ollama/vLLM) must be reachable.
 - **Failure Modes**: Batch timeout reached with insufficient requests, backend service overload.
-- **Implementation**: [llm_router/](agentos_core/llm_router/)
-- **Tests**: [test_llm_router.py](agentos_core/tests/test_llm_router.py)
+- **Implementation**: [llm_router/](core/llm_router/)
+- **Tests**: [test_llm_router.py](core/tests/test_llm_router.py)
 - **Related Skills**: [ReAct Reasoning](#skill-react-reasoning).
 - **Signals / Metrics**: Average batch size, request wait time (ms), throughput (requests/sec).
 
@@ -47,8 +47,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Top-K ranked results based on cosine similarity of 1024-d embeddings.
 - **Preconditions / Assumptions**: PostgreSQL instance with `pgvector` enabled and `EMBED_MODEL` available in Ollama.
 - **Failure Modes**: Embedding service latency, vector space collisions (low dimensionality).
-- **Implementation**: [agent_memory/vector_store.py](agentos_memory/agent_memory/vector_store.py)
-- **Tests**: [test_productivity_rag.py](agentos_core/tests/test_productivity_rag.py)
+- **Implementation**: [agent_memory/vector_store.py](memory/agent_memory/vector_store.py)
+- **Tests**: [test_productivity_rag.py](core/tests/test_productivity_rag.py)
 - **Related Skills**: [Resilient RAG](#skill-resilient-rag).
 - **Signals / Metrics**: Retrieval precision@k, embedding generation latency.
 
@@ -67,8 +67,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Lifting Mechanism**: It "lifts" the dimension of standard tool calls by analyzing the *relationships* between sub-systems (Memory <-> Skills <-> Core) rather than just calling individual functions.
 - **Preconditions / Assumptions**: Access to root-level context and metadata for all sub-services.
 - **Failure Modes**: State space explosion, conflicting subsystem goals.
-- **Implementation**: [agent_core/antigravity.py](agentos_core/agent_core/antigravity.py)
-- **Tests**: [test_antigravity.py](agentos_core/tests/test_antigravity.py)
+- **Implementation**: [agent_core/antigravity.py](core/agent_core/antigravity.py)
+- **Tests**: [test_antigravity.py](core/tests/test_antigravity.py)
 - **Related Skills**: [Resilient RAG](#skill-resilient-rag), [Skill Indexing](#skill-skill-indexing).
 - **Signals / Metrics**: Cross-module resolution rate, planning efficiency, "Insight lift" (new connections discovered).
 
@@ -83,8 +83,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Indexed vector chunks and metadata in `pgvector`.
 - **Preconditions / Assumptions**: `Semantic Storage` must be online.
 - **Failure Modes**: Invalid Markdown structure in skill files, duplication of skill names.
-- **Implementation**: [agent_skills/indexer.py](agentos_skills/agent_skills/indexer.py)
-- **Tests**: [test_productivity_docs.py](agentos_core/tests/test_productivity_docs.py)
+- **Implementation**: [agent_skills/indexer.py](skills/agent_skills/indexer.py)
+- **Tests**: [test_productivity_docs.py](core/tests/test_productivity_docs.py)
 - **Related Skills**: [Semantic Storage](#skill-semantic-storage).
 - **Signals / Metrics**: Sync latency, indexing coverage (found vs. indexed).
 
@@ -99,8 +99,8 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Verified context snippets with confidence scores.
 - **Preconditions / Assumptions**: Knowledge base must be indexed.
 - **Failure Modes**: Divergence in multi-hop reasoning, validation rejection (false negatives).
-- **Implementation**: [agent_rag/](agentos_memory/agent_rag/)
-- **Tests**: [test_productivity_rag.py](agentos_core/tests/test_productivity_rag.py)
+- **Implementation**: [agent_rag/](memory/agent_rag/)
+- **Tests**: [test_productivity_rag.py](core/tests/test_productivity_rag.py)
 - **Related Skills**: [Semantic Storage](#skill-semantic-storage), [Skill Indexing](#skill-skill-indexing).
 - **Signals / Metrics**: Hallucination rate (verified), context relevance score.
 
@@ -123,9 +123,9 @@ graph TD
 
 ## Extension and Integration Points
 
-- **New Core Tools**: Register in `agentos_core/agent_core/tools/`.
-- **New Specialized Skills**: Drop a `SKILL.md` into `agentos_skills/skills/`.
-- **Domain Modules**: Create internal modules in `agentos_core/` (like `devops_auto`).
+- **New Core Tools**: Register in `core/agent_core/tools/`.
+- **New Specialized Skills**: Drop a `SKILL.md` into `skills/skills/`.
+- **Domain Modules**: Create internal modules in `core/` (like `devops_auto`).
 
 ## Next Skills to Add (Roadmap)
 

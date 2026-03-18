@@ -3,7 +3,7 @@ import os
 from unittest.mock import AsyncMock, patch, MagicMock
 from projects.desktop_agent.main import run_organizer
 from projects.desktop_agent.models import FileCategory
-from agentos_core.lane_queue.models import Command, CommandType, CommandStatus
+from lane_queue.models import Command, CommandType, CommandStatus
 
 @pytest.mark.asyncio
 async def test_full_workflow_execution(tmp_path):
@@ -22,10 +22,10 @@ async def test_full_workflow_execution(tmp_path):
             mock_llm.return_value = FileCategory(category="Documents", confidence=0.9, reasoning="Mocked")
             
             # Mock CommandStore to ignore DB
-            with patch("agentos_core.lane_queue.store.get_db_connection"):
-                 with patch("agentos_core.lane_queue.store.CommandStore.create_lane") as mock_lane:
+            with patch("core.lane_queue.store.get_db_connection"):
+                 with patch("core.lane_queue.store.CommandStore.create_lane") as mock_lane:
                      mock_lane.return_value = MagicMock(id="lane-123")
-                     with patch("agentos_core.lane_queue.store.CommandStore.enqueue") as mock_enqueue:
+                     with patch("core.lane_queue.store.CommandStore.enqueue") as mock_enqueue:
                          mock_enqueue.return_value = MagicMock(id="cmd-456")
                          
                          # Execute the run_organizer function (main logic)

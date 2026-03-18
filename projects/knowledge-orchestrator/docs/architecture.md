@@ -6,8 +6,8 @@ The `knowledge-orchestrator` is a meta-agent that synthesizes information across
 
 ```mermaid
 graph LR
-    Core[Agent OS Core] -->|Retrieval| Mem[agentos_memory]
-    Core -->|Retrieval| Skills[agentos_skills]
+    Core[Agent OS Core] -->|Retrieval| Mem[memory]
+    Core -->|Retrieval| Skills[skills]
     
     Orch[Knowledge Orchestrator] -->|Query| Core
     Orch -->|Aggregate| Summary[Synthesis Engine]
@@ -17,7 +17,7 @@ graph LR
 ## Key Modules
 
 - **Synthesis Engine**: Uses long-context LLMs to find contradictions or connections between different session histories and notes.
-- **Entity Extractor**: Processes unstructured thoughts to populate a relational knowledge graph stored in `agentos_memory`.
+- **Entity Extractor**: Processes unstructured thoughts to populate a relational knowledge graph stored in `memory`.
 - **Reporting Module**: Generates periodic "System State" and "Knowledge Map" reports for the user, highlighting missing documentation or skills.
 
 ## Retrieval Strategy

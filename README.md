@@ -27,10 +27,10 @@ graph TD
 
 ### Main Components
 
-- **[Agent OS Gateway](agentos_gateway/)**: The orchestration and CLI hub.
-- **[Agent OS Core](agentos_core/)**: The reasoning engine. Manages ReAct loops and secure tool sandboxing.
-- **[Agent Memory](agentos_memory/)**: The semantic storage layer. Handles `pgvector` RAG and long-term history.
-- **[Agent Skills](agentos_skills/)**: The capability registry. Indexes and retrieves specialized behaviors.
+- **[Agent OS Gateway](gateway/)**: The orchestration and CLI hub.
+- **[Agent OS Core](core/)**: The reasoning engine. Manages ReAct loops and secure tool sandboxing.
+- **[Agent Memory](memory/)**: The semantic storage layer. Handles `pgvector` RAG and long-term history.
+- **[Agent Skills](skills/)**: The capability registry. Indexes and retrieves specialized behaviors.
 - **[Agent OS Router](agentos_router/)**: Multi-objective contextual bandit for dynamic RAG depth optimization.
 
 ---
@@ -86,14 +86,14 @@ graph TD
 3. **Run the OS (Backend)**:
 
    ```bash
-   python -m agentos_gateway.main serve
+   python -m gateway.main serve
    ```
 
 4. **Run the Web UI**:
    - In a new terminal, start the Streamlit frontend. This connects to the `main.py serve` backend via WebSocket:
 
    ```bash
-   cd agentos_ui
+   cd ui
    streamlit run app.py
    ```
 
@@ -112,4 +112,4 @@ graph TD
 
 ## 🛠️ Development
 
-See [development setup](agentos_core/docs/architecture.md#development-setup) for details on testing, linting, and local debugging.
+See [development setup](core/docs/architecture.md#development-setup) for details on testing, linting, and local debugging.

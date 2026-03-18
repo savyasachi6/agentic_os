@@ -6,9 +6,9 @@ In a distributed agentic system, the reasoning loop (thinking) and side-effect e
 
 ## Decision
 
-We chose to implement a **Durable Lane-Based Command Queue** inside `agentos_core`.
+We chose to implement a **Durable Lane-Based Command Queue** inside `core`.
 
-- **Durable**: Every command is persisted to the `agentos_memory` SQL store before execution.
+- **Durable**: Every command is persisted to the `memory` SQL store before execution.
 - **Lane-Based**: Commands are grouped into "lanes" (e.g., `bash`, `python`, `devops`). A single lane provides sequential execution within that context, while multiple lanes can run in parallel without race conditions.
 
 ## Rationale

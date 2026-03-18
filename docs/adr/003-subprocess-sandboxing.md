@@ -2,7 +2,7 @@
 
 ## Context
 
-Executing arbitrary shell commands, Python scripts, or file I/O operations directly within the main `agentos_core` process is a significant security and stability risk. A single crashed tool or a malicious command could compromise the entire reasoning engine.
+Executing arbitrary shell commands, Python scripts, or file I/O operations directly within the main `core` process is a significant security and stability risk. A single crashed tool or a malicious command could compromise the entire reasoning engine.
 
 ## Decision
 
@@ -15,7 +15,7 @@ We chose to implement **Subprocess Sandboxing** using a dedicated `SandboxManage
 ## Rationale
 
 - **Security**: Prevents "breaking out" of the agent's reasoning loop. If a tool call is malicious or destructive, the damage is capped at the worker/subprocess level.
-- **Stability**: Resource leaks (memory, fd) or hang-ups in a tool do not affect the `agentos_core` process. The manager can simply kill and restart a misbehaving worker.
+- **Stability**: Resource leaks (memory, fd) or hang-ups in a tool do not affect the `core` process. The manager can simply kill and restart a misbehaving worker.
 - **Observability**: Every tool call to a worker is an HTTP request, providing a clear audit log of all system interactions.
 
 ## Consequences

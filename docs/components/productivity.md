@@ -1,6 +1,6 @@
 # Productivity Domain
 
-The **Productivity Domain** within `agentos_core` handles task management, personal organization, and user-centric planning.
+The **Productivity Domain** within `core` handles task management, personal organization, and user-centric planning.
 
 ## Responsibility
 
@@ -11,7 +11,7 @@ The primary goal of this component is to translate high-level user goals into ac
 - **Task Planner (`productivity/task_planner.py`)**:
   - Analyzes user requests for time-sensitive constraints.
   - Decomposes complex goals into prioritized sub-tasks.
-  - Integrates with the `Execution Tree` in `agentos_memory` for long-term tracking.
+  - Integrates with the `Execution Tree` in `memory` for long-term tracking.
 
 - **Workspace Manager**:
   - Tracks context across multiple active projects.
@@ -22,7 +22,7 @@ The primary goal of this component is to translate high-level user goals into ac
 - **Inbound**:
   - `agent_core.loop`: Requests planning assistance for multi-step goals.
 - **Outbound**:
-  - `agentos_memory.tree_store`: Persists plans and progress nodes.
+  - `memory.tree_store`: Persists plans and progress nodes.
 
 ## Extension Points
 

@@ -110,7 +110,7 @@ class SQLAgent:
 
 ## 4. Implementation Layout
 
-The Multi-Agent architecture is physically segregated in `agentos_core/agent_core/`:
+The Multi-Agent architecture is physically segregated in `core/agent_core/`:
 
 * `loop/coordinator.py`: Houses `CoordinatorAgent` - The central ReAct thought loop utilizing `tree_store` memory.
 * `loop/thought_loop.py` & `routing.py`: Standalone Python methods mapping ReAct strings to task agents.

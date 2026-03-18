@@ -13,11 +13,11 @@ Agentic OS relies on PostgreSQL with the `pgvector` extension for all semantic a
 
 ## The Resilient RAG Pipeline
 
-Located primarily in `agentos_memory/agent_rag/`, the pipeline ensures high-fidelity retrieval.
+Located primarily in `memory/agent_rag/`, the pipeline ensures high-fidelity retrieval.
 
 ### 1. Ingestion
 
-Documents are ingested, cleaned of noise, and chunked using the `agentos_skills` indexer logic. Embeddings are generated using local models like `nomic-embed-text`.
+Documents are ingested, cleaned of noise, and chunked using the `skills` indexer logic. Embeddings are generated using local models like `nomic-embed-text`.
 
 ### 2. Hybrid Retrieval
 

@@ -1,9 +1,9 @@
 from typing import List, Optional
 import os
 from projects.desktop_agent.models import FileCategory
-from agentos_core.agent_core.llm import generate_structured_output
-from agentos_core.lane_queue.store import CommandStore
-from agentos_core.lane_queue.models import CommandType
+from core.core.llm import generate_structured_output
+from lane_queue.store import CommandStore
+from lane_queue.models import CommandType
 
 class FileOrganizer:
     """

@@ -18,9 +18,9 @@ graph TD
 ## Core Components
 
 - **Agent Node**: Orchestrates high-level sysadmin tasks using the ReAct loop.
-- **Tools**: `run_shell`, `read_file`, `write_file` (all executed in the isolated `agentos_core.sandbox`).
+- **Tools**: `run_shell`, `read_file`, `write_file` (all executed in the isolated `core.sandbox`).
 - **Monitoring**: Leverages `list_processes` and `get_system_info` to detect resource leaks or downtime.
-- **Security**: All actions are signed with JWTs and recorded in the `events` table in `agentos_memory` for full auditability.
+- **Security**: All actions are signed with JWTs and recorded in the `events` table in `memory` for full auditability.
 
 ## Automated Remediation Loop
 
