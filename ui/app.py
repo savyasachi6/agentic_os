@@ -1,5 +1,6 @@
 import streamlit as st
 import asyncio
+import threading
 import websockets
 import json
 import requests
@@ -306,7 +307,22 @@ if page == "💬 Terminal":
         st.session_state.is_processing = True
         with st.chat_message("assistant"):
             message_container = st.container()
-            asyncio.run(send_message_and_receive_stream(prompt, st.session_state.session_id, message_container))
+            # Streamlit has its own internal event loop — calling asyncio.run() directly
+            # creates a nested/conflicting loop that causes 'All connection attempts failed'.
+            # The fix: run the coroutine in a fresh thread with its own event loop.
+            result_container = []
+            def _run_ws():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(
+                        send_message_and_receive_stream(prompt, st.session_state.session_id, message_container)
+                    )
+                finally:
+                    loop.close()
+            t = threading.Thread(target=_run_ws, daemon=True)
+            t.start()
+            t.join()
         st.rerun()
 
 elif page == "🧩 Skill Explorer": # Skill Explorer Page
