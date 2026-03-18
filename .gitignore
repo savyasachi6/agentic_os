@@ -1,8 +1,4 @@
-agent_core/
-agent_memory/
-agent_skills/
-lane_queue/
-sandbox/
+# Build and checkpoints
 checkpoints/
 __pycache__/
 *.pyc
