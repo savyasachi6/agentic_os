@@ -28,26 +28,6 @@ services:
     ports:
       - "9222:9222"
 
-  agent-core:
-    build:
-      context: .
-      dockerfile: core/Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - POSTGRES_HOST=postgres
-      - REDIS_HOST=redis
-      - LIGHTPANDA_CDP_URL=ws://lightpanda:9222
-      - TOOLS_API_URL=http://tools-api:9100
-      - LLM_MODEL=qwen3-vl:8b
-      - EMBED_MODEL=mxbai-embed-large
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
   tools-api:
     build:
       context: .
@@ -55,8 +35,39 @@ services:
     expose:
       - "9100"
     environment:
-      - WORKER_PORT=9100
+      WORKER_PORT: "9100"
     command: ["python", "sandbox/worker.py", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
+
+  agent-core:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      # Cache
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      # Browser
+      LIGHTPANDA_CDP_URL: ws://lightpanda:9222
+      # Tools sandbox
+      TOOLS_API_URL: http://tools-api:9100
+      # LLM / Embeddings — Ollama runs on the Docker host
+      LLM_MODEL: qwen3-vl:8b
+      EMBED_MODEL: mxbai-embed-large
+      OLLAMA_HOST: http://host.docker.internal:11434
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
   agent-ui:
     build:
@@ -65,6 +76,15 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - AGENT_API_URL=http://agent-core:8000
+      # Database (UI reads session history directly)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      # Point UI at the backend service, not localhost
+      CORE_API_URL: http://agent-core:8000
+      CORE_WS_URL: ws://agent-core:8000/chat
+      PYTHONPATH: /app
     depends_on:
       - agent-core

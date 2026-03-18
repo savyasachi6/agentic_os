@@ -8,15 +8,22 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY ui/requirements.txt .
+# Install root project dependencies first
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy UI code
-COPY ui/ .
+# Install UI-specific dependencies
+COPY ui/requirements.txt ui-requirements.txt
+RUN pip install --no-cache-dir -r ui-requirements.txt
+
+# Copy all application code (monorepo structure)
+COPY . .
+
+# Ensure all project packages are importable (agent_memory, agent_config, etc.)
+ENV PYTHONPATH=/app
 
 # Expose Streamlit port
 EXPOSE 8501
 
-# Run Streamlit
-CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# Run Streamlit — we run from /app so sys.path resolution works correctly
+CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

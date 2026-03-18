@@ -24,9 +24,9 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Configuration constants
-CORE_API_URL = "http://localhost:8000"
-CORE_WS_URL = "ws://localhost:8000/chat"
+# Configuration constants — override via env vars in Docker
+CORE_API_URL = os.environ.get("CORE_API_URL", "http://localhost:8000")
+CORE_WS_URL = os.environ.get("CORE_WS_URL", "ws://localhost:8000/chat")
 
 @st.cache_resource
 def init_db():
