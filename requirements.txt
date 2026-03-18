@@ -12,3 +12,6 @@ pyjwt
 cryptography
 pytest
 pywin32; platform_system == 'Windows'
+# Optional – browser tools (Lightpanda / Playwright CDP)
+# Run: pip install playwright && playwright install
+playwright; extra == "browser"

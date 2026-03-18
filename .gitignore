@@ -13,3 +13,16 @@ models/
 *.gguf
 *.bin
 *.safetensors
+*.npz
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# Temporary / scratch files
+tmp/
+tmp_*.py
+check_db.py
+debug_*.py
+migrate_*.py

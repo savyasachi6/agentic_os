@@ -16,8 +16,7 @@
     "venvPath": ".",
     "venv": ".venv",
     "extraPaths": [
-        ".",
-        "core"
+        "."
     ]
 }
 

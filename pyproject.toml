@@ -43,5 +43,9 @@ include = [
     "ui*",
 ]
 
+[project.optional-dependencies]
+# Install with: pip install -e ".[browser]"
+browser = ["playwright>=1.44.0"]
+
 [project.scripts]
 agent-os = "gateway.main:main"
