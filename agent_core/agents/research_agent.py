@@ -11,6 +11,14 @@ from agent_memory.cache import FractalCache
 from agent_rag.retrieval.retriever import HybridRetriever
 from agent_core.loop.thought_loop import parse_react_action
 
+try:
+    from agent_sandbox.browser_tools import handle_browser_navigate, PLAYWRIGHT_AVAILABLE  # type: ignore
+    from agent_sandbox.models import ToolCallRequest  # type: ignore
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    handle_browser_navigate = None
+    ToolCallRequest = None
+
 
 class ResearcherAgentWorker:
     """
@@ -110,6 +118,26 @@ class ResearcherAgentWorker:
                     except Exception as ex:
                         obs = f"Observation: Speculative Search Failed - {ex}"
                         
+                    messages.append({"role": "user", "content": obs})
+
+                elif action_type == "web_fetch":
+                    print(f"[ResearchAgent] Executing Web Fetch: {action_payload}")
+                    if not PLAYWRIGHT_AVAILABLE:
+                        obs = "Observation: web_fetch unavailable - playwright/lightpanda not running."
+                    else:
+                        try:
+                            payload_data = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
+                            url = payload_data.get("url", "")
+                            content_type = payload_data.get("content_type", "text")
+                            req = ToolCallRequest(path=url, args={"content_type": content_type})
+                            loop = asyncio.get_event_loop()
+                            resp = await loop.run_in_executor(None, handle_browser_navigate, req)
+                            if resp.success:
+                                obs = f"Observation: Page '{resp.result['title']}' at {url}:\n{resp.result['content']}"
+                            else:
+                                obs = f"Observation: web_fetch failed - {resp.error}"
+                        except Exception as ex:
+                            obs = f"Observation: web_fetch error - {ex}"
                     messages.append({"role": "user", "content": obs})
 
                 else:
