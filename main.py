@@ -99,6 +99,7 @@ def main():
 
     elif args.command == "docker-up":
         print("[Docker] Starting all services...")
+        subprocess.run(["docker-compose", "down"])
         subprocess.run(["docker-compose", "up", "-d", "--build"])
 
     elif args.command == "docker-down":
