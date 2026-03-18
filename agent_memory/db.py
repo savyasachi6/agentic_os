@@ -69,15 +69,33 @@ def _reset_pool():
 
 
 def init_schema():
-    """Run schema.sql against the database to ensure all tables exist."""
+    """Run schema.sql against the database to ensure all tables exist.
+
+    Uses autocommit so that each DDL statement runs in its own implicit
+    transaction (required for CREATE EXTENSION outside a transaction block).
+    Errors like duplicate extension/type are silently skipped via IF NOT EXISTS.
+    """
     schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
     with open(schema_path, "r") as f:
         sql = f.read()
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
+    conn = None
+    if _pool is None:
+        init_db_pool()
+    conn = _pool.getconn()
+    try:
+        old_autocommit = conn.autocommit
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+        except (psycopg2.errors.DuplicateObject, psycopg2.errors.UniqueViolation) as e:
+            logger.warning("[memory] Schema already partially applied, skipping: %s", e)
+        finally:
+            conn.autocommit = old_autocommit
+    finally:
+        _pool.putconn(conn)
+
     logger.info("[memory] Schema initialized.")
     print("[memory] Schema initialized.")
 
