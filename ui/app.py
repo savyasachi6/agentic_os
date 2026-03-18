@@ -1,6 +1,7 @@
 import streamlit as st
 import asyncio
 import threading
+from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
 import websockets
 import json
 import requests
@@ -141,75 +142,63 @@ def get_router_stats():
 async def send_message_and_receive_stream(message: str, session_id: str, message_container):
     """Connect to the websocket, send the message, and stream the response to the UI."""
     try:
-        # Disable ping_interval to prevent silent disconnects on long-running agent tasks
         async with websockets.connect(CORE_WS_URL, ping_interval=None) as ws:
-            # Send the user message
             payload = json.dumps({"message": message, "session_id": session_id})
             await ws.send(payload)
-            
-            # Prepare UI placeholders for the streaming response
+
             current_thought = ""
             current_response = ""
-            
-            # Create a placeholder in the UI for the active response
+
             with message_container:
                 thought_expander = st.empty()
-                status_placeholder = st.empty()   # single updating status bar
+                status_placeholder = st.empty()
                 response_placeholder = st.empty()
-            
+
             while True:
                 response = await ws.recv()
                 data = json.loads(response)
                 msg_type = data.get("type")
                 content = data.get("content", "")
-                
+
                 if msg_type == "session":
-                    # The server assigned or confirmed the session ID
                     if data.get("session_id") != st.session_state.session_id:
                         st.session_state.session_id = data.get("session_id")
-                        
+
                 elif msg_type == "thought":
-                    # Internal reasoning
                     current_thought += f"\n\n**Thought:**\n{content}"
                     thought_expander.expander("Agent Reasoning", expanded=True).markdown(current_thought)
                     st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "thought"})
-                    
+
                 elif msg_type == "status":
-                    # Transient keepalive — update a single status bar in-place,
-                    # never add a new bubble and never save to history.
                     status_placeholder.info(f"⏳ {content}")
 
                 elif msg_type == "observation":
-                    # Tool output
                     current_thought += f"\n\n**Observation:**\n```\n{content}\n```"
                     thought_expander.expander("Agent Reasoning", expanded=True).markdown(current_thought)
                     st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "observation"})
-                    
+
                 elif msg_type == "token":
-                    # Streaming final output chunk
                     current_response += content
                     response_placeholder.markdown(current_response + "▌")
-                    
+
                 elif msg_type == "final":
-                    # The final complete response
                     if content and not current_response:
                         current_response = content
-                    status_placeholder.empty()   # clear the waiting indicator
+                    status_placeholder.empty()
                     response_placeholder.markdown(current_response)
                     st.session_state.chat_history.append({"role": "assistant", "content": current_response, "type": "message"})
                     break
-                    
+
                 elif msg_type == "ping":
-                    # Keepalive from server
                     pass
-                    
+
                 elif msg_type == "error":
                     error_msg = f"Agent Error: {content}"
                     st.session_state.chat_history.append({"role": "assistant", "content": error_msg, "type": "message"})
                     break
-                    
+
     except Exception as e:
-        error_msg = f"WebSocket Connection Error: {e}\n\n(Is the Agentic OS backend `python main.py serve` running?)"
+        error_msg = f"WebSocket Connection Error: {e}\n\n(Is the Agentic OS backend running?)"
         st.session_state.chat_history.append({"role": "assistant", "content": error_msg, "type": "message"})
     finally:
         st.session_state.is_processing = False
@@ -307,11 +296,12 @@ if page == "💬 Terminal":
         st.session_state.is_processing = True
         with st.chat_message("assistant"):
             message_container = st.container()
-            # Streamlit has its own internal event loop — calling asyncio.run() directly
-            # creates a nested/conflicting loop that causes 'All connection attempts failed'.
-            # The fix: run the coroutine in a fresh thread with its own event loop.
-            result_container = []
+            # Streamlit uses uvloop internally, so asyncio.run() conflicts.
+            # The fix: run the coroutine in a fresh thread with its own event loop,
+            # AND propagate Streamlit's script run context so st.* calls work in the thread.
+            ctx = get_script_run_ctx()
             def _run_ws():
+                add_script_run_ctx(threading.current_thread(), ctx)
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
