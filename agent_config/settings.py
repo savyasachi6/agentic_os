@@ -58,7 +58,7 @@ class LLMRouterSettings(BaseSettings):
     batch_interval_ms: int = Field(default=50, validation_alias="ROUTER_BATCH_INTERVAL_MS")
     max_batch_size: int = Field(default=8, validation_alias="ROUTER_MAX_BATCH_SIZE")
     backend: str = Field(default="ollama", validation_alias="ROUTER_BACKEND")
-    ollama_base_url: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_BASE_URL")
+    ollama_base_url: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_HOST")
     llama_cpp_model_path: str = Field(default="models/qwen2.5-coder-7b-instruct-q4_k_m.gguf", validation_alias="LLAMA_CPP_MODEL_PATH")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
