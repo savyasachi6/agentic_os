@@ -12,8 +12,8 @@ import httpx
 
 from agent_config import queue_settings
 from agent_core.llm import LLMClient
-from security.jwt_auth import create_token
-from security.rbac import get_required_scope_for_tool
+from agent_security.jwt_auth import create_token
+from agent_security.rbac import get_required_scope_for_tool
 from .store import CommandStore
 from .models import Command, CommandType, CommandStatus
 
