@@ -123,11 +123,11 @@ async def cmd_submit(args):
     
     # Determine agent role
     role = AgentRole.RAG
-    if args.role == "sql":
-        role = AgentRole.SQL
+    if args.role == "sql" or args.role == "schema":
+        role = AgentRole.SCHEMA
         
     node = ts.add_node(Node(
-        chain_id=chain.id,
+        chain_id=chain.id or 0,
         agent_role=role,
         type=NodeType.TASK,
         content=args.task,
@@ -154,7 +154,8 @@ async def cmd_status(args):
     print(f"Task {node.id} Status: {node.status.value.upper()}")
     if node.status == NodeStatus.DONE:
         print("-" * 40)
-        print(node.result.get("message", node.result))
+        result_msg = node.result.get("message", node.result) if isinstance(node.result, dict) else node.result
+        print(result_msg)
     elif node.status == NodeStatus.FAILED:
         print(f"Error: {node.result}")
 

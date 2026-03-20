@@ -17,6 +17,7 @@ class AgentState(TypedDict):
     
     # For error tracking and self-healing conditions
     last_action_status: str  # "success", "error", or "pending"
+    retry_count: int         # Count of consecutive errors
     
     # Role-Based Access Control logic (Phase 6 Keycloak integration)
     user_roles: List[str]  # Added for Keycloak RBAC

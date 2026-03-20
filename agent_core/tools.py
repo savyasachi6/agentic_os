@@ -29,17 +29,22 @@ class ActionResult(BaseModel):
 # ---------------------------------------------------------------------------
 # 2. Sandboxing Layer
 # ---------------------------------------------------------------------------
+import pathlib
+
 class WorkspaceManager:
     # Use environment variable or default to project root / tmp
-    BASE_DIR = os.path.abspath(os.environ.get("WORKSPACE_DIR", os.getcwd()))
+    BASE_DIR = pathlib.Path(os.environ.get("WORKSPACE_DIR", os.getcwd())).resolve()
     
     @classmethod
     def sanitize_path(cls, path: str) -> str:
-        """Prevents directory traversal attacks (e.g., '../../etc/passwd')"""
-        safe_path = os.path.abspath(os.path.join(cls.BASE_DIR, path))
-        if not safe_path.startswith(cls.BASE_DIR):
-            raise PermissionError(f"Agent attempted to access forbidden path: {path}")
-        return safe_path
+        """Prevents directory traversal and symlink attacks"""
+        try:
+            target_path = pathlib.Path(cls.BASE_DIR, path).resolve(strict=False)
+            if not target_path.is_relative_to(cls.BASE_DIR):
+                raise PermissionError(f"Agent attempted to access forbidden path: {path}")
+            return str(target_path)
+        except Exception as e:
+            raise PermissionError(f"Path resolution failed: {e}")
 
 
 # ---------------------------------------------------------------------------
