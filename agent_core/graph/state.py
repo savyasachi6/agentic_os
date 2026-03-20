@@ -18,5 +18,7 @@ class AgentState(TypedDict):
     # For error tracking and self-healing conditions
     last_action_status: str  # "success", "error", or "pending"
     
-    # Role-Based Access Control logic (Phase 5 .NET integration placeholder)
-    user_claims: Dict[str, Any]
+    # Role-Based Access Control logic (Phase 6 Keycloak integration)
+    user_roles: List[str]  # Added for Keycloak RBAC
+    user_id: str           # For audit trails
+

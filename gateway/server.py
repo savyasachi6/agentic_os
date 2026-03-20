@@ -19,9 +19,9 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, HTTPException
 from pydantic import BaseModel
+from agent_core.utils.auth import KeycloakManager
 
 from agent_core.loop.coordinator import CoordinatorAgent
 from agent_memory.db import init_schema
@@ -156,9 +156,11 @@ class ChatResponse(BaseModel):
     response: str
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_post(req: ChatRequest):
-    """Simple POST endpoint for one-shot chat without WebSockets."""
+async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.verify_token)):
+    """Simple POST endpoint for one-shot chat with Keycloak RBAC."""
     session_id = req.session_id
+    user_id = auth_data.get("user_id")
+    user_roles = auth_data.get("roles", [])
     
     if session_id and session_id in _sessions:
         agent = _sessions[session_id]
@@ -166,8 +168,13 @@ async def chat_post(req: ChatRequest):
         agent = CoordinatorAgent(session_id=session_id)
         session_id = agent.state.session_id
         _sessions[session_id] = agent
-        
+    
+    # Inject auth context into AgentState
+    agent.state["user_id"] = user_id
+    agent.state["user_roles"] = user_roles
+    
     response = await agent.run_turn_async(req.message)
+
     return ChatResponse(session_id=session_id, response=response)
 
 
@@ -177,6 +184,34 @@ async def get_chat_history(session_id: str):
     vs = VectorStore()
     history = vs.get_session_history(session_id)
     return {"status": "success", "session_id": session_id, "history": history}
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+class FeedbackProxyRequest(BaseModel):
+    session_id: str
+    query_hash_rl: str
+    arm_index: int
+    user_feedback: int  # +1 or -1
+    depth: int = 0
+
+@app.post("/rl/chat/feedback")
+async def chat_feedback(req: FeedbackProxyRequest):
+    """Bridge UI feedback to the RL Router."""
+    from agent_rag.retrieval.rl_client import RLRoutingClient
+    rl_client = RLRoutingClient()
+    
+    # We simplified it here: the UI transmits the RL metadata it received during streaming.
+    result = await rl_client.submit_feedback(
+        query_hash=req.query_hash_rl,
+        arm_index=req.arm_index,
+        success=True, # User feedback implies they saw the answer
+        latency_ms=0, # Latency not applicable for delayed user feedback
+        user_feedback=req.user_feedback,
+        depth_used=req.depth
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------
