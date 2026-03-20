@@ -51,8 +51,8 @@ def init_db_pool():
         retryable_exceptions=_TRANSIENT_DB_ERRORS,
         label="DB.init_pool",
     )
-    logger.info("[memory] DB pool initialized → %s:%s/%s", db_settings.host, db_settings.port, db_settings.name)
-    print(f"[memory] DB pool initialized → {db_settings.host}:{db_settings.port}/{db_settings.name}")
+    logger.info("[memory] DB pool initialized -> %s:%s/%s", db_settings.host, db_settings.port, db_settings.name)
+    print(f"[memory] DB pool initialized -> {db_settings.host}:{db_settings.port}/{db_settings.name}")
 
 
 def _reset_pool():

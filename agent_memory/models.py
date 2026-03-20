@@ -13,6 +13,7 @@ class AgentRole(str, Enum):
     SCHEMA = "schema"
     TOOLS = "tools"
     ORCHESTRATOR = "orchestrator"
+    EMAIL = "email"
 
 
 class NodeType(str, Enum):

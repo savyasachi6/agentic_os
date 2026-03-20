@@ -793,6 +793,13 @@ CREATE TABLE IF NOT EXISTS agent_tool_executions (
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS bandit_weights (
+    id          SERIAL PRIMARY KEY,
+    model_name  VARCHAR(64) NOT NULL UNIQUE,
+    weights_bin BYTEA NOT NULL,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS speculative_metrics (
     id                    VARCHAR(64) PRIMARY KEY,
     query_hash            TEXT NOT NULL,

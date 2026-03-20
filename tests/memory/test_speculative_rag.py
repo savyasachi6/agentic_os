@@ -186,11 +186,12 @@ class TestCollapsedTree:
             mock_chunk.relations = []
 
             mock_retriever = MockRetriever.return_value
-            mock_retriever.retrieve.return_value = [mock_chunk]
+            mock_retriever.retrieve_async = AsyncMock(return_value=[mock_chunk])
 
             result = await collapsed_tree_retrieve(
                 query_type="factual", query="What is Python?", session_id="sess-1"
             )
+
 
             assert result["strategy"] == "factual_direct"
             assert result["answer"] == "Direct factual answer"
@@ -232,7 +233,8 @@ class TestCollapsedTree:
             mock_chunk.metadata = {}
             mock_chunk.relations = []
 
-            MockRetriever.return_value.retrieve.return_value = [mock_chunk]
+            MockRetriever.return_value.retrieve_async = AsyncMock(return_value=[mock_chunk])
+
 
             mock_drafter = MockDrafter.return_value
             mock_drafter.draft_parallel = AsyncMock(return_value=[
@@ -254,6 +256,7 @@ class TestCollapsedTree:
             assert result["strategy"] == "speculative_collapsed"
             assert result["answer"] == "Verified answer"
             assert result["confidence"] == 0.95
+
 
     @pytest.mark.asyncio
     async def test_fractal_recursion_depth_guard(self):
