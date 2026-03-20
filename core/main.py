@@ -169,6 +169,9 @@ def cmd_worker(args):
             elif args.agent == "research":
                 from agent_core.agents.research_agent import ResearcherAgentWorker
                 worker = ResearcherAgentWorker(model_name=args.model)
+            elif args.agent == "email":
+                from agent_core.agents.email_agent import EmailAgentWorker
+                worker = EmailAgentWorker()
             else:
                 print(f"Unknown agent type: {args.agent}")
                 import sys
@@ -209,7 +212,7 @@ def main():
 
     # worker
     worker_parser = subparsers.add_parser("worker", help="Start a specialist background worker")
-    worker_parser.add_argument("--agent", required=True, choices=["sql", "research", "code"], help="Type of agent to run")
+    worker_parser.add_argument("--agent", required=True, choices=["sql", "research", "code", "email"], help="Type of agent to run")
     worker_parser.add_argument("--model", default=None, help="Override LLM model name")
     worker_parser.set_defaults(func=cmd_worker)
 

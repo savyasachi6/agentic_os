@@ -15,17 +15,18 @@ import asyncio
 from typing import Optional
 import sys
 
-# Ensure project root is in sys.path
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+# Ensure project root is in Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 # Load root .env
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+load_dotenv(os.path.join(root_dir, ".env"))
 
 from agent_core.loop.coordinator import CoordinatorAgent
 from agent_core.agents.sql_agent import SQLAgentWorker

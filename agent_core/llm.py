@@ -1,14 +1,10 @@
-"""
-LLM client: adapter for local model inference via Ollama.
-Now routes all generation through the centralized LLMRouter.
-"""
-
 import time
 import asyncio
 from typing import List, Dict, Generator, Optional
 
 from agent_config import model_settings
 from llm_router import LLMRouter
+from llm_router.models import Priority
 
 class LLMClient:
     def __init__(
@@ -26,6 +22,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         session_id: str = "default_session",
+        priority: Priority = Priority.NORMAL
     ) -> str:
         """
         Asynchronous generation. Submits the request to the central LLMRouter
@@ -37,7 +34,8 @@ class LLMClient:
                 session_id=session_id,
                 model=self.model_name,
                 max_tokens=self.max_tokens,
-                temperature=self.temperature
+                temperature=self.temperature,
+                priority=priority
             )
         except Exception as e:
             err_msg = f"[Agent error: {e}]"
@@ -48,6 +46,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         retries: int = 3,
+        priority: Priority = Priority.NORMAL
     ) -> str:
         """
         Synchronous wrapper around generate_async. 
@@ -66,7 +65,7 @@ class LLMClient:
             print("[llm] Warning: Called sync generate() from within an async loop. This may fail.")
             raise RuntimeError("Cannot call synchronous generate() from an active asyncio event loop. Use generate_async().")
         else:
-            return asyncio.run(self.generate_async(messages))
+            return asyncio.run(self.generate_async(messages, priority=priority))
 
     def generate_streaming(
         self,
@@ -99,6 +98,7 @@ class LLMClient:
     def summarize(self, text: str, max_summary_tokens: int = 200) -> str:
         """
         Ask the model to produce a concise summary of the given text.
+        Uses SUMMARIZATION priority.
         """
         messages = [
             {
@@ -107,7 +107,7 @@ class LLMClient:
             },
             {"role": "user", "content": text},
         ]
-        return self.generate(messages)
+        return self.generate(messages, priority=Priority.SUMMARIZATION)
 
 from pydantic import BaseModel
 import json

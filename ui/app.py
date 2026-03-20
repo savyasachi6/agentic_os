@@ -136,6 +136,24 @@ def get_router_stats():
         print(f"Router stats fetch error: {e}")
     return None
 
+def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int):
+    """Submit user feedback to the Gateway."""
+    try:
+        payload = {
+            "session_id": st.session_state.session_id,
+            "query_hash_rl": query_hash_rl,
+            "arm_index": arm_index,
+            "user_feedback": feedback,
+            "depth": depth
+        }
+        response = requests.post(f"{CORE_API_URL}/rl/chat/feedback", json=payload, timeout=5)
+        if response.status_code == 200:
+            st.toast("Feedback recorded! 🚀" if feedback > 0 else "Feedback recorded. We'll improve! 🛠️")
+        else:
+            st.error(f"Feedback error: {response.text}")
+    except Exception as e:
+        st.error(f"Failed to submit feedback: {e}")
+
 # ---------------------------------------------------------------------------
 # WebSocket Communication
 # ---------------------------------------------------------------------------
@@ -177,6 +195,10 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     thought_expander.expander("Agent Reasoning", expanded=True).markdown(current_thought)
                     st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "observation"})
 
+                elif msg_type == "rl_metadata":
+                    # Store RL metadata for the NEXT final message
+                    st.session_state.last_rl_metadata = json.loads(content)
+
                 elif msg_type == "token":
                     current_response += content
                     response_placeholder.markdown(current_response + "▌")
@@ -184,9 +206,22 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                 elif msg_type == "final":
                     if content and not current_response:
                         current_response = content
+                    
+                    if not current_response:
+                        current_response = "*(The agent was unable to produce a response. Please check the 'Agent Reasoning' logs above for details.)*"
+
                     status_placeholder.empty()
                     response_placeholder.markdown(current_response)
-                    st.session_state.chat_history.append({"role": "assistant", "content": current_response, "type": "message"})
+                    
+                    # Store RL metadata with the message for feedback buttons
+                    msg_metadata = st.session_state.get("last_rl_metadata", {})
+                    st.session_state.chat_history.append({
+                        "role": "assistant", 
+                        "content": current_response, 
+                        "type": "message",
+                        "metadata": msg_metadata
+                    })
+                    st.session_state.last_rl_metadata = {} # Reset
                     break
 
                 elif msg_type == "ping":
@@ -276,6 +311,19 @@ if page == "💬 Terminal":
         if msg["type"] == "message":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+                
+                # Show feedback buttons for assistant messages with RL metadata
+                metadata = msg.get("metadata")
+                if msg["role"] == "assistant" and metadata and metadata.get("query_hash_rl"):
+                    qh = metadata["query_hash_rl"]
+                    arm = metadata["arm_index"]
+                    depth = metadata.get("depth", 0)
+                    
+                    c1, c2, c3 = st.columns([0.05, 0.05, 0.9])
+                    if c1.button("👍", key=f"up_{qh}"):
+                        submit_feedback(qh, arm, depth, 1)
+                    if c2.button("👎", key=f"down_{qh}"):
+                        submit_feedback(qh, arm, depth, -1)
         elif msg["type"] == "thought":
             with st.chat_message("assistant", avatar="🧠"):
                 with st.expander("Agent Thought", expanded=False):

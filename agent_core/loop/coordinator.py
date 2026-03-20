@@ -2,6 +2,8 @@ import os
 import asyncio
 import uuid
 import traceback
+import json
+from datetime import datetime
 from typing import Optional
 
 from agent_config import queue_settings
@@ -79,6 +81,8 @@ class CoordinatorAgent:
             if os.path.exists(proj_prompt_path):
                 with open(proj_prompt_path, "r") as f:
                     self.global_system_prompt += f"\n\nPROJECT ({self.project_name}) RULES:\n{f.read()}"
+            else:
+                self.global_system_prompt += f"\n\nYou are currently operating within the {self.project_name} project context."
 
     def _add_context_node(self, node_type: NodeType, content: str) -> Node:
         """Helper to append into the semantic tree store."""
@@ -110,7 +114,8 @@ class CoordinatorAgent:
             tree_nodes, _ = self.tree_store.build_context(self.chain.id, query=user_input, limit=5)
             tree_context = "\n".join([f"[{n['role']}] {n['content']}" for n in tree_nodes])
 
-            system_msg = f"{self.global_system_prompt}\n\n[Skill Context]\n{skill_context}\n\n[Tree History]\n{tree_context}"
+            current_datetime = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+            system_msg = f"{self.global_system_prompt}\n\n[Current Date/Time]\n{current_datetime}\n\n[Skill Context]\n{skill_context}\n\n[Tree History]\n{tree_context}"
             messages = [{"role": "system", "content": system_msg}]
             messages.extend(self.state.history)
 
@@ -152,6 +157,7 @@ class CoordinatorAgent:
                     "sql": AgentRole.SCHEMA,
                     "research": AgentRole.RAG,
                     "code": AgentRole.TOOLS,
+                    "email": AgentRole.EMAIL,
                     "respond": AgentRole.ORCHESTRATOR
                 }
                 agent_role = role_mapping.get(agent_type, AgentRole.TOOLS)
@@ -178,9 +184,20 @@ class CoordinatorAgent:
 
                 # Poll till done (Blocking wrapper)
                 result = await self._wait_for_task(task_node.id, agent_type, status_callback)
-                observation_msg = f"Task completed by {agent_type}.\nResult: {result}"
+                
+                if isinstance(result, dict) and "error" in result:
+                    observation_msg = f"Task FAILED by {agent_type}.\nError: {result['error']}"
+                else:
+                    observation_msg = f"Task completed by {agent_type}.\nResult: {result}"
                 
                 # Feedback loop
+                if status_callback and isinstance(result, dict) and "query_hash_rl" in result:
+                    await status_callback("rl_metadata", json.dumps({
+                        "query_hash_rl": result["query_hash_rl"],
+                        "arm_index": result["arm_index"],
+                        "depth": result.get("depth", 0)
+                    }))
+
                 self.state.add_message("user", observation_msg)
                 messages.append({"role": "assistant", "content": response_text})
                 messages.append({"role": "user", "content": f"Observation: {observation_msg}"})

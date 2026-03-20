@@ -56,6 +56,7 @@ class FeedbackService:
             auditor_score=request.auditor_score,
             depth_used=request.depth_used,
             min_sufficient_depth=request.min_sufficient_depth,
+            user_feedback=request.user_feedback,
         )
 
         # If tool_calls are provided, compute the differentiated RelyToolBench utility
@@ -68,6 +69,7 @@ class FeedbackService:
                 success=request.success,
                 latency_ms=request.latency_ms,
                 tool_calls=domain_tool_calls,
+                user_feedback=request.user_feedback,
             )
             reliable_pass = self._reward.is_reliable_pass(
                 success=request.success,

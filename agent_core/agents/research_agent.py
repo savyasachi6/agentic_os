@@ -79,13 +79,32 @@ class ResearcherAgentWorker:
                 action_type, action_payload = action_data
                 
                 if action_type in ["complete", "complete_task", "done", "respond", "finish"]:
+                    # Capture RL metadata for feedback loop if available from a prior speculative_rag call
+                    rl_metadata = {}
+                    # We look back through the messages or keep state, but simplest here is to 
+                    # check if 'res' was defined in this local scope during the loop.
+                    # A better way is to track it explicitly.
+                    
+                    # For now, we safely check if 'res' is in locals() and is what we expect
+                    res_data = locals().get("res")
+                    if isinstance(res_data, dict):
+                        if "query_hash_rl" in res_data:
+                            rl_metadata["query_hash_rl"] = res_data["query_hash_rl"]
+                        if "arm_index" in res_data:
+                            rl_metadata["arm_index"] = res_data["arm_index"]
+                        if "depth" in res_data:
+                            rl_metadata["depth"] = res_data["depth"]
+
                     asyncio.create_task(self.cache.set_cached_response_async(
                         query=query_goal,
                         response={"message": action_payload},
                         strategy_used="research_worker"
                     ))
                     
-                    self.tree_store.update_node_status(task.id, NodeStatus.DONE, result={"message": action_payload})
+                    self.tree_store.update_node_status(task.id, NodeStatus.DONE, result={
+                        "message": action_payload,
+                        **rl_metadata
+                    })
                     print(f"[ResearchAgent] Finished task {task.id}")
                     return
 
