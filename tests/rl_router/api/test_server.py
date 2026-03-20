@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from rl_router.main import app
+from rl_router.server import app
 
 
 @pytest.fixture

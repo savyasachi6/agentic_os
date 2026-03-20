@@ -107,6 +107,7 @@ graph TD
 - **[RL Router Specs](docs/06-rl-router.md)**: Details on the contextual bandit logic.
 - **[Internal API Reference](docs/api.md)**: Full API documentation.
 - **[Security & Sandboxing](docs/04-security-and-sandboxing.md)**: Isolation protocols.
+- **[AI Agent Guidelines](AGENTS.md)**: Coding standards and boundaries for AI coding agents.
 
 ---
 

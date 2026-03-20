@@ -1,13 +1,20 @@
 import requests
-from jose import jwt
 from fastapi import Request, HTTPException
 import os
+from agent_config import security_settings
+from loguru import logger
 
-# These would ideally come from environment variables
-KEYCLOAK_URL = os.getenv("KEYCLOAK_URL", "http://localhost:8080/realms/myrealm")
-CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "agentic-os-kernel")
-CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "your-client-secret")
-KEYCLOAK_PUBLIC_KEY = os.getenv("KEYCLOAK_PUBLIC_KEY", "PUBLIC_KEY_OR_SECRET")
+# Strictly load configurations from Pydantic matching the .env
+KEYCLOAK_URL = security_settings.keycloak_url
+CLIENT_ID = security_settings.keycloak_client_id
+CLIENT_SECRET = security_settings.keycloak_client_secret
+
+import jwt as pyjwt # Using pyjwt instead of jose if not colliding
+from jwt import PyJWKClient
+
+# Cache the JWKS client for performance across requests
+jwks_url = f"{KEYCLOAK_URL}/protocol/openid-connect/certs"
+jwks_client = PyJWKClient(jwks_url)
 
 class KeycloakManager:
     @staticmethod
@@ -23,7 +30,7 @@ class KeycloakManager:
             response.raise_for_status()
             return response.json().get("access_token")
         except Exception as e:
-            print(f"Error fetching service account token: {e}")
+            logger.error(f"Error fetching service account token: {e}")
             return None
 
     @staticmethod
@@ -35,10 +42,21 @@ class KeycloakManager:
         
         try:
             token = auth_header.split(" ")[1]
-            # In production, fetch public key from KEYCLOAK_URL/protocol/openid-connect/certs
-            payload = jwt.decode(token, KEYCLOAK_PUBLIC_KEY, audience="account", algorithms=["RS256"])
+            
+            # Fetch signing key dynamically
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            
+            # Validate token with pyjwt
+            payload = pyjwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience="account",
+                options={"verify_aud": False} # Adjust audience validation depending on Keycloak setup
+            )
+            
             roles = payload.get("realm_access", {}).get("roles", [])
             return {"user_id": payload.get("sub"), "roles": roles}
         except Exception as e:
-            print(f"JWT Verification failed: {e}")
+            logger.error(f"JWT Verification failed: {e}")
             raise HTTPException(status_code=401, detail="Invalid Token")

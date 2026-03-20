@@ -38,7 +38,16 @@ class MCPToolBridge:
     @staticmethod
     def get_dotnet_bridge(project_path: str = "./McpServer"):
         """Utility to quickly connect to the local .NET MCP server"""
+        # Execute the compiled binary directly to avoid the 'dotnet run' latency.
+        # Ensure the project has been built beforehand (e.g., dotnet build -c Release)
+        binary_path = os.path.join(project_path, "bin", "Release", "net8.0", "McpServer.exe")
+        if not os.path.exists(binary_path):
+            # Fallback for linux/mac or uncompiled state if needed, though instructions assume compiled
+            binary_path = os.path.join(project_path, "bin", "Release", "net8.0", "McpServer")
+            if not os.path.exists(binary_path):
+                 print(f"Warning: Compiled MCP Server not found at {binary_path}. Please build it.")
+        
         return MCPToolBridge(
-            command="dotnet", 
-            args=["run", "--project", project_path]
+            command=binary_path, 
+            args=[]
         )

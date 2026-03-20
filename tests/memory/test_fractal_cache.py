@@ -23,8 +23,8 @@ sys.modules.setdefault("pgvector", MagicMock())
 sys.modules.setdefault("pgvector.psycopg2", MagicMock())
 sys.modules.setdefault("ollama", MagicMock())
 
-import memory.cache as cache_module
-from memory.cache import FractalCache, SemanticCache
+import agent_memory.cache as cache_module
+from agent_memory.cache import FractalCache, SemanticCache
 
 
 class TestFractalCache:

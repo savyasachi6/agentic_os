@@ -123,6 +123,9 @@ class SecuritySettings(BaseSettings):
     jwt_secret: str = Field(default="super-secret-key", validation_alias="JWT_SECRET")
     jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
     jwt_expiry_minutes: int = Field(default=60, validation_alias="JWT_EXPIRY_MINUTES")
+    keycloak_url: str = Field(default="http://localhost:8080/realms/myrealm", validation_alias="KEYCLOAK_URL")
+    keycloak_client_id: str = Field(default="agentic-os-kernel", validation_alias="KEYCLOAK_CLIENT_ID")
+    keycloak_client_secret: str = Field(default="your-client-secret", validation_alias="KEYCLOAK_CLIENT_SECRET")
     
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
