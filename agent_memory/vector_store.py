@@ -159,6 +159,63 @@ class VectorStore:
                 results = [dict(zip(columns, row)) for row in cur.fetchall()]
                 return results, is_degraded
 
+    def search_skills_relational(self, query: str, limit: int = 5) -> tuple[List[Dict[str, Any]], bool]:
+        """Performs two-hop relational search to gather expanded context. Returns (results, is_degraded)."""
+        query_vec, is_degraded = self.generate_embedding(query)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH semantic_matches AS (
+                        SELECT
+                            s.id AS skill_id, s.name, s.description, s.eval_lift,
+                            c.chunk_type, c.heading, c.content,
+                            1 - (c.embedding <=> %s::vector) AS score,
+                            false AS is_relational
+                        FROM skill_chunks c
+                        JOIN knowledge_skills s ON c.skill_id = s.id
+                        ORDER BY c.embedding <=> %s::vector
+                        LIMIT %s
+                    ),
+                    related_skills AS (
+                        SELECT DISTINCT target_entity_id AS skill_id
+                        FROM entity_relations er
+                        JOIN semantic_matches sm ON er.source_entity_id = sm.skill_id
+                        WHERE er.source_entity_type = 'skill' AND er.target_entity_type = 'skill'
+                           AND er.relation_type IN ('PART_OF', 'REQUIRES', 'USES')
+                    ),
+                    relational_context AS (
+                        SELECT
+                            s.id AS skill_id, s.name, s.description, s.eval_lift,
+                            c.chunk_type, c.heading, c.content,
+                            0.0 AS score,
+                            true AS is_relational
+                        FROM skill_chunks c
+                        JOIN knowledge_skills s ON c.skill_id = s.id
+                        JOIN related_skills rs ON c.skill_id = rs.skill_id
+                        WHERE c.chunk_type IN ('instructions', 'frontmatter')
+                    )
+                    SELECT * FROM semantic_matches
+                    UNION ALL
+                    SELECT * FROM relational_context
+                    ORDER BY score DESC, is_relational ASC
+                    LIMIT %s;
+                    """,
+                    (query_vec, query_vec, limit, limit * 3),
+                )
+                columns = [
+                    "skill_id", "skill_name", "skill_description", "eval_lift",
+                    "chunk_type", "heading", "content", "score", "is_relational"
+                ]
+                results = [dict(zip(columns, row)) for row in cur.fetchall()]
+                
+                # Annotate relational context for clarity in LLM prompt
+                for r in results:
+                    if r["is_relational"]:
+                        r["content"] = f"[RELATIONAL CONTEXT: {r['skill_name'].upper()}]\n{r['content']}"
+
+                return results, is_degraded
+
     # ------------------------------------------------------------------
     # Thoughts (per-turn reasoning log)
     # ------------------------------------------------------------------
