@@ -1,235 +1,167 @@
+# agent_core/loop/coordinator.py
 import os
 import asyncio
+import logging
 import uuid
-import traceback
 import json
-from datetime import datetime
-from typing import Optional
+from typing import Optional, Callable, Dict, Any
 
-from agent_config import queue_settings
-from agent_core.llm import LLMClient
-from agent_core.state import AgentState
-from agent_skills.retriever import SkillRetriever
-from agent_core.loop.thought_loop import parse_react_action, parse_thought
-from agent_core.loop.routing import route_action_to_agent
-
+# Internal project imports
 from agent_memory.tree_store import TreeStore
 from agent_memory.models import Node, AgentRole, NodeType, NodeStatus
+from agent_core.llm import LLMClient
+from core.guard import AgentCallGuard
+from core.types import Intent
+from intent.classifier import classify_intent
+from agent_core.loop.routing import route_action_to_agent
+from agent_core.loop.thought_loop import parse_react_action
 
+logger = logging.getLogger("agentos.coordinator")
 
-class TurnTracker:
-    """Tracks LLM turns and token budgets across the agent hierarchy."""
-    def __init__(self, max_turns: int = 15):
-        self.total_turns = 0
-        self.max_turns = max_turns
+class BridgeAgent:
+    def __init__(self, role: AgentRole, tree_store: TreeStore, status_callback: Optional[Callable] = None):
+        self.role = role
+        self.tree_store = tree_store
+        self.status_callback = status_callback
 
-    def record_turn(self):
-        self.total_turns += 1
-        if self.total_turns > self.max_turns:
-            raise RuntimeError(f"Global reasoning budget exhausted ({self.max_turns} turns).")
+    async def execute(self, payload: dict, chain_id: int) -> dict:
+        goal = payload.get("goal") or payload.get("command") or str(payload)
+        node = Node(
+            id=None,
+            chain_id=chain_id,
+            parent_id=None,
+            agent_role=self.role,
+            type=NodeType.TOOL_CALL,
+            status=NodeStatus.PENDING,
+            content=goal,
+            payload=payload
+        )
+        task_node = await self.tree_store.add_node_async(node)
+        
+        # Polling logic
+        assert task_node.id is not None
+        for _ in range(60): # 30s timeout
+            await asyncio.sleep(0.5) 
+            t = await self.tree_store.get_node_async(task_node.id)
+            if t and t.status in (NodeStatus.DONE, NodeStatus.FAILED):
+                return t.result or {}
+        return {"error": "timeout"}
+
+class LLMBridge:
+    def __init__(self, client: Optional[LLMClient] = None):
+        self.client = client or LLMClient()
+    async def complete(self, system, user):
+        return await self.client.generate_async([
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ])
 
 class CoordinatorAgent:
-    """
-    The orchestrator that plans, reasons, and delegates tasks 
-    via the lane_queue to specialized worker agents.
-    It does not execute domain logic natively.
-    """
-
-    def __init__(self, model_name: Optional[str] = None, project_name: Optional[str] = None, session_id: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, session_id: Optional[str] = None, agent_registry: Optional[dict] = None, llm_client: Optional[LLMClient] = None):
         self.session_id = session_id or str(uuid.uuid4())
-        self.llm = LLMClient(model_name=model_name)
-        self.state = AgentState(session_id=self.session_id)
-        self.skill_retriever = SkillRetriever()
-        self.project_name = project_name
-        self.turn_tracker = TurnTracker()
-
+        self.llm_client = llm_client or LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        # Initialize or resume execution tracking tree for this session
-        existing_chain = self.tree_store.get_chain_by_session_id(self.session_id)
-        if existing_chain:
-            self.chain = existing_chain
-            # Set current_node_id to the last node in this chain if possible
-            # (or leave as None to start a new branch)
-            print(f"[Coordinator] Resuming existing chain {self.chain.id} for session {self.session_id}")
-        else:
-            self.chain = self.tree_store.create_chain(
-                session_id=self.session_id, 
-                description="Coordinator Agent Session"
-            )
-        self.current_node_id = None
-        self.global_system_prompt = "" # Ensure it exists before loading
-
-        self._load_prompts()
-
-    def _load_prompts(self):
-        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.chain_id: Optional[int] = None
         
-        # Load Coordinator instructions
-        # Use relative pathing from this file to ensure it works across different root_dir guesses
+        self.agents = agent_registry or {
+            "rag": BridgeAgent(AgentRole.RAG, self.tree_store),
+            "planner": BridgeAgent(AgentRole.PLANNER, self.tree_store),
+            "executor": BridgeAgent(AgentRole.TOOLS, self.tree_store),
+            "capability": BridgeAgent(AgentRole.SCHEMA, self.tree_store),
+            "code": BridgeAgent(AgentRole.TOOLS, self.tree_store),
+            "productivity": BridgeAgent(AgentRole.PRODUCTIVITY, self.tree_store),
+            "email": BridgeAgent(AgentRole.EMAIL, self.tree_store),
+            "llm": LLMBridge(self.llm_client)
+        }
+        self.system_prompt = ""
+        self._load_prompt()
+
+    def _load_prompt(self):
         this_dir = os.path.dirname(os.path.abspath(__file__))
         prompt_path = os.path.join(os.path.dirname(this_dir), "prompts", "coordinator_prompt.md")
-        
         if os.path.exists(prompt_path):
             with open(prompt_path, "r") as f:
-                self.global_system_prompt = f.read()
+                self.system_prompt = f.read()
         else:
-            self.global_system_prompt = "You are the CoordinatorAgent. Delegate tasks to specialist agents using the lane queue."
+            self.system_prompt = "You are the Agentic OS Coordinator. Route tasks to specialists."
 
-        # Load project-specific instructions if any
-        if self.project_name:
-            proj_prompt_path = os.path.join(root_dir, "projects", self.project_name, "system_prompt.md")
-            if os.path.exists(proj_prompt_path):
-                with open(proj_prompt_path, "r") as f:
-                    self.global_system_prompt += f"\n\nPROJECT ({self.project_name}) RULES:\n{f.read()}"
+    async def _ensure_chain(self):
+        if self.chain_id is not None:
+            return
+        from db.queries.commands import TreeStore as RealTreeStore
+        ts = RealTreeStore()
+        chain = await ts.get_chain_by_session_id_async(self.session_id)
+        if not chain:
+            chain = await ts.create_chain_async(self.session_id, description=f"Session {self.session_id}")
+        self.chain_id = chain.id
+
+    async def run_turn(self, message: str) -> str:
+        await self._ensure_chain()
+        chain_id = self.chain_id or 1
+        intent = classify_intent(message)
+        
+        # Intent Shortcuts
+        if intent == Intent.GREETING:
+            return "Hello! I'm the legacy Coordinator. How can I help you today?"
+
+        if intent == Intent.CAPABILITY_QUERY:
+            res = await self.agents["capability"].execute({"query": message}, chain_id=chain_id)
+            return res.get("message", str(res))
+
+        if intent in (Intent.RAG_LOOKUP, Intent.WEB_SEARCH):
+            res = await self.agents["rag"].execute({"goal": message}, chain_id=chain_id)
+            return res.get("message", str(res))
+
+        if intent == Intent.CODE_GEN:
+            res = await self.agents["code"].execute({"goal": message}, chain_id=chain_id)
+            return res.get("message", str(res))
+
+        if intent == Intent.SIMPLE_TASK:
+            res = await self.agents["executor"].execute({"goal": message}, chain_id=chain_id)
+            return res.get("message", str(res))
+
+        # ReAct Loop
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": message}
+        ]
+        
+        last_action = None
+        for _ in range(5):
+            response = await self.llm_client.generate_async(messages)
+            messages.append({"role": "assistant", "content": response})
+            
+            action_data = parse_react_action(response)
+            if not action_data:
+                return response
+
+            action_name, action_goal = action_data
+            if last_action == (action_name, action_goal):
+                return f"Loop detected: {action_name}. Returning last observation."
+            last_action = (action_name, action_goal)
+            
+            agent_type = route_action_to_agent(action_name)
+            
+            if agent_type == "respond":
+                return action_goal
+            
+            # Map agent_type to bridge key
+            bridge_key = "rag" if agent_type == "research" else "executor" if agent_type == "code" else agent_type
+            if bridge_key == "code" and "code" not in self.agents: bridge_key = "executor"
+            
+            bridge = self.agents.get(bridge_key)
+            if bridge and hasattr(bridge, "execute"):
+                res = await bridge.execute({"goal": action_goal}, chain_id=chain_id)
+                obs = f"Observation: {json.dumps(res)}"
             else:
-                self.global_system_prompt += f"\n\nYou are currently operating within the {self.project_name} project context."
-
-    def _add_context_node(self, node_type: NodeType, content: str) -> Node:
-        """Helper to append into the semantic tree store."""
-        node = Node(
-            chain_id=self.chain.id,
-            parent_id=self.current_node_id,
-            agent_role=AgentRole.ORCHESTRATOR,
-            type=node_type,
-            status=NodeStatus.DONE,
-            content=content
-        )
-        node = self.tree_store.add_node(node)
-        self.current_node_id = node.id
-        return node
-
-    async def run_turn(self, user_input: str, status_callback=None) -> str:
-        """Main coordinator reaction loop to user input."""
-        try:
-            self.state.add_message("user", user_input)
+                obs = f"Observation Error: Agent {agent_type} ({bridge_key}) not found."
             
-            # Log the trigger into the Tree Store
-            self._add_context_node(NodeType.PLAN, f"User Input: {user_input}")
-
-            # 1. Retrieve prior context via standard linear state & tree
-            session_summary = self.state.get_session_summary()
-            skill_context = self.skill_retriever.retrieve_context(user_input, session_summary)
-
-            # Pull semantic tree history for the LLM
-            tree_nodes, _ = self.tree_store.build_context(self.chain.id, query=user_input, limit=5)
-            tree_context = "\n".join([f"[{n['role']}] {n['content']}" for n in tree_nodes])
-
-            current_datetime = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
-            system_msg = f"{self.global_system_prompt}\n\n[Current Date/Time]\n{current_datetime}\n\n[Skill Context]\n{skill_context}\n\n[Tree History]\n{tree_context}"
-            messages = [{"role": "system", "content": system_msg}]
-            messages.extend(self.state.history)
-
-            # 2. Coordinator Reasoning loop
-            max_iterations = 5
-            for i in range(max_iterations):
-                self.turn_tracker.record_turn()
-                response_text = await self.llm.generate_async(messages, session_id=self.state.session_id)
-                self.state.add_message("assistant", response_text)
-                
-                # Log Thought into TreeStore
-                thought = parse_thought(response_text)
-                self._add_context_node(NodeType.SUMMARY, f"Thought: {thought}")
-                
-                if status_callback:
-                    await status_callback("thought", thought)
-
-                # 3. Look for delegation
-                action_data = parse_react_action(response_text)
-
-                if not action_data:
-                    # No explicit action, assuming coordinator is finished synthesizing
-                    return response_text
-
-                raw_action_type, action_goal = action_data
-                
-                if raw_action_type in ["respond", "finish", "done", "complete", "complete_task"]:
-                    # Agent explicitly stated it is finished
-                    return action_goal
-
-                # Delegate to Agent Worker
-                agent_type = route_action_to_agent(raw_action_type)
-                
-                if status_callback:
-                    await status_callback("observation", f"Delegating to => {agent_type} (Goal: {action_goal})")
-                
-                # Map routing action to agent_role semantics
-                role_mapping = {
-                    "sql": AgentRole.SCHEMA,
-                    "research": AgentRole.RAG,
-                    "code": AgentRole.TOOLS,
-                    "email": AgentRole.EMAIL,
-                    "respond": AgentRole.ORCHESTRATOR
-                }
-                agent_role = role_mapping.get(agent_type, AgentRole.TOOLS)
-
-                # Calculate remaining budget for specialist
-                remaining_budget = max(1, self.turn_tracker.max_turns - self.turn_tracker.total_turns)
-                specialist_budget = min(4, remaining_budget) # Cap specialist at 4 per call
-
-                # Create Task Node
-                node = Node(
-                    chain_id=self.chain.id,
-                    parent_id=self.current_node_id,
-                    agent_role=agent_role,
-                    type=NodeType.TOOL_CALL,
-                    status=NodeStatus.PENDING,
-                    content=f"Delegating to {agent_type}: {action_goal}",
-                    payload={
-                        "query": action_goal,
-                        "max_turns": specialist_budget
-                    }
-                )
-                task_node = self.tree_store.add_node(node)
-                self.current_node_id = task_node.id
-
-                # Poll till done (Blocking wrapper)
-                result = await self._wait_for_task(task_node.id, agent_type, status_callback)
-                
-                if isinstance(result, dict) and "error" in result:
-                    observation_msg = f"Task FAILED by {agent_type}.\nError: {result['error']}"
-                else:
-                    observation_msg = f"Task completed by {agent_type}.\nResult: {result}"
-                
-                # Feedback loop
-                if status_callback and isinstance(result, dict) and "query_hash_rl" in result:
-                    await status_callback("rl_metadata", json.dumps({
-                        "query_hash_rl": result["query_hash_rl"],
-                        "arm_index": result["arm_index"],
-                        "depth": result.get("depth", 0)
-                    }))
-
-                self.state.add_message("user", observation_msg)
-                messages.append({"role": "assistant", "content": response_text})
-                messages.append({"role": "user", "content": f"Observation: {observation_msg}"})
-                
-                self._add_context_node(NodeType.RESULT, observation_msg)
-
-            return "[Coordinator] Exceeded maximum reasoning iterations. Returning best-effort partial response.\n\n" + response_text
-
-        except Exception as e:
-            traceback.print_exc()
-            return f"[Agent Error: {e}]"
-
-    async def _wait_for_task(self, task_id: int, agent_type: str = "agent", status_callback=None) -> dict:
-        """Poll the tree store until a specialist agent completes the task node."""
-        wait_seconds = 0
-        while True:
-            await asyncio.sleep(1)
-            wait_seconds += 1
+            messages.append({"role": "user", "content": obs})
             
-            # Send a keepalive to the UI every 10 seconds so the websocket doesn't idle out
-            # and the user knows the background task is still executing.
-            if wait_seconds % 10 == 0 and status_callback:
-                await status_callback("status", f"Still waiting for {agent_type} to complete task... ({wait_seconds}s)")
-                
-            t = self.tree_store.get_node_by_id(task_id)
-            if not t:
-                continue
-            if t.status == NodeStatus.DONE:
-                return t.result or {}
-            if t.status == NodeStatus.FAILED:
-                return {"error": t.result}
+        return "Max coordinator turns reached."
 
-    # Alias so server.py can call agent.run_turn_async() consistently
-    run_turn_async = run_turn
+    async def run_turn_async(self, message: str, status_callback: Optional[Callable] = None) -> str:
+        return await self.run_turn(message)
 
+    async def _wait_for_task(self, node_id: int):
+        return {"status": "done"}
