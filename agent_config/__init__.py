@@ -11,4 +11,6 @@ from .settings import (
     security_settings,
     sandbox_settings,
     email_settings,
+    productivity_settings,
+    devops_settings,
 )

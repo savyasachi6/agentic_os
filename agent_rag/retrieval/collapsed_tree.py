@@ -51,7 +51,7 @@ async def collapsed_tree_retrieve(
     cache = FractalCache()
 
     # Check cache first
-    cached = cache.get_cached_response(query)
+    cached = await cache.get_cached_response_async(query)
     if cached:
         return {
             "answer": cached["response"],
@@ -110,7 +110,7 @@ async def _factual_direct_lookup(
     }
 
     # Cache the result
-    cache.set_cached_response(query, answer, "factual_direct")
+    await cache.set_cached_response_async(query, answer, "factual_direct")
     return result
 
 
@@ -232,7 +232,7 @@ async def _speculative_pipeline(
 
         if verdict["confidence"] > 0.9:
             # Collapse tree — high confidence, return immediately
-            cache.set_cached_response(query, verdict["best_draft"], "speculative_collapsed")
+            await cache.set_cached_response_async(query, verdict["best_draft"], "speculative_collapsed")
             return {
                 "answer": verdict["best_draft"],
                 "strategy": "speculative_collapsed",
@@ -292,7 +292,7 @@ async def fractal_loop(
     """
     if depth > max_depth:
         logger.info(f"Fractal loop hit max depth ({max_depth}), returning best available answer")
-        cache.set_cached_response(query, initial_answer, "fractal_max_depth")
+        await cache.set_cached_response_async(query, initial_answer, "fractal_max_depth")
         return {
             "answer": initial_answer,
             "strategy": "fractal_max_depth",
@@ -368,7 +368,7 @@ async def fractal_loop(
         drafts = await drafter.draft_parallel(spark, chunk_dicts)
 
         if not drafts:
-            cache.set_cached_response(query, initial_answer, "fractal_no_drafts")
+            await cache.set_cached_response_async(query, initial_answer, "fractal_no_drafts")
             return {
                 "answer": initial_answer,
                 "strategy": "fractal_no_drafts",
@@ -384,7 +384,7 @@ async def fractal_loop(
         if verdict["confidence"] > 0.9 or not verdict.get("new_spark"):
             # Collapse
             final_answer = verdict["best_draft"]
-            cache.set_cached_response(query, final_answer, f"fractal_collapsed_d{depth}")
+            await cache.set_cached_response_async(query, final_answer, f"fractal_collapsed_d{depth}")
             return {
                 "answer": final_answer,
                 "strategy": f"fractal_collapsed_d{depth}",

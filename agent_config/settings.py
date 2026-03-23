@@ -3,6 +3,7 @@ Unified settings for Agentic OS.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+import os
 from typing import Optional, List
 
 
@@ -147,6 +148,14 @@ class EmailSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+class ProductivitySettings(BaseSettings):
+    todo_path: str = Field(default="todo.json")
+    notes_dir: str = Field(default="notes")
+
+class DevOpsSettings(BaseSettings):
+    telegram_token: Optional[str] = Field(default=None)
+    github_token: Optional[str] = Field(default=None)
+
 
 # Singleton instances
 db_settings = DatabaseSettings()
@@ -162,3 +171,34 @@ redis_settings = RedisSettings()
 security_settings = SecuritySettings()
 sandbox_settings = SandboxSettings()
 email_settings = EmailSettings()
+productivity_settings = ProductivitySettings()
+devops_settings = DevOpsSettings()
+
+
+def validate_settings():
+    """Perform startup sanity checks on environment and configuration."""
+    import logging
+    logger = logging.getLogger("agentos.config")
+    
+    # 1. Check for insecure defaults in production-like environments
+    # We assume 'production' if certain flags are set or it's not localhost
+    is_prod = db_settings.host != "localhost" or server_settings.host != "0.0.0.0"
+    
+    if is_prod:
+        if db_settings.password == "password":
+            logger.error("[config] INSECURE: Using default POSTGRES_PASSWORD in non-local environment!")
+            # In a real hard-fail system, we'd raise an error here.
+            
+        if security_settings.jwt_secret == "super-secret-key":
+            logger.error("[config] INSECURE: Using default JWT_SECRET in non-local environment!")
+
+    # 2. Verify critical paths
+    if not os.path.exists(agent_settings.skills_dir):
+        logger.warning(f"[config] SKILLS_DIR not found: {agent_settings.skills_dir}. Indexing will fail.")
+
+    # 3. Connectivity hint (async checks would happen elsewhere, this is a fast sync check)
+    if llm_router_settings.backend == "ollama":
+        # Check if ollama is reachable (optional, maybe too slow for every startup)
+        pass
+
+    logger.info("[config] Settings validated.")

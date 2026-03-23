@@ -124,6 +124,18 @@ def load_db_history(session_id: str):
         st.error(f"Failed to load history: {e}")
     return False
 
+def load_sessions():
+    """Fetch the list of historical sessions."""
+    try:
+        response = requests.get(f"{CORE_API_URL}/chat/sessions", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success":
+                return data.get("sessions", [])
+    except Exception as e:
+        print(f"Failed to load sessions: {e}")
+    return []
+
 def get_router_stats():
     """Fetches bandit diagnostics directly from the mounted RL Router sub-app."""
     try:
@@ -168,9 +180,11 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
             current_response = ""
 
             with message_container:
-                thought_expander = st.empty()
+                thought_container = st.empty()
                 status_placeholder = st.empty()
                 response_placeholder = st.empty()
+
+            thought_placeholder = None
 
             while True:
                 response = await ws.recv()
@@ -183,17 +197,25 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                         st.session_state.session_id = data.get("session_id")
 
                 elif msg_type == "thought":
-                    current_thought += f"\n\n**Thought:**\n{content}"
-                    thought_expander.expander("Agent Reasoning", expanded=True).markdown(current_thought)
-                    st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "thought"})
-
+                    current_thought += content
+                    if thought_placeholder is None:
+                        with thought_container.container():
+                            thought_expander = st.expander("Agent Reasoning", expanded=True)
+                            thought_placeholder = thought_expander.empty()
+                    thought_placeholder.markdown(current_thought)
+                    # We only append to history at the very end of the turn to avoid history bloating
+                
                 elif msg_type == "status":
                     status_placeholder.info(f"⏳ {content}")
 
                 elif msg_type == "observation":
                     current_thought += f"\n\n**Observation:**\n```\n{content}\n```"
-                    thought_expander.expander("Agent Reasoning", expanded=True).markdown(current_thought)
-                    st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "observation"})
+                    if thought_placeholder is None:
+                        with thought_container.container():
+                            thought_expander = st.expander("Agent Reasoning", expanded=True)
+                            thought_placeholder = thought_expander.empty()
+                    thought_placeholder.markdown(current_thought)
+                    # Note: observation is usually a full block, so we keep the header
 
                 elif msg_type == "rl_metadata":
                     # Store RL metadata for the NEXT final message
@@ -204,8 +226,8 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     response_placeholder.markdown(current_response + "▌")
 
                 elif msg_type == "final":
-                    if content and not current_response:
-                        current_response = content
+                    if content:
+                        current_response = content.strip()
                     
                     if not current_response:
                         current_response = "*(The agent was unable to produce a response. Please check the 'Agent Reasoning' logs above for details.)*"
@@ -213,6 +235,10 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     status_placeholder.empty()
                     response_placeholder.markdown(current_response)
                     
+                    # Store everything including thoughts in history at the end
+                    if current_thought:
+                        st.session_state.chat_history.append({"role": "assistant", "content": current_thought, "type": "thought"})
+
                     # Store RL metadata with the message for feedback buttons
                     msg_metadata = st.session_state.get("last_rl_metadata", {})
                     st.session_state.chat_history.append({
@@ -253,7 +279,22 @@ with st.sidebar:
     
     if page == "💬 Terminal":
         st.subheader("Session Management")
-        session_input = st.text_input("Session ID", value=st.session_state.session_id)
+        
+        available_sessions = load_sessions()
+        
+        if available_sessions:
+            session_options = {s["session_id"]: f"{str(s.get('first_message', 'No message'))[:40]}... ({str(s.get('created_at', '')).split(' ')[0]})" for s in available_sessions}
+            
+            selected_session = st.selectbox(
+                "Select Past Session", 
+                options=[""] + list(session_options.keys()),
+                format_func=lambda x: session_options.get(x, "--- Select a session ---"),
+                index=0
+            )
+            
+            session_input = st.text_input("Session ID (or leave blank to use dropdown)", value=selected_session or st.session_state.session_id)
+        else:
+            session_input = st.text_input("Session ID", value=st.session_state.session_id)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -307,7 +348,10 @@ if page == "💬 Terminal":
     st.header("Terminal")
     
     # Render existing chat history
-    for msg in st.session_state.chat_history:
+    i = 0
+    while i < len(st.session_state.chat_history):
+        msg = st.session_state.chat_history[i]
+        
         if msg["type"] == "message":
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
@@ -324,14 +368,25 @@ if page == "💬 Terminal":
                         submit_feedback(qh, arm, depth, 1)
                     if c2.button("👎", key=f"down_{qh}"):
                         submit_feedback(qh, arm, depth, -1)
+            i += 1
+                        
         elif msg["type"] == "thought":
+            # Consolidate consecutive thought blocks
+            combined_thought = msg["content"]
+            i += 1
+            while i < len(st.session_state.chat_history) and st.session_state.chat_history[i]["type"] == "thought":
+                combined_thought += "\n\n" + st.session_state.chat_history[i]["content"]
+                i += 1
+                
             with st.chat_message("assistant", avatar="🧠"):
                 with st.expander("Agent Thought", expanded=False):
-                    st.markdown(msg["content"])
+                    st.markdown(combined_thought)
+                    
         elif msg["type"] == "observation":
             with st.chat_message("assistant", avatar="🛠️"):
                 with st.expander("Tool Observation", expanded=False):
                     st.markdown(f"```\n{msg['content']}\n```")
+            i += 1
 
     # Handle user input
     prompt = st.chat_input("Ask the Agentic OS...", disabled=st.session_state.is_processing)
@@ -409,14 +464,14 @@ elif page == "🎯 RL Strategy":
         
         # Mapping for better display names
         arm_names = {
-            0: "Depth 0 (Spec Off)",
-            1: "Depth 0 (Spec On)",
-            2: "Depth 1 (Spec Off)",
-            3: "Depth 1 (Spec On)",
-            4: "Depth 2 (Spec Off)",
-            5: "Depth 2 (Spec On)",
-            6: "Depth 3 (Spec Off)",
-            7: "Depth 3 (Spec On)",
+            0: "Collapsed Tree (Spec Off)",
+            1: "Collapsed Tree (Spec On)",
+            2: "Standard RAG (Spec Off)",
+            3: "Standard RAG (Spec On)",
+            4: "Multi-hop GraphRAG (Spec Off)",
+            5: "Multi-hop GraphRAG (Spec On)",
+            6: "Full Fractal Tree (Spec Off)",
+            7: "Full Fractal Tree (Spec On)",
         }
         
         # 2. Arm Performance Table

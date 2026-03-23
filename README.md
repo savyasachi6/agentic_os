@@ -1,6 +1,6 @@
 # Agentic OS: The System of Systems
 
-Welcome to the **Agentic OS** ecosystem. This project provides a distributed, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
+Welcome to the **Agentic OS** ecosystem. This project provides a production-grade, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
 
 ## 🏛️ Architecture Overview
 
@@ -8,109 +8,82 @@ Agentic OS is structured as a "System of Systems," decoupling core reasoning fro
 
 ```mermaid
 graph TD
-    User([User/Client]) <-->|WebSocket/API| Core[Agent OS Core]
+    User([User/Client]) <-->|API/CLI| Core[Agent OS Core]
     
     subgraph "Core Intelligence"
-        Core <-->|Internal Protocol| Router[LLM Router]
-        Core <-->|Async Tasks| Queue[Lane-Based Queue]
+        Core <-->|Intent Classification| IC[Intent Classifier]
+        Core <-->|Coordinator Turn| C[CoordinatorAgent]
+        C <-->|DAG Execution| P[PlannerAgent]
     end
 
-    subgraph "Knowledge & Capability"
-        Core <-->|Context| Memory[Agent Memory & RAG]
-        Core <-->|Retrieval| Skills[Agent Skills]
-        Core <-->|Optimization| RLRouter[RL Router]
+    subgraph "Agent Registry"
+        C <-->|Research| RAG[RAGAgent]
+        C <-->|Search| WS[WebSearchAgent]
+        C <-->|Execute| EX[ExecutorAgent]
+        C <-->|Capabilities| CAP[CapabilityAgent]
+        C <-->|Audit| AD[AuditorAgent]
     end
 
-    Memory <-->|pgvector| DB[(PostgreSQL)]
-    Core -->|Tool Invocation| Sandbox[Subprocess Sandbox]
+    subgraph "Storage Layer"
+        RAG <-->|pgvector| AM[Agent Memory]
+        AM <-->|Postgres| DB[(Session DB)]
+    end
 ```
 
 ### Main Components
 
-- **[Agent OS Gateway](gateway/)**: The orchestration and CLI hub.
-- **[Agent OS Core](core/)**: The reasoning engine. Manages ReAct loops and secure tool sandboxing.
-- **[Agent Memory](memory/)**: The semantic storage layer. Handles `pgvector` RAG and long-term history.
-- **[Agent Skills](skills/)**: The capability registry. Indexes and retrieves specialized behaviors.
-- **[Agent OS Router](agentos_router/)**: Multi-objective contextual bandit for dynamic RAG depth optimization.
+- **[Core & Coordinator](core/)**: The primary entry point and reasoning engine. Handles intent classification and agent routing.
+- **[Autonomous Agents](agents/)**: specialized modular agents (RAG, Executor, Planner, Auditor, etc.) each with a strict domain and risk profile.
+- **[Agent Memory](agent_memory/)**: The semantic storage layer. Managed `pgvector` RAG, semantic caching, and tree-store persistence.
+- **[Database Layer](db/)**: Clean SQL-based command and query interfaces for all system state.
+- **[System Prompts](prompts/)**: Standardized system instructions for all active agents.
 
 ---
 
-## 🌟 Key Features & Skills
+## 🌟 Key Features
 
-- **Centralized LLM Router**: Micro-batching for high-throughput local inference (Ollama/vLLM).
-- **Resilient RAG**: Multi-tiered retrieval (Fractal, GraphRAG) with explicit validation layers.
-- **Lane-Based Execution**: Durable, ordered command processing via DB-backed queues.
-- **Capability Discovery**: Automatic indexing of `SKILL.md` packages for modular expansion.
-- **Secure Sandboxing**: Isolated subprocess execution for risky filesystem and shell operations.
-
----
-
-## 🌊 Main Flows
-
-### 1. User Request Flow
-
-`User` → `WebSocket (/chat)` → `ReAct Agent (Core)` → `Skill/Memory Retrieval` → `Reasoning Step` → `Tool Execution (Sandbox)` → `Streaming Response`.
-
-### 2. Skill Lifecycle
-
-`Local SKILL.md` → `Skill Indexer` → `Vector Store (pgvector)` → `Semantic Discovery` → `Context Injection`.
-
----
-
-## 🔌 API Endpoints (Core)
-
-| Path | Method | Purpose | Example |
-| :--- | :--- | :--- | :--- |
-| `/chat` | `WS` | Streaming ReAct chat with session persistence | `{"message": "Check docker status"}` |
-| `/health` | `GET` | Service readiness check | `curl localhost:8000/health` |
-| `/embed` | `POST` | Generate embeddings for arbitrary text | `{"text": "Hello world"}` |
-| `/skills/reindex` | `POST` | Trigger recursive skill discovery | `curl -X POST .../reindex` |
+- **Intent-Driven Routing**: Microsecond classification of user intent (Capability, RAG, Web, Code, etc.) bypasses unnecessary planning.
+- **Risk-Gated Execution**: LOW risk commands execute directly; HIGH risk commands are blocked for explicit human approval.
+- **Resilient RAG**: 3-layer retrieval (Cache -> Vector -> Web Fallback) with a strict "single-search" circuit breaker.
+- **Strict Architecture**: Zero-knowledge separation between agents ensures no recursive loops or uncontrolled reasoning depth.
+- **Local-First**: Optimized for local inference using Ollama or LlamaCPP backends via the LLM router.
 
 ---
 
 ## 🚀 Quickstart
 
 1. **Environment Setup**:
-
    ```bash
    cp .env.example .env
    # Configure LLM_MODEL, OLLAMA_URL, and POSTGRES_URL
    ```
 
 2. **Start Infrastructure**:
-
    ```bash
    docker-compose up -d
    ```
 
 3. **Run the OS (Backend)**:
-
    ```bash
-   python -m gateway.main serve
+   python gateway/main.py serve
    ```
 
-4. **Run the Web UI**:
-   - In a new terminal, start the Streamlit frontend. This connects to the `main.py serve` backend via WebSocket:
-
+4. **Run the UI (Optional)**:
    ```bash
-   cd ui
-   streamlit run app.py
+   python ui/app.py
    ```
 
 ---
 
 ## 📚 Navigation & Docs
 
-- **[Capabilities Registry](skill.md)**: Full list of system skills and their implementation.
-- **[Architecture Decision Records](docs/adr/)**: History of major design choices.
-- **[Data Model & RAG](docs/03-data-model-and-rag.md)**: Deep dive into the memory schema.
-- **[RL Router Specs](docs/06-rl-router.md)**: Details on the contextual bandit logic.
-- **[Internal API Reference](docs/api.md)**: Full API documentation.
-- **[Security & Sandboxing](docs/04-security-and-sandboxing.md)**: Isolation protocols.
-- **[AI Agent Guidelines](AGENTS.md)**: Coding standards and boundaries for AI coding agents.
+- **[Agent Guidelines](AGENTS.md)**: Coding standards and boundaries for system development.
+- **[Database Schema](db/schema.sql)**: The underlying data model for chains, nodes, and memory.
+- **[Technical Specification](docs/architecture.md)**: Deep dive into the system-of-systems design.
 
 ---
 
 ## 🛠️ Development
 
-See [development setup](core/docs/architecture.md#development-setup) for details on testing, linting, and local debugging.
+See [development setup](docs/architecture.md#development-setup) for details on testing, linting, and local debugging.
+Always run `pytest` before submitting changes.

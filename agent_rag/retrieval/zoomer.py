@@ -59,10 +59,7 @@ class DynamicZoomer:
             logger.debug("DynamicZoomer.zoom_out: chunk %s has no parent_chunk_id", chunk.id)
             return None
 
-        loop = asyncio.get_running_loop()
-        parent = await loop.run_in_executor(
-            None, self._rag_store.fetch_parent_chunk, parent_id
-        )
+        parent = await self._rag_store.fetch_parent_chunk_async(parent_id)
         if not parent:
             logger.debug(
                 "DynamicZoomer.zoom_out: parent %s not found in DB", parent_id

@@ -40,11 +40,12 @@ def load_project_env(project_name: str):
 
 async def cmd_cli(args):
     """Start the interactive CLI agent loop."""
-    from agent_core.loop.coordinator import CoordinatorAgent
-    from agent_memory.db import init_schema
+    from agents.coordinator import CoordinatorAgent
+    from db.connection import init_schema
     from llm_router import LLMRouter
 
-    init_schema()
+    schema_path = os.path.join(os.path.dirname(__file__), "..", "agent_memory", "schema.sql")
+    init_schema(schema_path)
     
     # Load project env if specified
     project_dir = None
@@ -63,8 +64,10 @@ async def cmd_cli(args):
         
         async def run_loop():
             print(f"\nWelcome to Agent OS CLI.")
+            loop = asyncio.get_event_loop()
             while True:
-                user_msg = input("\nUser: ").strip()
+                user_msg = await loop.run_in_executor(None, input, "\nUser: ")
+                user_msg = user_msg.strip()
                 if user_msg.lower() in ["exit", "quit"]:
                     break
                 if not user_msg:
@@ -80,7 +83,7 @@ async def cmd_cli(args):
 def cmd_serve(args):
     """Start the FastAPI server."""
     import uvicorn
-    from agent_config import server_settings
+    from core.config import settings
 
     if args.project:
         load_project_env(args.project)
@@ -88,19 +91,20 @@ def cmd_serve(args):
     # LLMRouter will be started in server.py @app.on_event("startup")
     uvicorn.run(
         "gateway.server:app",
-        host=args.host or server_settings.host,
-        port=args.port or server_settings.port,
+        host=args.host or settings.db_host,
+        port=args.port or 8000,
         reload=args.reload,
     )
 
 
 async def cmd_index(args):
     """Re-index all skills into pgvector."""
-    from agent_skills.indexer import SkillIndexer
-    from agent_memory.db import init_schema
+    from rag.indexer import SkillIndexer
+    from db.connection import init_schema
     from llm_router import LLMRouter
 
-    init_schema()
+    schema_path = os.path.join(os.path.dirname(__file__), "..", "agent_memory", "schema.sql")
+    init_schema(schema_path)
     
     # Start the LLM Router (for embeddings)
     router = LLMRouter.get_instance()
@@ -115,8 +119,9 @@ async def cmd_index(args):
 
 async def cmd_submit(args):
     """Submit a task to the background processing system."""
-    from agent_memory.tree_store import TreeStore
-    from agent_memory.models import Node, AgentRole, NodeType, NodeStatus
+    from db.queries.commands import TreeStore
+    from db.models import Node
+    from core.types import AgentRole, NodeType, NodeStatus
     
     ts = TreeStore()
     chain = ts.create_chain(session_id=f"terminal_{int(time.time())}", description=args.task)
@@ -127,7 +132,7 @@ async def cmd_submit(args):
         role = AgentRole.SCHEMA
         
     node = ts.add_node(Node(
-        chain_id=chain.id or 0,
+        chain_id=chain or 0, # Assuming ts.create_chain returns an ID or Node
         agent_role=role,
         type=NodeType.TASK,
         content=args.task,
@@ -142,8 +147,8 @@ async def cmd_submit(args):
 
 async def cmd_status(args):
     """Check the status of a specific task."""
-    from agent_memory.tree_store import TreeStore
-    from agent_memory.models import NodeStatus
+    from db.queries.commands import TreeStore
+    from core.types import NodeStatus
     
     ts = TreeStore()
     node = ts.get_node_by_id(args.id)
@@ -162,10 +167,10 @@ async def cmd_status(args):
 
 async def cmd_remote_chat(args):
     """Terminal chat interface using the REST API (non-WebSocket)."""
-    from agent_config import server_settings
+    from core.config import settings
     
     host = args.host or "localhost"
-    port = args.port or server_settings.port
+    port = args.port or 8000 # Default port
     url = f"http://{host}:{port}/chat"
     session_id = None
     
@@ -201,6 +206,8 @@ async def cmd_remote_chat(args):
 
 
 def main():
+    # from core.config import settings # Already loaded as a singleton
+    
     parser = argparse.ArgumentParser(
         prog="agent-os",
         description="AgentOS-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",

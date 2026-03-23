@@ -7,7 +7,40 @@ from agent_config import llm_router_settings
 from llm_router.backends import LLMBackend, OllamaBackend, LlamaCPPBackend
 
 from .models import LLMRequest, LLMResponse, BatchGroup, Priority
-from agentos_core.router.batch_manager import BatchManager
+
+class BatchManager:
+    def __init__(self, batch_interval_ms: int, max_batch_size: int):
+        self.queue: List[LLMRequest] = []
+        self.max_batch_size = max_batch_size
+        self.batch_interval = batch_interval_ms / 1000.0
+        self.lock = asyncio.Lock()
+
+    async def add_request(self, req: LLMRequest):
+        async with self.lock:
+            self.queue.append(req)
+            # Sort by priority (Lowest value = Highest priority)
+            self.queue.sort(key=lambda x: x.priority.value)
+
+    async def wait_for_data(self, timeout: float):
+        """Wait for data or timeout. In a real system, use an Event."""
+        start = time.time()
+        while time.time() - start < timeout:
+            if self.queue:
+                return
+            await asyncio.sleep(0.01)
+
+    async def get_batches_to_flush(self) -> List[List[LLMRequest]]:
+        async with self.lock:
+            if not self.queue:
+                return []
+            
+            # Flush in chunks of max_batch_size
+            batches = []
+            while self.queue:
+                batch = self.queue[:self.max_batch_size]
+                self.queue = self.queue[self.max_batch_size:]
+                batches.append(batch)
+            return batches
 
 class LLMRouter:
     _instance = None
@@ -19,7 +52,7 @@ class LLMRouter:
         return cls._instance
 
     def __init__(self, batch_interval_ms: Optional[int] = None, max_batch_size: Optional[int] = None):
-        self._batch_interval = (batch_interval_ms or llm_router_settings.batch_interval_ms) / 1000.0
+        self._batch_interval = 0.0
         self._max_batch_size = max_batch_size or llm_router_settings.max_batch_size
         
         # Determine backend based on configuration
@@ -65,12 +98,14 @@ class LLMRouter:
         model: str, 
         max_tokens: int = 2048, 
         temperature: float = 0.7,
-        priority: Priority = Priority.NORMAL
+        priority: Priority = Priority.NORMAL,
+        stop: Optional[List[str]] = None
     ) -> str:
         """
         Submit a new generation request to the router.
         Returns the generated content string asynchronously.
         """
+        print(f"[LLMRouter DEBUG] submit called for session {session_id} with {len(messages)} messages")
         request_id = str(uuid.uuid4())
         req = LLMRequest(
             request_id=request_id,
@@ -79,7 +114,8 @@ class LLMRouter:
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
-            priority=priority
+            priority=priority,
+            stop=stop
         )
         
         loop = asyncio.get_running_loop()
@@ -118,7 +154,9 @@ class LLMRouter:
         # Simple grouping by model and max_tokens
         groups: Dict[str, BatchGroup] = {}
         for req in batch:
-            key = f"{req.model}_{req.max_tokens}_{req.temperature}"
+            # Group by model, tokens, temperature, and stringified stop sequences
+            stop_key = ",".join(sorted(req.stop)) if req.stop else "none"
+            key = f"{req.model}_{req.max_tokens}_{req.temperature}_{stop_key}"
             if key not in groups:
                 groups[key] = BatchGroup(model=req.model, max_tokens=req.max_tokens)
             groups[key].requests.append(req)
@@ -128,14 +166,16 @@ class LLMRouter:
             
             try:
                 # Send to backend
-                # Currently taking the temperature from the first request in group as representative
+                # Currently taking the temperature and stop sequences from the first request in group
                 temp = group.requests[0].temperature if group.requests else 0.7
+                stop_seqs = group.requests[0].stop if group.requests else None
                 
                 results = await self.backend.generate_batch(
                     messages_batch=messages_batch, 
                     model=group.model, 
                     max_tokens=group.max_tokens,
-                    temperature=temp
+                    temperature=temp,
+                    stop=stop_seqs
                 )
                 
                 # Demux and resolve futures

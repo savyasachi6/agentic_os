@@ -16,11 +16,19 @@ PyYAML
 langchain-core
 langgraph
 pywin32; platform_system == 'Windows'
+nest-asyncio
 
 # Optional – browser tools (Lightpanda / Playwright CDP)
 # Run: pip install playwright && playwright install
-playwright; extra == "browser"
+playwright
 requests
 python-jose[cryptography]
 mcp
+loguru
+asyncpg>=0.29.0
+redis>=5.0.0
+fastmcp>=0.1.0
+pgvector>=0.3.0
+langchain>=0.3.0
+langgraph>=0.2.0
 

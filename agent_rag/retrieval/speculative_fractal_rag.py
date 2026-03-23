@@ -109,18 +109,15 @@ class SpeculativeDrafter:
             chunk_ids = [c.get("id", "") for c in clusters[i] if c.get("id")]
             confidence = self._score_draft(result, query)
 
-            # Persist for traceability
-            try:
-                self._rag_store.save_draft(
-                    draft_id=draft_id,
-                    query_hash=query_hash,
-                    draft_cluster=i,
-                    draft_content=result,
-                    confidence=confidence,
-                    chunk_ids=chunk_ids
-                )
-            except Exception as e:
-                logger.warning(f"Failed to persist draft: {e}")
+            # Save the draft asynchronously for persistence/tracing
+            await self._rag_store.save_draft_async(
+                draft_id=draft_id,
+                query_hash=query_hash,
+                draft_cluster=i,
+                draft_content=result,
+                confidence=confidence,
+                chunk_ids=chunk_ids
+            )
 
             drafts.append({
                 "draft": result,

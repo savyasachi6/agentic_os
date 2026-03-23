@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS events (
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE INDEX IF NOT EXISTS idx_events_session ON events (session_id);
+
 -- ============================================================
 -- Skill chunks: embedded pieces of SKILL.md content
 -- ============================================================
@@ -59,7 +61,7 @@ CREATE TABLE IF NOT EXISTS skill_chunks (
     chunk_type  VARCHAR(50),  -- 'frontmatter', 'instructions', 'examples', 'scripts_ref'
     heading     VARCHAR(512), -- section heading this chunk came from
     content     TEXT NOT NULL,
-    embedding   VECTOR(1024),
+    embedding   VECTOR(1536),
     token_count INTEGER
 );
 
@@ -74,7 +76,7 @@ CREATE TABLE IF NOT EXISTS thoughts (
     session_id  VARCHAR(255) NOT NULL,
     role        VARCHAR(50) NOT NULL,  -- 'user', 'assistant', 'tool', 'thought'
     content     TEXT NOT NULL,
-    embedding   VECTOR(1024),
+    embedding   VECTOR(1536),
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -89,7 +91,7 @@ CREATE TABLE IF NOT EXISTS session_summaries (
     id          SERIAL PRIMARY KEY,
     session_id  VARCHAR(255) NOT NULL,
     summary     TEXT NOT NULL,
-    embedding   VECTOR(1024),
+    embedding   VECTOR(1536),
     turn_start  INTEGER,     -- first turn index covered
     turn_end    INTEGER,     -- last turn index covered
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -178,9 +180,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     priority INTEGER DEFAULT 5,         -- 1=low, 10=urgent
     planned_order INTEGER DEFAULT 0,    -- execution sequence within siblings
     content TEXT,                       -- raw text or json payload
-    payload JSON DEFAULT '{}',         -- structured input task arguments
-    result JSON,                       -- structured output from the agent
-    embedding VECTOR(1024),              -- 1024 to match the rest of the embedding columns
+    payload JSONB DEFAULT '{}',         -- structured input task arguments
+    result JSONB,                       -- structured output from the agent
+    embedding VECTOR(1536),              -- 1536 to match the rest of the embedding columns
     deadline_at TIMESTAMP,
     fractal_depth INT DEFAULT 0,
     draft_cluster INT,
@@ -235,12 +237,14 @@ CREATE TABLE IF NOT EXISTS chunks (
     chunk_metadata JSONB DEFAULT '{}',
     fulltext_weighted TSVECTOR, -- For GIN-based lexical search
     deleted_at     TIMESTAMP,   -- Soft delete support
+    parent_chunk_id UUID REFERENCES chunks(id) ON DELETE SET NULL, -- For hierarchy/Dynamic Zooming
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(document_id, chunk_index)
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON chunks (document_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_parent ON chunks (parent_chunk_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_fulltext ON chunks USING GIN (fulltext_weighted);
 CREATE INDEX IF NOT EXISTS idx_chunks_tags ON chunks USING GIN (llm_tags);
 CREATE INDEX IF NOT EXISTS idx_chunks_metadata ON chunks USING GIN (chunk_metadata); -- Support rapid metadata filtering
@@ -275,9 +279,9 @@ CREATE TRIGGER trg_chunks_tsvector BEFORE INSERT OR UPDATE
 -- ============================================================
 CREATE TABLE IF NOT EXISTS chunk_embeddings (
     chunk_id   UUID PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-    embedding  VECTOR(1024) NOT NULL,
+    embedding  VECTOR(1536) NOT NULL,
     model_name VARCHAR(128) NOT NULL,
-    dimension  INTEGER DEFAULT 1024,
+    dimension  INTEGER DEFAULT 1536,
     is_current BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -327,7 +331,9 @@ CREATE TABLE IF NOT EXISTS entity_relations (
     relation_type      VARCHAR(64) NOT NULL, -- REQUIRES, RELATED_TO, PART_OF, USES
     weight             FLOAT DEFAULT 1.0,
     metadata_json      JSONB DEFAULT '{}',
-    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source_entity_id, target_entity_id, relation_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_entity_relations_src ON entity_relations (source_entity_id, relation_type);
@@ -430,7 +436,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_feedback_negative ON audit_feedback (retrie
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     query_hash        CHAR(32) NOT NULL UNIQUE,     -- MD5 of normalized query text
-    query_vector      VECTOR(1024) NOT NULL,
+    query_vector      VECTOR(1536) NOT NULL,
     response_payload  JSONB NOT NULL,
     strategy_used     VARCHAR(64),
     staleness_version INTEGER DEFAULT 1,
@@ -451,7 +457,7 @@ CREATE INDEX IF NOT EXISTS idx_semantic_cache_hnsw
 -- Hybrid Search Stored Procedure
 -- ============================================================
 CREATE OR REPLACE FUNCTION hybrid_search(
-    query_vec VECTOR(1024),
+    query_vec VECTOR(1536),
     query_text TEXT,
     match_limit INTEGER DEFAULT 5
 )

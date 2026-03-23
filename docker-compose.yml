@@ -20,6 +20,7 @@ services:
       - agentos-net
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./init-keycloak-db.sql:/docker-entrypoint-initdb.d/init-keycloak-db.sql
 
   redis:
     image: redis:7-alpine
@@ -48,7 +49,10 @@ services:
       - "9100"
     environment:
       WORKER_PORT: "9100"
-    command: ["python", "sandbox/worker.py", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
+      PYTHONPATH: /sandbox
+    volumes:
+      - .:/sandbox
+    command: ["python", "-u", "-m", "agent_sandbox.worker", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
     networks:
       - agentos-net
 
@@ -69,10 +73,14 @@ services:
       LIGHTPANDA_CDP_URL: ws://lightpanda:9222
       TOOLS_API_URL: http://tools-api:9100
       RL_ROUTER_URL: http://rl-router:8100/rl
-      LLM_MODEL: qwen3-vl:8b
+      LLM_MODEL: gemma3:4b
       EMBED_MODEL: mxbai-embed-large
       OLLAMA_HOST: http://host.docker.internal:11434
       PYTHONPATH: /app
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -131,6 +139,8 @@ services:
     depends_on:
       agent-core:
         condition: service_healthy
+    volumes:
+      - .:/app
     networks:
       - agentos-net
 

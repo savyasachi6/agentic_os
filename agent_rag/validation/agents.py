@@ -9,7 +9,10 @@ Hierarchical Agent Roles for the Agentic RAG Pipeline:
 """
 from typing import Any, Dict, Tuple, List, Optional
 import json
+import logging
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("agentos.rag_agents")
 
 # Agent OS native integrations
 from agent_core.llm import generate_structured_output, get_llm
@@ -31,8 +34,8 @@ class PlannerAgent:
             from agent_config import model_settings
             response = ollama.chat(model=model_settings.fast_model, messages=[{"role": "user", "content": prompt}])
             return json.loads(response['message']['content'])
-        except Exception:
-            # Fallback
+        except Exception as e:
+            logger.debug("[PlannerAgent] JSON decompose failed: %s", e)
             return [{"sub_query": query}]
 
     async def strategize_skills(self, query: str) -> Dict[str, Any]:

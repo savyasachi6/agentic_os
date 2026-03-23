@@ -218,6 +218,11 @@ class RagStore:
                     "chunk_metadata": row[3] or {},
                 }
 
+    async def fetch_parent_chunk_async(self, parent_chunk_id: str) -> Optional[Dict[str, Any]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.fetch_parent_chunk, parent_chunk_id)
+
     def query_hybrid(self, query_text: str, query_vector: List[float], top_k: int = 10,
                      fulltext_weight: float = 0.5, vector_weight: float = 0.5) -> List[Dict[str, Any]]:
         """
@@ -307,6 +312,14 @@ class RagStore:
                     })
                 return results
 
+    async def query_hybrid_async(self, query_text: str, query_vector: List[float], top_k: int = 10,
+                                 fulltext_weight: float = 0.5, vector_weight: float = 0.5) -> List[Dict[str, Any]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.query_hybrid, query_text, query_vector, top_k, fulltext_weight, vector_weight
+        )
+
     def traverse_graph(self, entity_id: int, max_depth: int = 2) -> List[Dict[str, Any]]:
         """
         Executes WITH RECURSIVE graph traversal to find related entities.
@@ -377,6 +390,11 @@ class RagStore:
                     })
                 return res
 
+    async def get_chunk_relations_async(self, chunk_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_chunk_relations, chunk_ids)
+
     # ------------------------------------------------------------------
     # Audit & Feedback
     # ------------------------------------------------------------------
@@ -394,6 +412,13 @@ class RagStore:
                 event_id = str(cur.fetchone()[0])
             conn.commit()
             return event_id
+
+    async def log_retrieval_event_async(self, session_id: str, query: str, chunk_ids: List[str], strategy: str, latency_ms: int) -> str:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.log_retrieval_event, session_id, query, chunk_ids, strategy, latency_ms
+        )
 
     def log_audit_feedback(self, event_id: str, chunk_id: Optional[str], role: str, score: float, hallucination: bool = False, comments: str = ""):
         with get_db_connection() as conn:
@@ -414,6 +439,13 @@ class RagStore:
                     (event_id, role, score, hallucination, comments)
                 )
             conn.commit()
+
+    async def log_audit_feedback_async(self, event_id: str, chunk_id: Optional[str], role: str, score: float, hallucination: bool = False, comments: str = ""):
+        import asyncio
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self.log_audit_feedback, event_id, chunk_id, role, score, hallucination, comments
+        )
 
     # ------------------------------------------------------------------
     # Speculative RAG: Draft Storage
@@ -437,6 +469,14 @@ class RagStore:
                 result = cur.fetchone()[0]
             conn.commit()
             return result
+
+    async def save_draft_async(self, draft_id: str, query_hash: str, draft_cluster: int,
+                               draft_content: str, confidence: float, chunk_ids: List[str]) -> str:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.save_draft, draft_id, query_hash, draft_cluster, draft_content, confidence, chunk_ids
+        )
 
     def get_drafts_for_query(self, query_hash: str) -> List[Dict[str, Any]]:
         """Retrieve all stored drafts for a query, ordered by confidence DESC."""

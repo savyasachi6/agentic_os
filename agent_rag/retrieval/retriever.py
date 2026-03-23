@@ -83,14 +83,14 @@ class HybridRetriever:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    # This is dangerous in sync code called from async, but for CLI/tests it works
-                    final_chunks = asyncio.run_coroutine_threadsafe(
-                        self._reranker.rerank(query, final_chunks, top_k=k), loop
-                    ).result()
+                    # If we are in an async loop, we cannot block and wait for a result 
+                    # from the same loop. This is a design flaw in the sync retrieve().
+                    # We log it and skip reranking to avoid deadlock.
+                    print("[retriever] Warning: Skipping sync rerank from within an async loop to avoid deadlock. Use retrieve_async().")
                 else:
                     final_chunks = asyncio.run(self._reranker.rerank(query, final_chunks, top_k=k))
             except Exception as e:
-                print(f"Sync Reranker failed: {e}")
+                print(f"[retriever] Sync Reranker failed: {e}")
                 final_chunks = final_chunks[:k]
         
         # 4. Enrich structural relationships
@@ -128,7 +128,7 @@ class HybridRetriever:
         k = top_k or self._top_k
         
         if use_cache:
-            cached = self._semantic_cache.get_cached_response(query)
+            cached = await self._semantic_cache.get_cached_response_async(query)
             if cached:
                 return self._parse_cached_chunks(cached["response"])
 
@@ -140,9 +140,7 @@ class HybridRetriever:
 
         # 2. Hybrid Search
         search_k = k * 2 if use_reranker else k
-        import asyncio
-        loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(None, self._rag_store.query_hybrid, query, query_vector, search_k)
+        results = await self._rag_store.query_hybrid_async(query, query_vector, search_k)
         
         final_chunks = [RetrievedChunk(
             id=r["id"],
@@ -214,23 +212,24 @@ class HybridRetriever:
     async def _relational_search_async(self, chunks: List[RetrievedChunk], depth: int = 2) -> List[RetrievedChunk]:
         if not chunks:
             return chunks
-        import asyncio
-        loop = asyncio.get_running_loop()
         chunk_ids = [c.id for c in chunks]
-        relations_map = await loop.run_in_executor(None, self._rag_store.get_chunk_relations, chunk_ids)
+        relations_map = await self._rag_store.get_chunk_relations_async(chunk_ids)
         for chunk in chunks:
             chunk.relations = relations_map.get(chunk.id, [])
         return chunks
 
-    def audit_results(self, event_id: str, auditor_role: str, score: float, chunk_id: Optional[str] = None, hallucination: bool = False, comments: str = ""):
+    async def audit_results_async(self, event_id: str, auditor_role: str, score: float, chunk_id: Optional[str] = None, hallucination: bool = False, comments: str = ""):
         """Saves feedback from the validation agents (Auditor/Gatekeeper)."""
-        self._rag_store.log_audit_feedback(
-            event_id=event_id,
-            chunk_id=chunk_id,
-            role=auditor_role,
-            score=score,
-            hallucination=hallucination,
-            comments=comments
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            self._rag_store.log_audit_feedback,
+            event_id,
+            chunk_id,
+            auditor_role,
+            score,
+            hallucination,
+            comments
         )
 
     async def speculative_retrieve(self, query: str, session_id: str,
