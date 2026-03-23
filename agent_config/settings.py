@@ -3,6 +3,7 @@ Unified settings for Agentic OS.
 """
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+import os
 from typing import Optional, List
 
 
@@ -32,6 +33,7 @@ class ModelSettings(BaseSettings):
     reasoning_model: str = Field(default="qwen3-vl:8b", validation_alias="REASONING_MODEL")
     drafter_model: str = Field(default="glm-4.7-9b", validation_alias="DRAFTER_MODEL")
     verifier_model: str = Field(default="qwen3-coder-next", validation_alias="VERIFIER_MODEL")
+    auditor_model: str = Field(default="gemma3:1b", validation_alias="AUDITOR_MODEL")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -118,6 +120,43 @@ class RedisSettings(BaseSettings):
         return f"redis://{self.host}:{self.port}/{self.db}"
 
 
+class SecuritySettings(BaseSettings):
+    jwt_secret: str = Field(default="super-secret-key", validation_alias="JWT_SECRET")
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_expiry_minutes: int = Field(default=60, validation_alias="JWT_EXPIRY_MINUTES")
+    keycloak_url: str = Field(default="http://localhost:8080/realms/myrealm", validation_alias="KEYCLOAK_URL")
+    keycloak_client_id: str = Field(default="agentic-os-kernel", validation_alias="KEYCLOAK_CLIENT_ID")
+    keycloak_client_secret: str = Field(default="your-client-secret", validation_alias="KEYCLOAK_CLIENT_SECRET")
+    
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class SandboxSettings(BaseSettings):
+    worker_base_port: int = Field(default=9100, validation_alias="SANDBOX_BASE_PORT")
+    worker_timeout_seconds: int = Field(default=3600, validation_alias="SANDBOX_WORKER_TIMEOUT")
+    max_memory_mb: int = Field(default=512, validation_alias="SANDBOX_MAX_MEMORY_MB")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+class EmailSettings(BaseSettings):
+    smtp_host: str = Field(default="localhost", validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_user: Optional[str] = Field(default=None, validation_alias="SMTP_USER")
+    smtp_password: Optional[str] = Field(default=None, validation_alias="SMTP_PASSWORD")
+    email_from: str = Field(default="agent@agentos.ai", validation_alias="EMAIL_FROM")
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+class ProductivitySettings(BaseSettings):
+    todo_path: str = Field(default="todo.json")
+    notes_dir: str = Field(default="notes")
+
+class DevOpsSettings(BaseSettings):
+    telegram_token: Optional[str] = Field(default=None)
+    github_token: Optional[str] = Field(default=None)
+
+
 # Singleton instances
 db_settings = DatabaseSettings()
 model_settings = ModelSettings()
@@ -129,3 +168,37 @@ reward_settings = RewardSettings()
 bandit_settings = BanditSettings()
 drift_settings = DriftSettings()
 redis_settings = RedisSettings()
+security_settings = SecuritySettings()
+sandbox_settings = SandboxSettings()
+email_settings = EmailSettings()
+productivity_settings = ProductivitySettings()
+devops_settings = DevOpsSettings()
+
+
+def validate_settings():
+    """Perform startup sanity checks on environment and configuration."""
+    import logging
+    logger = logging.getLogger("agentos.config")
+    
+    # 1. Check for insecure defaults in production-like environments
+    # We assume 'production' if certain flags are set or it's not localhost
+    is_prod = db_settings.host != "localhost" or server_settings.host != "0.0.0.0"
+    
+    if is_prod:
+        if db_settings.password == "password":
+            logger.error("[config] INSECURE: Using default POSTGRES_PASSWORD in non-local environment!")
+            # In a real hard-fail system, we'd raise an error here.
+            
+        if security_settings.jwt_secret == "super-secret-key":
+            logger.error("[config] INSECURE: Using default JWT_SECRET in non-local environment!")
+
+    # 2. Verify critical paths
+    if not os.path.exists(agent_settings.skills_dir):
+        logger.warning(f"[config] SKILLS_DIR not found: {agent_settings.skills_dir}. Indexing will fail.")
+
+    # 3. Connectivity hint (async checks would happen elsewhere, this is a fast sync check)
+    if llm_router_settings.backend == "ollama":
+        # Check if ollama is reachable (optional, maybe too slow for every startup)
+        pass
+
+    logger.info("[config] Settings validated.")

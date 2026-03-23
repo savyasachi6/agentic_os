@@ -18,6 +18,9 @@ services:
       retries: 5
     networks:
       - agentos-net
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-keycloak-db.sql:/docker-entrypoint-initdb.d/init-keycloak-db.sql
 
   redis:
     image: redis:7-alpine
@@ -46,7 +49,10 @@ services:
       - "9100"
     environment:
       WORKER_PORT: "9100"
-    command: ["python", "sandbox/worker.py", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
+      PYTHONPATH: /sandbox
+    volumes:
+      - .:/sandbox
+    command: ["python", "-u", "-m", "agent_sandbox.worker", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
     networks:
       - agentos-net
 
@@ -66,14 +72,21 @@ services:
       REDIS_PORT: "6379"
       LIGHTPANDA_CDP_URL: ws://lightpanda:9222
       TOOLS_API_URL: http://tools-api:9100
-      LLM_MODEL: qwen3-vl:8b
+      RL_ROUTER_URL: http://rl-router:8100/rl
+      LLM_MODEL: gemma3:4b
       EMBED_MODEL: mxbai-embed-large
       OLLAMA_HOST: http://host.docker.internal:11434
       PYTHONPATH: /app
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rl-router:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
@@ -81,6 +94,30 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    networks:
+      - agentos-net
+
+  rl-router:
+    build:
+      context: .
+      dockerfile: rl_router/Dockerfile
+    ports:
+      - "8100:8100"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:8100/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - agentos-net
 
@@ -102,5 +139,35 @@ services:
     depends_on:
       agent-core:
         condition: service_healthy
+    volumes:
+      - .:/app
     networks:
       - agentos-net
+
+  # Sovereign Identity (Keycloak)
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: agent
+      KC_DB_PASSWORD: password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentos-net
+
+volumes:
+  pgdata:
+

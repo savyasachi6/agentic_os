@@ -4,7 +4,12 @@ One-time script to:
 2. Seed some documents for end-to-end testing
 """
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# --- Monorepo Shim ---
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+# --------------------
 
 from agent_memory.db import get_db_connection
 
@@ -22,13 +27,13 @@ def run():
                         JOIN pg_class c ON c.oid = a.attrelid
                         WHERE c.relname = 'semantic_cache'
                           AND a.attname = 'query_vector'
-                          AND a.atttypmod = 1536
+                          AND a.atttypmod = 1024
                     ) THEN
                         -- Clear existing data first since we can't cast between vector dims
                         DELETE FROM semantic_cache;
                         ALTER TABLE semantic_cache DROP COLUMN query_vector;
-                        ALTER TABLE semantic_cache ADD COLUMN query_vector VECTOR(1024) NOT NULL DEFAULT array_fill(0, ARRAY[1024])::vector(1024);
-                        RAISE NOTICE 'Fixed semantic_cache.query_vector to VECTOR(1024)';
+                        ALTER TABLE semantic_cache ADD COLUMN query_vector VECTOR(1536) NOT NULL DEFAULT array_fill(0, ARRAY[1536])::vector(1536);
+                        RAISE NOTICE 'Fixed semantic_cache.query_vector to VECTOR(1536)';
                     ELSE
                         RAISE NOTICE 'semantic_cache.query_vector already correct or does not match known bad state';
                     END IF;

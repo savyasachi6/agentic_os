@@ -139,6 +139,12 @@ class FractalCache:
     # L0 / L1 / L2 Cache Retrieval
     # ------------------------------------------------------------------
 
+    async def get_cached_response_async(self, query: str) -> Optional[Dict[str, Any]]:
+        """Non-blocking version of get_cached_response."""
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_cached_response, query)
+
     def get_cached_response(self, query: str) -> Optional[Dict[str, Any]]:
         """
         L0 Redis → L1 Postgres exact → L2 pgvector ANN.
@@ -301,8 +307,8 @@ class FractalCache:
                                 r.setex(_redis_key(query_hash, "ctx"), ttl, serialised)
                             else:
                                 r.set(_redis_key(query_hash, "ctx"), serialised)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.warning("[cache] L0 ctx backfill error: %s", exc)
                     return data
         return None
 

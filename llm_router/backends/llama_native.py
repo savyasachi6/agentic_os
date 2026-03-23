@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Dict
+from typing import List, Dict, Optional
 from llm_router.backends.base import LLMBackend
 
 class LlamaCPPBackend(LLMBackend):
@@ -28,7 +28,7 @@ class LlamaCPPBackend(LLMBackend):
         except Exception as e:
             raise RuntimeError(f"Failed to load Llama model from {self.model_path}. Error: {e}")
 
-    async def generate_batch(self, messages_batch: List[List[Dict[str, str]]], model: str, max_tokens: int, temperature: float) -> List[str]:
+    async def generate_batch(self, messages_batch: List[List[Dict[str, str]]], model: str, max_tokens: int, temperature: float, stop: Optional[List[str]] = None) -> List[str]:
         """
         Runs inference natively without network overhead.
         We run this in a thread executor to prevent blocking the async event loop.
@@ -47,7 +47,8 @@ class LlamaCPPBackend(LLMBackend):
                 res = self.llm.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
-                    temperature=temperature
+                    temperature=temperature,
+                    stop=stop
                 )
                 return res["choices"][0]["message"]["content"]
             except Exception as e:

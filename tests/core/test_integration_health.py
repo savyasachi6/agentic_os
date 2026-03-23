@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from agent_core.loop import LocalAgent
+from agent_core.loop.coordinator import CoordinatorAgent
 from agent_core.state import AgentState
 from agent_skills.retriever import SkillRetriever
 from agent_memory.vector_store import VectorStore
@@ -12,10 +12,10 @@ async def test_system_of_systems_health():
     Verified that the orchestrator can reach its subsystems.
     """
     # 1. Mock the external heavy dependencies (DB, LLM, and Ollama)
-    with patch("memory.db.get_db_connection") as mock_get_conn_db, \
-         patch("memory.vector_store.get_db_connection") as mock_get_conn_vs, \
-         patch("memory.db.init_db_pool"), \
-         patch("core.llm.LLMClient") as mock_llm_client, \
+    with patch("agent_memory.db.get_db_connection") as mock_get_conn_db, \
+         patch("agent_memory.vector_store.get_db_connection") as mock_get_conn_vs, \
+         patch("agent_memory.db.init_db_pool"), \
+         patch("agent_core.llm.LLMClient") as mock_llm_client, \
          patch("ollama.embeddings") as mock_embeddings, \
          patch("ollama.chat") as mock_chat, \
          patch("pgvector.psycopg2.register_vector"):
@@ -45,9 +45,7 @@ async def test_system_of_systems_health():
         # Mock for queued reason call (if used)
         llm_instance.reason = MagicMock(return_value="Thought: I am healthy.\nAction: finish(status='integrated')")
         
-        agent = LocalAgent(
-            use_queue=False
-        )
+        agent = CoordinatorAgent()
         # Manually override the llm and state to match our mocks/instances
         agent.llm = llm_instance
         agent.state = state

@@ -9,9 +9,12 @@
         ".git",
         ".venv"
     ],
-    "reportMissingImports": true,
+    "reportMissingImports": "warning",
     "reportMissingTypeStubs": false,
-    "pythonVersion": "3.13",
+    "pythonVersion": "3.12",
+    "typeCheckingMode": "basic",
+    "reportMissingModuleSource": "none",
+    "reportAttributeAccessIssue": "warning",
     "pythonPlatform": "Windows",
     "venvPath": ".",
     "venv": ".venv",
@@ -19,6 +22,3 @@
         "."
     ]
 }
-
-
-

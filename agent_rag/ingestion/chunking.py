@@ -1,5 +1,8 @@
 # src/ingestion/chunking.py
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
+from ..indexing.hierarchy_builder import HierarchyBuilder
+from agent_memory.vector_store import VectorStore
+
 
 def chunk_structured_doc(structured_elements: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -60,3 +63,20 @@ def chunk_structured_doc(structured_elements: List[Dict[str, Any]]) -> List[Dict
         })
 
     return chunks
+
+
+def hierarchical_chunking(document_id: str, raw_text: str) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Senior Architect implementation of hierarchical (Parent-Child) indexing.
+    
+    Returns:
+        (parent_chunks, child_chunks)
+        parent_chunks: ~1500 tokens, rich context, NO embeddings.
+        child_chunks: ~250 tokens, high precision, WITH embeddings.
+    """
+    vs = VectorStore()
+    builder = HierarchyBuilder(embed_fn=vs.generate_embedding_sync)
+    
+    parents, children = builder.build(document_id, raw_text)
+    return parents, children
+

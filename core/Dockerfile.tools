@@ -18,8 +18,16 @@ RUN chown -R sandboxuser:sandboxuser /sandbox
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn pydantic
 
-# Copy only the sandbox code
+# Copy the required code
 COPY agent_sandbox/ sandbox/
+COPY agent_security/ agent_security/
+COPY agent_core/ agent_core/
+COPY agent_config/ agent_config/
+COPY agent_memory/ agent_memory/
+COPY agent_productivity/ agent_productivity/
+COPY agent_rag/ agent_rag/
+COPY agent_skills/ agent_skills/
+
 
 # Switch to the non-root user
 USER sandboxuser

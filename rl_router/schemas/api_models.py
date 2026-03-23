@@ -86,6 +86,12 @@ class FeedbackRequest(BaseModel):
         default_factory=list,
         description="Per-tool invocation traces with RelyToolBench hallucination categories",
     )
+    user_feedback: Optional[int] = Field(
+        default=None,
+        ge=-1,
+        le=1,
+        description="Explicit user feedback (+1 for thumbs up, -1 for thumbs down)",
+    )
 
 
 class FeedbackResponse(BaseModel):

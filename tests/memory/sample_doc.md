@@ -4,7 +4,7 @@
 This document describes the high-fidelity memory system for quantum agents.
 
 ## 2. Technical Details
-The system uses a 1024d vector space.
+The system uses a 1536d vector space.
 
 | Component | Latency | Throughput |
 |-----------|---------|------------|

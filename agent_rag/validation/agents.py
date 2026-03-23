@@ -9,7 +9,10 @@ Hierarchical Agent Roles for the Agentic RAG Pipeline:
 """
 from typing import Any, Dict, Tuple, List, Optional
 import json
+import logging
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("agentos.rag_agents")
 
 # Agent OS native integrations
 from agent_core.llm import generate_structured_output, get_llm
@@ -31,8 +34,8 @@ class PlannerAgent:
             from agent_config import model_settings
             response = ollama.chat(model=model_settings.fast_model, messages=[{"role": "user", "content": prompt}])
             return json.loads(response['message']['content'])
-        except Exception:
-            # Fallback
+        except Exception as e:
+            logger.debug("[PlannerAgent] JSON decompose failed: %s", e)
             return [{"sub_query": query}]
 
     async def strategize_skills(self, query: str) -> Dict[str, Any]:
@@ -236,7 +239,18 @@ Provide an improved answer that addresses all concerns."""
 class AuditorAgent:
     """Bottom-tier evaluation and feedback."""
     async def audit(self, answer: str, chunks: List[RetrievedChunk]) -> Tuple[bool, dict]:
-        context = "\n\n".join(c.content for c in chunks[:5])
+        """
+        Original answer-level audit. 
+        Calls the specialized Auditor for chunk-level validation.
+        """
+        from .auditor import Auditor
+        auditor = Auditor()
+        
+        # 1. Chunk-level audit
+        approved_chunks, chunk_reports = await auditor.audit_chunks("N/A", chunks)
+        
+        # 2. Answer-level audit (existing logic, but using the new model)
+        context = "\n\n".join(c.content for c in approved_chunks[:5])
         prompt = f"""Evaluate the following answer against the provided context.
 
 ANSWER: {answer}
@@ -249,15 +263,19 @@ Check for:
 
 Respond in JSON: {{"is_valid": true/false, "issues": ["issue1"], "score": 0.0-1.0}}"""
         try:
-            import ollama
             from agent_config import model_settings
-            response = ollama.chat(model=model_settings.fast_model, messages=[{"role": "user", "content": prompt}])
+            import ollama
+            response = await ollama.AsyncClient().chat(model=model_settings.auditor_model, messages=[{"role": "user", "content": prompt}])
             text = response['message']['content']
             if "```" in text:
                 start = text.find("{")
                 end = text.rfind("}") + 1
                 text = text[start:end]
             result = json.loads(text)
+            
+            # Combine reports
+            result["chunk_reports"] = chunk_reports
             return result.get("is_valid", True), result
-        except Exception:
-            return True, {"is_valid": True, "issues": [], "score": 0.8}
+        except Exception as e:
+            logger.error(f"AuditorAgent failed: {e}")
+            return True, {"is_valid": True, "issues": [f"Error: {e}"], "score": 0.8}

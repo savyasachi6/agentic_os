@@ -43,6 +43,7 @@ class RewardCoefficients:
     kappa: float = 2.0
     hallucination_hard_cap: float = -0.3
     lambda_tool_cost: float = 1e-4
+    lambda_feedback: float = 0.5
     hallucination_penalties: Dict[HallucinationCategory, float] = field(
         default_factory=lambda: dict(DEFAULT_HALLUCINATION_PENALTIES)
     )
@@ -77,6 +78,7 @@ class RewardCalculator:
         auditor_score: float | None = None,
         depth_used: int = 0,
         min_sufficient_depth: int | None = None,
+        user_feedback: float | None = None,
     ) -> RewardVector:
         """Compute the full reward vector and its scalar utility."""
 
@@ -99,8 +101,11 @@ class RewardCalculator:
             excess = 0
         overthinking_penalty = -self._c.gamma * excess
 
+        # r5 — explicit user feedback (reward boost or penalty)
+        feedback_reward = self._c.lambda_feedback * float(user_feedback or 0.0)
+
         scalar = self._scalarise(
-            quality=quality,
+            quality=quality + feedback_reward,
             hallucination_penalty=hallucination_penalty,
             latency_cost=latency_cost,
             overthinking_penalty=overthinking_penalty,
@@ -125,6 +130,7 @@ class RewardCalculator:
         success: bool,
         latency_ms: float,
         tool_calls: List[ToolCallLog] | None = None,
+        user_feedback: float | None = None,
     ) -> float:
         """Compute Benefit-Cost Utility with granular hallucination penalties.
 
@@ -151,7 +157,10 @@ class RewardCalculator:
         # 4. Differentiated hallucination penalty
         p_hall = sum(penalties.get(tc.hallucination_type, 0.0) for tc in tool_calls)
 
-        utility = r_task - c_l - p_tool - p_hall
+        # 5. User feedback reward
+        r_feedback = self._c.lambda_feedback * float(user_feedback or 0.0)
+
+        utility = r_task - c_l - p_tool - p_hall + r_feedback
         return round(float(utility), 6)
 
     def is_reliable_pass(self, success: bool, tool_calls: List[ToolCallLog] | None = None) -> bool:

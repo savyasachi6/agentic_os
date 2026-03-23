@@ -184,3 +184,42 @@ class ToolExecutionRepository:
             conn.close()
         except Exception:
             logger.exception("Failed to log tool executions for episode %s", episode_id)
+
+
+class BanditRepository:
+    """Repository for bandit_weights table."""
+
+    def save_weights(self, model_name: str, weights_bytes: bytes) -> bool:
+        """Upsert serialized bandit weights into the database."""
+        sql = """
+            INSERT INTO bandit_weights (model_name, weights_bin, updated_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (model_name) DO UPDATE SET
+                weights_bin = EXCLUDED.weights_bin,
+                updated_at = EXCLUDED.updated_at
+        """
+        try:
+            conn = get_connection()
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (model_name, psycopg2.Binary(weights_bytes)))
+            conn.close()
+            return True
+        except Exception:
+            logger.exception("Failed to save bandit weights for %s", model_name)
+            return False
+
+    def load_weights(self, model_name: str) -> Optional[bytes]:
+        """Fetch serialized bandit weights from the database."""
+        sql = "SELECT weights_bin FROM bandit_weights WHERE model_name = %s"
+        try:
+            conn = get_connection()
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (model_name,))
+                    row = cur.fetchone()
+            conn.close()
+            return bytes(row[0]) if row else None
+        except Exception:
+            logger.exception("Failed to load bandit weights for %s", model_name)
+            return None

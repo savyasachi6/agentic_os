@@ -56,7 +56,9 @@ class RagStore:
         """
         Inserts a batch of chunks and their embedding vectors.
         Skips chunks that have an exact matching content_hash.
-        `chunks` list items: {chunk_index, content_hash, raw_text, clean_text, token_count, section_path, llm_summary, llm_tags, enrichment, metadata, embedding}
+        `chunks` list items: {chunk_index, content_hash, raw_text, clean_text, token_count,
+                              section_path, llm_summary, llm_tags, enrichment, metadata, embedding,
+                              parent_chunk_id (optional — set by HierarchyBuilder for child chunks)}
         """
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -68,13 +70,15 @@ class RagStore:
                             continue
 
                     chunk_id = chunk.get("id") or str(uuid.uuid4())
-                    
+                    parent_chunk_id = chunk.get("parent_chunk_id")  # None for legacy / parent chunks
+
                     cur.execute(
                         """
                         INSERT INTO chunks (
-                            id, document_id, chunk_index, content_hash, raw_text, clean_text, 
-                            token_count, section_path, llm_summary, llm_tags, enrichment_json, chunk_metadata
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            id, document_id, chunk_index, content_hash, raw_text, clean_text,
+                            token_count, section_path, llm_summary, llm_tags, enrichment_json,
+                            chunk_metadata, parent_chunk_id
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (document_id, chunk_index) DO UPDATE SET
                             content_hash = EXCLUDED.content_hash,
                             raw_text = EXCLUDED.raw_text,
@@ -85,6 +89,7 @@ class RagStore:
                             llm_tags = EXCLUDED.llm_tags,
                             enrichment_json = EXCLUDED.enrichment_json,
                             chunk_metadata = EXCLUDED.chunk_metadata,
+                            parent_chunk_id = EXCLUDED.parent_chunk_id,
                             updated_at = CURRENT_TIMESTAMP,
                             deleted_at = NULL
                         RETURNING id;
@@ -95,12 +100,13 @@ class RagStore:
                             chunk.get("token_count"), chunk.get("section_path"),
                             chunk.get("llm_summary"), chunk.get("llm_tags", []),
                             json.dumps(chunk.get("enrichment", {})),
-                            json.dumps(chunk.get("metadata", {}))
+                            json.dumps(chunk.get("metadata", {})),
+                            parent_chunk_id,
                         )
                     )
-                    
+
                     persisted_chunk_id = cur.fetchone()[0]
-                    
+
                     if "embedding" in chunk:
                         cur.execute(
                             """
@@ -183,12 +189,49 @@ class RagStore:
     # ------------------------------------------------------------------
     # Retrieval
     # ------------------------------------------------------------------
+
+    def fetch_parent_chunk(self, parent_chunk_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a parent chunk by its UUID for Dynamic Zooming.
+
+        Returns a dict with 'id', 'raw_text', 'clean_text', 'chunk_metadata',
+        or None if the chunk is not found.
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, raw_text, clean_text, chunk_metadata
+                    FROM chunks
+                    WHERE id = %s AND deleted_at IS NULL
+                    LIMIT 1;
+                    """,
+                    (parent_chunk_id,)
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "id": str(row[0]),
+                    "raw_text": row[1],
+                    "clean_text": row[2],
+                    "chunk_metadata": row[3] or {},
+                }
+
+    async def fetch_parent_chunk_async(self, parent_chunk_id: str) -> Optional[Dict[str, Any]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.fetch_parent_chunk, parent_chunk_id)
+
     def query_hybrid(self, query_text: str, query_vector: List[float], top_k: int = 10,
                      fulltext_weight: float = 0.5, vector_weight: float = 0.5) -> List[Dict[str, Any]]:
         """
         Hybrid retrieval using RRF (Reciprocal Rank Fusion) on full-text and vector search.
         Returns a list of chunks with their scores and associated document info.
+        Also returns parent_chunk_id when present (for Dynamic Zooming).
         """
+        # Exclude parent-only chunks from search results (they have no embeddings and exist
+        # only as context sources for zoom-out; we never want them as direct answers).
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -200,11 +243,13 @@ class RagStore:
                             c.raw_text,
                             c.clean_text,
                             c.llm_summary,
+                            c.parent_chunk_id,
                             d.source_uri,
                             ROW_NUMBER() OVER (ORDER BY ts_rank_cd(to_tsvector('english', c.clean_text), websearch_to_tsquery('english', %s)) DESC) AS rank
                         FROM chunks c
                         JOIN documents d ON c.document_id = d.id
                         WHERE to_tsvector('english', c.clean_text) @@ websearch_to_tsquery('english', %s)
+                          AND (c.chunk_metadata->>'is_parent')::boolean IS NOT TRUE
                         ORDER BY rank
                         LIMIT %s
                     ),
@@ -215,19 +260,21 @@ class RagStore:
                             c.raw_text,
                             c.clean_text,
                             c.llm_summary,
+                            c.parent_chunk_id,
                             d.source_uri,
                             ROW_NUMBER() OVER (ORDER BY ce.embedding <=> %s::vector) AS rank
                         FROM chunks c
                         JOIN chunk_embeddings ce ON c.id = ce.chunk_id
                         JOIN documents d ON c.document_id = d.id
                         WHERE ce.is_current = TRUE
+                          AND (c.chunk_metadata->>'is_parent')::boolean IS NOT TRUE
                         ORDER BY rank
                         LIMIT %s
                     ),
                     rrf_results AS (
                         SELECT
                             COALESCE(fs.chunk_id, vs.chunk_id) AS chunk_id,
-                            (COALESCE(1.0 / (%s + fs.rank), 0.0) * %s + 
+                            (COALESCE(1.0 / (%s + fs.rank), 0.0) * %s +
                              COALESCE(1.0 / (%s + vs.rank), 0.0) * %s) AS score
                         FROM fulltext_search fs
                         FULL OUTER JOIN vector_search vs ON fs.chunk_id = vs.chunk_id
@@ -239,29 +286,39 @@ class RagStore:
                         COALESCE(fs.clean_text, vs.clean_text) AS clean_text,
                         COALESCE(fs.llm_summary, vs.llm_summary) AS llm_summary,
                         COALESCE(fs.source_uri, vs.source_uri) AS source_uri,
-                        rr.score
+                        rr.score,
+                        COALESCE(fs.parent_chunk_id, vs.parent_chunk_id) AS parent_chunk_id
                     FROM rrf_results rr
                     LEFT JOIN fulltext_search fs ON rr.chunk_id = fs.chunk_id
                     LEFT JOIN vector_search vs ON rr.chunk_id = vs.chunk_id
                     ORDER BY rr.score DESC
                     LIMIT %s;
                     """,
-                    (query_text, query_text, top_k, query_vector, top_k, 
-                     60, fulltext_weight, 60, vector_weight, top_k) # K=60 is a common RRF constant
+                    (query_text, query_text, top_k, query_vector, top_k,
+                     60, fulltext_weight, 60, vector_weight, top_k)  # K=60 is a common RRF constant
                 )
                 rows = cur.fetchall()
                 results = []
                 for r in rows:
                     results.append({
-                        "id": str(r[0]), 
-                        "document_id": str(r[1]), 
-                        "raw_text": r[2], 
+                        "id": str(r[0]),
+                        "document_id": str(r[1]),
+                        "raw_text": r[2],
                         "clean_text": r[3],
                         "llm_summary": r[4],
                         "source_uri": r[5],
-                        "score": float(r[6])
+                        "score": float(r[6]),
+                        "parent_chunk_id": str(r[7]) if r[7] else None,
                     })
                 return results
+
+    async def query_hybrid_async(self, query_text: str, query_vector: List[float], top_k: int = 10,
+                                 fulltext_weight: float = 0.5, vector_weight: float = 0.5) -> List[Dict[str, Any]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.query_hybrid, query_text, query_vector, top_k, fulltext_weight, vector_weight
+        )
 
     def traverse_graph(self, entity_id: int, max_depth: int = 2) -> List[Dict[str, Any]]:
         """
@@ -333,6 +390,11 @@ class RagStore:
                     })
                 return res
 
+    async def get_chunk_relations_async(self, chunk_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_chunk_relations, chunk_ids)
+
     # ------------------------------------------------------------------
     # Audit & Feedback
     # ------------------------------------------------------------------
@@ -350,6 +412,13 @@ class RagStore:
                 event_id = str(cur.fetchone()[0])
             conn.commit()
             return event_id
+
+    async def log_retrieval_event_async(self, session_id: str, query: str, chunk_ids: List[str], strategy: str, latency_ms: int) -> str:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.log_retrieval_event, session_id, query, chunk_ids, strategy, latency_ms
+        )
 
     def log_audit_feedback(self, event_id: str, chunk_id: Optional[str], role: str, score: float, hallucination: bool = False, comments: str = ""):
         with get_db_connection() as conn:
@@ -370,6 +439,13 @@ class RagStore:
                     (event_id, role, score, hallucination, comments)
                 )
             conn.commit()
+
+    async def log_audit_feedback_async(self, event_id: str, chunk_id: Optional[str], role: str, score: float, hallucination: bool = False, comments: str = ""):
+        import asyncio
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, self.log_audit_feedback, event_id, chunk_id, role, score, hallucination, comments
+        )
 
     # ------------------------------------------------------------------
     # Speculative RAG: Draft Storage
@@ -393,6 +469,14 @@ class RagStore:
                 result = cur.fetchone()[0]
             conn.commit()
             return result
+
+    async def save_draft_async(self, draft_id: str, query_hash: str, draft_cluster: int,
+                               draft_content: str, confidence: float, chunk_ids: List[str]) -> str:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self.save_draft, draft_id, query_hash, draft_cluster, draft_content, confidence, chunk_ids
+        )
 
     def get_drafts_for_query(self, query_hash: str) -> List[Dict[str, Any]]:
         """Retrieve all stored drafts for a query, ordered by confidence DESC."""

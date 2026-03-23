@@ -24,6 +24,7 @@ from rl_router.infrastructure.config import (
 from rl_router.infrastructure.repositories import (
     EpisodeRepository,
     ToolExecutionRepository,
+    BanditRepository,
 )
 
 
@@ -44,8 +45,19 @@ def get_bandit() -> LinUCBBandit:
         drift_min_samples=drift_settings.min_samples_before_detection,
     )
     
-    # Load weights if they exist (Warm Start)
-    # Resolve path relative to the package root (3 levels up from api/dependencies.py)
+    # Warmer Start — Try loading from DB first (most recent)
+    repo = get_bandit_repo()
+    db_weights = repo.load_weights("linucb_rag_depth")
+    
+    if db_weights:
+        try:
+            bandit.load_from_bytes(db_weights)
+            print("[bandit] Loaded weights from Database")
+            return bandit
+        except Exception as e:
+            print(f"[bandit] Failed to load weights from DB: {e}")
+
+    # Fallback to local file (Cold Start / Migration)
     pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     weights_path = os.path.join(pkg_root, "bandit_weights.npz")
     
@@ -54,8 +66,40 @@ def get_bandit() -> LinUCBBandit:
             with open(weights_path, "rb") as f:
                 bandit.load_from_bytes(f.read())
             print(f"[bandit] Loaded weights from {weights_path}")
+            return bandit
         except Exception as e:
-            print(f"[bandit] Failed to load weights: {e}")
+            print(f"[bandit] Failed to load weights from file: {e}")
+
+    # Heuristic Warm-Starting (Cold Start Bootstrapping)
+    print("[bandit] Performing Heuristic Warm-Start (Cold Start)...")
+    try:
+        from rl_router.utils.bootstrapper import Teacher
+        from rl_router.domain.features import ContextFeatureBuilder
+        from rl_router.domain.models import RetrievalAction
+        
+        queries = [
+            "how to refactor the agent_core loop",
+            "debug the routing service",
+            "link the new API to the UI",
+            "hi",
+            "what is the meaning of life?",
+            "kubernetes throughput issues",
+        ]
+        fb = ContextFeatureBuilder()
+        for q in queries:
+            depth, reward = Teacher.evaluate_query(q)
+            if depth > 3:
+                depth = 3
+            action = RetrievalAction.from_components(depth=depth, speculative=False).value
+            zeroed_embedding = [0.0] * bandit.d
+            ctx = fb.build(
+                query_text=q,
+                query_embedding=zeroed_embedding,
+            )
+            bandit.update(action, ctx, float(reward), hallucination_flag=False)
+        print("[bandit] Heuristic Warm-Start Complete.")
+    except Exception as e:
+        print(f"[bandit] Bootstrapping failed: {e}")
             
     return bandit
 
@@ -92,6 +136,11 @@ def get_episode_repo() -> EpisodeRepository:
 @lru_cache(maxsize=1)
 def get_tool_exec_repo() -> ToolExecutionRepository:
     return ToolExecutionRepository()
+
+
+@lru_cache(maxsize=1)
+def get_bandit_repo() -> BanditRepository:
+    return BanditRepository()
 
 
 # ---------------------------------------------------------------------------

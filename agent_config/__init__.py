@@ -8,4 +8,9 @@ from .settings import (
     reward_settings,
     bandit_settings,
     drift_settings,
+    security_settings,
+    sandbox_settings,
+    email_settings,
+    productivity_settings,
+    devops_settings,
 )

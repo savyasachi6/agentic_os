@@ -6,7 +6,9 @@ Pure domain logic using regex — no FastAPI, no DB, no config.
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from typing import List
 
 import numpy as np
@@ -78,6 +80,24 @@ _HYPOTHETICAL = re.compile(
     re.IGNORECASE,
 )
 
+def compute_token_entropy(text: str) -> float:
+    tokens = text.lower().split()
+    if not tokens:
+        return 0.0
+    counts = Counter(tokens)
+    total = sum(counts.values())
+    return -sum((c/total) * math.log2(c/total) for c in counts.values())
+
+def mock_phi3_complexity(text: str) -> float:
+    """Mock a 1-5 difficulty rating from a Phi-3 Pre-check model."""
+    length = len(text.split())
+    if length > 20: return 5.0
+    elif length > 12: return 4.0
+    elif length > 6: return 3.0
+    elif length > 3: return 2.0
+    return 1.0
+
+
 
 def extract_linguistic_features(query: str) -> LinguisticFeatures:
     """Extract 17-dimensional binary linguistic feature vector from raw text."""
@@ -108,11 +128,12 @@ def extract_linguistic_features(query: str) -> LinguisticFeatures:
 class ContextFeatureBuilder:
     """Builds a dense numeric context vector for the bandit.
 
-    Layout (1561-d default):
+    Layout (1564-d default):
         [0..1535]     query embedding
         [1536..1539]  intent logits
         [1540..1556]  17-d binary linguistic features
         [1557..1560]  session stats
+        [1561..1563]  advanced stats (entropy, complexity, cluster_id)
     """
 
     def __init__(self, embedding_dim: int = 1536) -> None:
@@ -121,7 +142,7 @@ class ContextFeatureBuilder:
     @property
     def output_dim(self) -> int:
         """Total dimension of the context vector."""
-        return self._embedding_dim + 4 + 17 + 4
+        return self._embedding_dim + 4 + 17 + 7
 
     def build(
         self,
@@ -174,4 +195,11 @@ class ContextFeatureBuilder:
             dtype=np.float64,
         ) * metadata_scale
 
-        return np.concatenate([emb, intents, ling_vec, session_stats])
+        # 5. Advanced Engineered Features (Phase C)
+        entropy = compute_token_entropy(query_text)
+        complexity = mock_phi3_complexity(query_text)
+        cluster_id = float(np.argmax(intents)) if intents.size > 0 else 0.0
+        advanced_stats = np.array([entropy, complexity, cluster_id], dtype=np.float64) * metadata_scale
+
+        return np.concatenate([emb, intents, ling_vec, session_stats, advanced_stats])
+

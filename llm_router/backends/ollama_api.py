@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import httpx
-from typing import List, Dict
+from typing import List, Dict, Optional
 from llm_router.backends.base import LLMBackend
 from agent_core.resilience import async_retry, RETRYABLE_EXCEPTIONS
 
@@ -32,6 +32,7 @@ class OllamaBackend(LLMBackend):
         model: str,
         max_tokens: int,
         temperature: float,
+        stop: Optional[List[str]] = None
     ) -> List[str]:
         """
         Fire concurrent async requests to Ollama with per-request retry/backoff.
@@ -42,19 +43,31 @@ class OllamaBackend(LLMBackend):
 
         @async_retry(max_attempts=5, base_delay=1.0, cap_delay=30.0, label="OllamaBackend.fetch")
         async def fetch(messages: List[Dict[str, str]]) -> str:
-            payload = {
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_tokens,
-                },
-            }
-            response = await client.post(f"{self.base_url}/api/chat", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("message", {}).get("content", "")
+            from ollama import AsyncClient
+            from agent_config import llm_router_settings
+            
+            nonlocal model, temperature, max_tokens, stop
+            
+            client = AsyncClient(host=llm_router_settings.ollama_base_url)
+            print(f"[OllamaBackend DEBUG] Model: {model} | Msgs: {len(messages)}")
+            try:
+                resp = await client.chat(
+                    model=model,
+                    messages=messages,
+                    stream=False,
+                    options={
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                        "num_ctx": 8192,
+                        "stop": stop,
+                    }
+                )
+                content = resp['message']['content']
+                print(f"[OllamaBackend DEBUG] Response Len: {len(content)}")
+                return content
+            except Exception as e:
+                print(f"[OllamaBackend] Fetch error: {e}")
+                raise
 
         tasks = [fetch(msgs) for msgs in messages_batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)

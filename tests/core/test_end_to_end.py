@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agent_core.loop.coordinator import CoordinatorAgent
-from core.agents.sql_agent import SQLAgentWorker
+from agent_core.agents.sql_agent import SQLAgentWorker
 from llm_router.router import LLMRouter
 
 async def main():

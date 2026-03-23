@@ -15,22 +15,24 @@ import asyncio
 from typing import Optional
 import sys
 
-# Ensure project root is in sys.path
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if root_dir not in sys.path:
-    sys.path.insert(0, root_dir)
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
+# Ensure project root is in Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
 # Load root .env
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+load_dotenv(os.path.join(root_dir, ".env"))
 
 from agent_core.loop.coordinator import CoordinatorAgent
 from agent_core.agents.sql_agent import SQLAgentWorker
+from agent_core.agents.capability_agent import CapabilityAgentWorker
 from agent_core.agents.code_agent import CodeAgentWorker
-from agent_core.agents.research_agent import ResearcherAgentWorker
+from agent_core.agents.rag_agent import RAGAgentWorker
 from agent_core.llm import LLMClient
 from agent_memory.db import init_schema
 from agent_memory.vector_store import VectorStore
@@ -70,8 +72,11 @@ async def startup():
     code_worker = CodeAgentWorker(workspace_root=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     _worker_tasks.append(asyncio.create_task(code_worker.run_forever(), name="code_agent_worker"))
     
-    research_worker = ResearcherAgentWorker()
-    _worker_tasks.append(asyncio.create_task(research_worker.run_forever(), name="research_agent_worker"))
+    rag_worker = RAGAgentWorker()
+    _worker_tasks.append(asyncio.create_task(rag_worker.run_forever(), name="rag_agent_worker"))
+    
+    capability_worker = CapabilityAgentWorker()
+    _worker_tasks.append(asyncio.create_task(capability_worker.run_forever(), name="capability_agent_worker"))
     
     print("[server] Agent OS ready (LLM Router started, workers running).")
 
