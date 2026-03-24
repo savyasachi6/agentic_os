@@ -3,7 +3,7 @@ import logging
 import httpx
 from typing import List, Dict, Optional
 from llm_router.backends.base import LLMBackend
-from agent_core.resilience import async_retry, RETRYABLE_EXCEPTIONS
+from core.resilience import async_retry, RETRYABLE_EXCEPTIONS
 
 logger = logging.getLogger("agentos.ollama_backend")
 
@@ -43,12 +43,13 @@ class OllamaBackend(LLMBackend):
 
         @async_retry(max_attempts=5, base_delay=1.0, cap_delay=30.0, label="OllamaBackend.fetch")
         async def fetch(messages: List[Dict[str, str]]) -> str:
+            from core.config import settings
             from ollama import AsyncClient
-            from agent_config import llm_router_settings
             
             nonlocal model, temperature, max_tokens, stop
             
-            client = AsyncClient(host=llm_router_settings.ollama_base_url)
+            # Use the shared httpx client for connection pooling if possible
+            client = AsyncClient(host=settings.ollama_base_url, client=_get_client())
             print(f"[OllamaBackend DEBUG] Model: {model} | Msgs: {len(messages)}")
             try:
                 resp = await client.chat(

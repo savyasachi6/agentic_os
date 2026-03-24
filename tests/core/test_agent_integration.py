@@ -42,12 +42,8 @@ def mock_llm():
         
         yield client
 
-@pytest.fixture
-def mock_skill_retriever():
-    with patch('agents.coordinator.SkillRetriever') as mock:
-        retriever = mock.return_value
-        retriever.retrieve_context.return_value = "Mock Skill Context"
-        yield retriever
+
+# Removed mock_skill_retriever as it is no longer used in CoordinatorAgent
 
 @pytest.fixture
 def mock_agent_state():
@@ -59,7 +55,7 @@ def mock_agent_state():
         yield state
 
 @pytest.mark.asyncio
-async def test_coordinator_routing_to_productivity(mock_tree_store, mock_llm, mock_skill_retriever, mock_agent_state):
+async def test_coordinator_routing_to_productivity(mock_tree_store, mock_llm, mock_agent_state):
     """Verify that 'add a todo' routes to the productivity agent."""
     # We must mock generate_async since we don't pass status_callback
     mock_llm.generate_async.side_effect = [
@@ -79,7 +75,7 @@ async def test_coordinator_routing_to_productivity(mock_tree_store, mock_llm, mo
         assert productivity_call.type == NodeType.TASK
 
 @pytest.mark.asyncio
-async def test_specialist_budget_increase(mock_tree_store, mock_llm, mock_skill_retriever, mock_agent_state):
+async def test_specialist_budget_increase(mock_tree_store, mock_llm, mock_agent_state):
     """Verify that specialists receive a budget of 10 turns."""
     mock_llm.generate_async.side_effect = [
         "Thought: Routing. Action: code(echo hello)",
