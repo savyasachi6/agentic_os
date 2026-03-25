@@ -68,6 +68,8 @@ class FeedbackService:
             final_utility = self._reward.compute_differentiated_utility(
                 success=request.success,
                 latency_ms=request.latency_ms,
+                step_count=request.step_count,
+                invalid_call_count=request.invalid_call_count,
                 tool_calls=domain_tool_calls,
                 user_feedback=request.user_feedback,
             )

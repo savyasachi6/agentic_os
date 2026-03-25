@@ -66,8 +66,40 @@ def get_bandit() -> LinUCBBandit:
             with open(weights_path, "rb") as f:
                 bandit.load_from_bytes(f.read())
             print(f"[bandit] Loaded weights from {weights_path}")
+            return bandit
         except Exception as e:
             print(f"[bandit] Failed to load weights from file: {e}")
+
+    # Heuristic Warm-Starting (Cold Start Bootstrapping)
+    print("[bandit] Performing Heuristic Warm-Start (Cold Start)...")
+    try:
+        from rl_router.utils.bootstrapper import Teacher
+        from rl_router.domain.features import ContextFeatureBuilder
+        from rl_router.domain.models import RetrievalAction
+        
+        queries = [
+            "how to refactor the agent_core loop",
+            "debug the routing service",
+            "link the new API to the UI",
+            "hi",
+            "what is the meaning of life?",
+            "kubernetes throughput issues",
+        ]
+        fb = ContextFeatureBuilder()
+        for q in queries:
+            depth, reward = Teacher.evaluate_query(q)
+            if depth > 3:
+                depth = 3
+            action = RetrievalAction.from_components(depth=depth, speculative=False).value
+            zeroed_embedding = [0.0] * bandit.d
+            ctx = fb.build(
+                query_text=q,
+                query_embedding=zeroed_embedding,
+            )
+            bandit.update(action, ctx, float(reward), hallucination_flag=False)
+        print("[bandit] Heuristic Warm-Start Complete.")
+    except Exception as e:
+        print(f"[bandit] Bootstrapping failed: {e}")
             
     return bandit
 

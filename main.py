@@ -6,6 +6,7 @@ Usage:
     python main.py server   -- Start unified Gateway + RL Router + Workers
     python main.py ui       -- Launch Streamlit UI
     python main.py cli      -- Start interactive CLI
+    python main.py system   -- Start new Agentic OS Multi-Agent System
     python main.py index    -- Re-index skills
 """
 
@@ -56,6 +57,10 @@ def main():
     chat_parser.add_argument("--host", default=None)
     chat_parser.add_argument("--port", type=int, default=None)
 
+    # Multi-Agent System
+    system_parser = subparsers.add_parser("system", help="Start new Multi-Agent Coordinator")
+    system_parser.add_argument("--session", default=None)
+
     args = parser.parse_args()
 
     if args.command == "server":
@@ -64,7 +69,8 @@ def main():
         cmd = [sys.executable, "-m", "gateway.main", "serve", "--host", args.host, "--port", str(args.port)]
         if args.reload:
             cmd.append("--reload")
-        subprocess.run(cmd)
+        result = subprocess.run(cmd)
+        sys.exit(result.returncode)
 
     elif args.command == "ui":
         print("[UI] Starting Streamlit...")
@@ -78,7 +84,8 @@ def main():
         subprocess.run(cmd)
 
     elif args.command == "index":
-        subprocess.run([sys.executable, "-m", "gateway.main", "index", "--skills-dir", args.dir])
+        result = subprocess.run([sys.executable, "-m", "gateway.main", "index", "--skills-dir", args.dir])
+        sys.exit(result.returncode)
 
     elif args.command == "submit":
         cmd = [sys.executable, "-m", "gateway.main", "submit", args.task]
@@ -105,6 +112,35 @@ def main():
     elif args.command == "docker-down":
         print("[Docker] Stopping all services...")
         subprocess.run(["docker-compose", "down"])
+
+    elif args.command == "system":
+        print("[System] Starting Agentic OS Multi-Agent Coordinator...")
+        import asyncio
+        from agents.coordinator import CoordinatorAgent
+        from llm.client import LLMClient
+        from tools.mcp.mcp_registry import mcp_registry
+        
+        async def run_system():
+            # Initialize MCP Tools
+            await mcp_registry.initialize()
+            
+            llm = LLMClient()
+            coordinator = CoordinatorAgent(llm_client=llm)
+            
+            print(f"\nAgentic OS Multi-Agent System ready.")
+            session_id = args.session
+            while True:
+                user_msg = input("\nUser> ").strip()
+                if user_msg.lower() in ["exit", "quit"]:
+                    break
+                if not user_msg:
+                    continue
+                response = await coordinator.run_turn(user_msg)
+                print(f"\nAssistant: {response}")
+            
+            await mcp_registry.shutdown()
+
+        asyncio.run(run_system())
 
     else:
         parser.print_help()

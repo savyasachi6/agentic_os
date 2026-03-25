@@ -4,7 +4,7 @@ import sys
 from unittest.mock import MagicMock, patch
 
 # Add core, memory, and skills to path
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core"))
+# legacy sys.path hack removed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "memory"))
 
@@ -16,7 +16,7 @@ def get_skill_retriever():
     # Mock both config and memory.vector_store if needed, 
     # but here we specifically need config to not crash during import.
     with patch.dict("sys.modules", {"config": MagicMock(agent_settings=mock_agent_settings)}):
-        from agent_skills.retriever import SkillRetriever
+        from rag.retriever import SkillRetriever
         return SkillRetriever
 
 

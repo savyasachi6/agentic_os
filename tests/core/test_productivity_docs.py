@@ -3,14 +3,14 @@ Documentation-driven tests for the Productivity Engine.
 Verifies that the examples in productivity/README.md are runnable and correct.
 """
 import pytest
-from datetime import datetime
+from agent_core.types import NodeType
 from productivity.todo_manager import add_todo
 from productivity.models import TodoStatus
 
 def test_readme_add_todo_example():
     """
     Verifies:
-    from agent_productivity.todo_manager import add_todo
+    from productivity.todo_manager import add_todo
     todo = add_todo(
         title="Prepare for the architectural review",
         priority="high",
@@ -18,7 +18,7 @@ def test_readme_add_todo_example():
         tags=["work", "arch"]
     )
     """
-    # Note: When running tests from core, the package is 'productivity'
+    # Note: When running tests from agent_core, the package is 'productivity'
     # The README uses 'core.productivity' which assumes root execution.
     # We test the relative import behavior here.
     

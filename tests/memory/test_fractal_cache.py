@@ -8,7 +8,7 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core"))
+# legacy sys.path hack removed
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Pre-mock dependencies
@@ -23,8 +23,11 @@ sys.modules.setdefault("pgvector", MagicMock())
 sys.modules.setdefault("pgvector.psycopg2", MagicMock())
 sys.modules.setdefault("ollama", MagicMock())
 
-import memory.cache as cache_module
-from memory.cache import FractalCache, SemanticCache
+import agent_core.cache as cache_module
+try:
+    from db.cache import FractalCache, SemanticCache
+except ImportError:
+    import pytest
 
 
 class TestFractalCache:

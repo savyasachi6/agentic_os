@@ -4,10 +4,12 @@ Compiles the durable StateGraph utilizing PostgreSQL checkpointing.
 """
 from langgraph.graph import StateGraph, END
 
-from agent_core.graph.state import AgentState
-from agent_core.graph.nodes.retriever import retrieve_context
-from agent_core.graph.nodes.actor import call_model
-from agent_core.graph.nodes.executor import invoke_tool
+from .state import AgentState
+from .nodes.retriever import retrieve_context
+from .nodes.actor import call_model
+from .nodes.executor import invoke_tool
+import logging
+logger = logging.getLogger(__name__)
 
 def should_continue(state: AgentState):
     """
@@ -15,6 +17,9 @@ def should_continue(state: AgentState):
     """
     # 1. Intercept explicit Executor errors
     if state.get("last_action_status") == "error":
+        if state.get("retry_count", 0) > 3:
+            logger.error("[Self-Healing] Max retries exceeded. Bailing out to prevent infinite loop.")
+            return END
         return "call_model" # Route back to the LLM Brain to analyze the ErrorTrace
         
     # 2. Determine if the last step was a Tool Invoke request or a Final Answer
@@ -24,10 +29,15 @@ def should_continue(state: AgentState):
     last_msg = state["messages"][-1]
     try:
         import json
-        content = json.loads(last_msg.content)
-        if "tool_call" in content:
+        msg_content = last_msg.content
+        if not isinstance(msg_content, (str, bytes, bytearray)):
+            msg_content = json.dumps(msg_content)
+        
+        content = json.loads(msg_content)
+        if isinstance(content, dict) and "tool_call" in content:
             return "invoke_tool" # Engine continues to Limbs
-    except Exception:
+    except Exception as e:
+        logger.debug("[blueprint] JSON parse failed for LangGraph message content: %s", e)
         pass
         
     # 3. Finished thinking - Return to User
@@ -46,6 +56,10 @@ def create_agent_os_kernel():
     workflow.add_node("retrieve_context", retrieve_context)
     workflow.add_node("call_model", call_model)
     workflow.add_node("invoke_tool", invoke_tool)
+    
+    # Add Long-Term Memory Compression Node
+    from .nodes.compression import memory_compression
+    workflow.add_node("memory_compression", memory_compression)
 
     # 3. Define Entrypoint bridging RAG -> Brain
     workflow.set_entry_point("retrieve_context")
@@ -61,7 +75,9 @@ def create_agent_os_kernel():
             END: END
         }
     )
-    workflow.add_edge("invoke_tool", "call_model")
+    # Route tool execution through memory compression before returning to model
+    workflow.add_edge("invoke_tool", "memory_compression")
+    workflow.add_edge("memory_compression", "call_model")
     
     return workflow
 
@@ -79,7 +95,7 @@ def compile_durable_graph(db_connection_string: str = None):
             memory = PostgresSaver.from_conn_string(db_connection_string)
             return workflow.compile(checkpointer=memory)
         except Exception as e:
-            print(f"[Durable Kernel Alert] PostgresSaver connection failed: {e}. Falling back to volatile RAM...")
+            logger.warning(f"[Durable Kernel Alert] PostgresSaver connection failed: {e}. Falling back to volatile RAM...")
             return workflow.compile()
     
     # Defaults to short-term logic mapping if no postgres URI explicitly provided

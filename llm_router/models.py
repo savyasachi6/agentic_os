@@ -15,6 +15,7 @@ class LLMRequest(BaseModel):
     max_tokens: int = 2048
     temperature: float = 0.7
     priority: Priority = Priority.NORMAL
+    stop: Optional[List[str]] = None
     
 class LLMResponse(BaseModel):
     request_id: str

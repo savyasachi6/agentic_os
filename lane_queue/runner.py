@@ -10,10 +10,10 @@ from typing import Optional, Callable, Dict, Any
 
 import httpx
 
-from agent_config import queue_settings
-from agent_core.llm import LLMClient
-from agent_security.jwt_auth import create_token
-from agent_security.rbac import get_required_scope_for_tool
+from agent_core.config import settings
+from llm.client import LLMClient
+from agent_core.security.jwt_auth import create_token
+from agent_core.security.rbac import get_required_scope_for_tool
 from .store import CommandStore
 from .models import Command, CommandType, CommandStatus
 
@@ -84,7 +84,7 @@ class LaneRunner:
     # ------------------------------------------------------------------
     def _loop(self):
         """Main poll loop running in background thread."""
-        poll_interval = queue_settings.poll_interval_seconds
+        poll_interval = settings.queue_poll_interval
 
         while not self._stop_event.is_set():
             try:
@@ -152,7 +152,7 @@ class LaneRunner:
 
         # POST to sandbox worker
         headers = {"Authorization": f"Bearer {token}"}
-        with httpx.Client(timeout=queue_settings.tool_timeout_seconds) as client:
+        with httpx.Client(timeout=settings.sandbox_tool_timeout) as client:
             response = client.post(
                 f"{sandbox_url}/tools/{tool_name}",
                 json=cmd.payload,

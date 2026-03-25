@@ -1,72 +1,90 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
+using System;
+using System.IO;
 using System.Text.Json;
+using System.Threading.Tasks;
 
-var builder = WebApplication.CreateBuilder(args);
-
-// Configure Authentication with Keycloak
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
+namespace McpServer
+{
+    class Program
     {
-        options.Authority = "http://localhost:8080/realms/myrealm";
-        options.RequireHttpsMetadata = false; // For development
-        options.TokenValidationParameters = new TokenValidationParameters
+        static async Task Main(string[] args)
         {
-            ValidateAudience = false,
-            RoleClaimType = ClaimTypes.Role,
-            NameClaimType = "preferred_username"
-        };
+            // Use Asynchronous Streams for standard I/O to prevent blocking bottleneck
+            using var stdin = new StreamReader(Console.OpenStandardInput());
+            using var stdout = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
 
-        options.Events = new JwtBearerEvents
-        {
-            OnTokenValidated = context =>
+            while (true)
             {
-                var claimsIdentity = context.Principal?.Identity as ClaimsIdentity;
-                var realmAccess = claimsIdentity?.FindFirst("realm_access");
-                if (realmAccess != null)
+                // Non-blocking read line-by-line asynchronously
+                var line = await stdin.ReadLineAsync();
+                if (line == null) break;
+
+                // Handle concurrent requests by spawning worker tasks
+                _ = Task.Run(async () =>
                 {
                     try
                     {
-                        var content = JsonDocument.Parse(realmAccess.Value);
-                        if (content.RootElement.TryGetProperty("roles", out var roles))
+                        var response = await HandleJsonRpcAsync(line);
+                        if (response != null)
                         {
-                            foreach (var role in roles.EnumerateArray())
+                            // Output back cleanly enforcing synchronized writes to stdout
+                            lock (stdout)
                             {
-                                var roleValue = role.GetString();
-                                if (!string.IsNullOrEmpty(roleValue))
-                                {
-                                    claimsIdentity.AddClaim(new Claim(ClaimTypes.Role, roleValue));
-                                }
+                                stdout.WriteLine(response);
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error parsing realm_access: {ex.Message}");
+                        // Global Exception Handling: Return as JSON-RPC error
+                        var errRpc = new { jsonrpc = "2.0", error = new { code = -32603, message = ex.Message } };
+                        lock (stdout)
+                        {
+                            stdout.WriteLine(JsonSerializer.Serialize(errRpc));
+                        }
                     }
-                }
-                return Task.CompletedTask;
+                });
             }
-        };
-    });
+        }
 
-builder.Services.AddAuthorization();
+        private static async Task<string?> HandleJsonRpcAsync(string jsonLine)
+        {
+            // Parse JSON-RPC
+            try
+            {
+                var doc = JsonDocument.Parse(jsonLine);
+                if (doc.RootElement.TryGetProperty("method", out var methodProp))
+                {
+                    var method = methodProp.GetString();
+                    object result = null;
 
-var app = builder.Build();
+                    // Simulated endpoints protecting via RBAC
+                    if (method == "run_dotnet_build")
+                    {
+                        await Task.Delay(100); // Simulate build work
+                        result = new { message = "Build Started...", status = "success" };
+                    }
+                    else if (method == "deploy_prod")
+                    {
+                        await Task.Delay(200); // Simulate deploy work
+                        result = new { message = "Deploying to Production...", status = "success" };
+                    }
+                    else if (method == "tools/list")
+                    {
+                        result = new { tools = new[] { new { name = "run_dotnet_build" }, new { name = "deploy_prod" } } };
+                    }
+                    else
+                    {
+                        throw new Exception("Method not found");
+                    }
 
-app.UseAuthentication();
-app.UseAuthorization();
-
-// MACHINE-LEVEL TOOL PROTECTION (MCP Endpoints)
-// In a real implementation, these would be part of the MCP protocol handler
-app.MapPost("/mcp/run_dotnet_build", () => Results.Ok(new { message = "Build Started...", status = "success" }))
-   .RequireAuthorization(policy => policy.RequireRole("Manager", "Developer"));
-
-app.MapPost("/mcp/deploy_prod", () => Results.Ok(new { message = "Deploying to Production...", status = "success" }))
-   .RequireAuthorization(policy => policy.RequireRole("Manager"));
-
-// Default health check
-app.MapGet("/", () => "MCP Server with RBAC is running.");
-
-app.Run();
+                    var id = doc.RootElement.TryGetProperty("id", out var idProp) ? idProp.GetInt32() : 0;
+                    return JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result });
+                }
+            }
+            catch (JsonException) { /* Invalid JSON */ }
+            
+            return null; // Ignore invalid format or notifications quietly
+        }
+    }
+}

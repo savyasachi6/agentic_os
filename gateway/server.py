@@ -21,15 +21,13 @@ if PROJECT_ROOT not in sys.path:
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, HTTPException
 from pydantic import BaseModel
-from agent_core.utils.auth import KeycloakManager
-
-from agent_core.loop.coordinator import CoordinatorAgent
-from agent_memory.db import init_schema
-from agent_memory.vector_store import VectorStore
-from agent_skills.indexer import SkillIndexer
-from llm_router import LLMRouter
+from agents.coordinator import CoordinatorAgent
+from rag.vector_store import VectorStore
+from rag.indexer import SkillIndexer
+from llm_router.router import LLMRouter
 from rl_router.server import create_app as create_rl_app
-from agent_config import server_settings
+from agent_core.config import settings
+from agent_core.utils.auth import KeycloakManager
 
 
 app = FastAPI(
@@ -50,22 +48,11 @@ _sessions: dict[str, CoordinatorAgent] = {}
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
-    init_schema()
+    # Note: DB Migration/Init is handled by entry points or externally
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
-
-    # Start Background Workers (SQL and Researcher)
-    from agent_core.agents.sql_agent import SQLAgentWorker
-    from agent_core.agents.research_agent import ResearcherAgentWorker
-    
-    sql_worker = SQLAgentWorker()
-    res_worker = ResearcherAgentWorker()
-    
-    asyncio.create_task(sql_worker.run_forever())
-    asyncio.create_task(res_worker.run_forever())
-
-    print("[server] Agent OS ready (LLM Router started, background workers active).")
+    print("[server] Agent OS ready (LLM Router started). Specialist workers should be running via scripts/worker_manager.py")
 
 
 @app.on_event("shutdown")
@@ -101,7 +88,7 @@ class EmbedResponse(BaseModel):
 @app.post("/embed", response_model=EmbedResponse)
 async def embed(req: EmbedRequest):
     vs = VectorStore(embed_model=req.model)
-    vec, _ = vs.generate_embedding(req.text)
+    vec, _ = await vs.generate_embedding_async(req.text)
     return EmbedResponse(
         embedding=vec,
         model=vs.embed_model,
@@ -120,7 +107,8 @@ class ReindexResponse(BaseModel):
 @app.post("/skills/reindex", response_model=ReindexResponse)
 async def reindex_skills():
     indexer = SkillIndexer()
-    indexer.index_all()
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, indexer.index_all)
     return ReindexResponse(
         message="Re-indexing complete.",
         skills_dir=indexer.skills_dir,
@@ -137,7 +125,7 @@ async def get_router_stats():
         import httpx
         async with httpx.AsyncClient() as client:
             # Point to the new hardened stats endpoint
-            resp = await client.get(f"http://localhost:{server_settings.port}/rl/bandit/stats", timeout=5)
+            resp = await client.get(f"http://localhost:8000/rl/bandit/stats", timeout=5)
             return resp.json()
     except Exception as e:
         return {"error": f"Failed to reach RL Router: {e}"}
@@ -166,23 +154,31 @@ async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.
         agent = _sessions[session_id]
     else:
         agent = CoordinatorAgent(session_id=session_id)
-        session_id = agent.state.session_id
+        session_id = agent.session_id
         _sessions[session_id] = agent
     
     # Inject auth context into AgentState
     agent.state["user_id"] = user_id
     agent.state["user_roles"] = user_roles
     
-    response = await agent.run_turn_async(req.message)
+    response = await agent.run_turn(req.message)
 
     return ChatResponse(session_id=session_id, response=response)
+
+
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    """Retrieve all available chat sessions."""
+    vs = VectorStore()
+    sessions = await vs.get_all_sessions_async()
+    return {"status": "success", "sessions": sessions}
 
 
 @app.get("/chat/{session_id}/history")
 async def get_chat_history(session_id: str):
     """Retrieve permanent chat history from pgvector."""
     vs = VectorStore()
-    history = vs.get_session_history(session_id)
+    history = await vs.get_session_history_async(session_id)
     return {"status": "success", "session_id": session_id, "history": history}
 
 
@@ -199,7 +195,7 @@ class FeedbackProxyRequest(BaseModel):
 @app.post("/rl/chat/feedback")
 async def chat_feedback(req: FeedbackProxyRequest):
     """Bridge UI feedback to the RL Router."""
-    from agent_rag.retrieval.rl_client import RLRoutingClient
+    from rag.retrieval.rl_client import RLRoutingClient
     rl_client = RLRoutingClient()
     
     # We simplified it here: the UI transmits the RL metadata it received during streaming.
@@ -255,7 +251,7 @@ async def chat_ws(ws: WebSocket):
                 session_id = requested_session
             elif agent is None:
                 agent = CoordinatorAgent()
-                session_id = agent.state.session_id
+                session_id = agent.session_id
                 _sessions[session_id] = agent
 
             await ws.send_json({"type": "session", "session_id": session_id})
@@ -281,7 +277,7 @@ async def chat_ws(ws: WebSocket):
 
             try:
                 # Run the ReAct turn asynchronously
-                response = await agent.run_turn_async(user_msg, status_callback=ws_callback)
+                response = await agent.run_turn(user_msg, status_callback=ws_callback)
                 await ws.send_json({"type": "final", "content": response})
             finally:
                 keepalive_task.cancel()

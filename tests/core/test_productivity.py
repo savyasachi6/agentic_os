@@ -4,7 +4,7 @@ Tests for the Personal Productivity module.
 from datetime import datetime
 from productivity.todo_manager import TodoManager
 from productivity.briefing import generate_briefing, format_briefing
-from productivity.models import TodoStatus
+from productivity.models import TodoItem, TodoStatus
 
 
 def test_todo_manager_crud():

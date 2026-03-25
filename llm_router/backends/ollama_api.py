@@ -1,14 +1,13 @@
 import asyncio
 import logging
 import httpx
-from typing import List, Dict
+from typing import List, Dict, Optional
+
 from llm_router.backends.base import LLMBackend
 from agent_core.resilience import async_retry, RETRYABLE_EXCEPTIONS
 
 logger = logging.getLogger("agentos.ollama_backend")
 
-# Keep a single shared AsyncClient across all calls so TCP connections are
-# reused (keep-alive). This is exactly what Ollama's own Go client does.
 _SHARED_CLIENT: httpx.AsyncClient | None = None
 
 
@@ -32,13 +31,13 @@ class OllamaBackend(LLMBackend):
         model: str,
         max_tokens: int,
         temperature: float,
+        stop: Optional[List[str]] = None,
     ) -> List[str]:
         """
-        Fire concurrent async requests to Ollama with per-request retry/backoff.
-        Uses a persistent keep-alive AsyncClient so TCP connections survive
-        brief network blips — the same technique used by Ollama and Open WebUI.
+        Fire concurrent async requests using the shared httpx pool directly.
+        No ollama SDK used here — avoids the BaseClient.init() conflict entirely.
         """
-        client = _get_client()
+        http_client = _get_client()
 
         @async_retry(max_attempts=5, base_delay=1.0, cap_delay=30.0, label="OllamaBackend.fetch")
         async def fetch(messages: List[Dict[str, str]]) -> str:
@@ -49,12 +48,24 @@ class OllamaBackend(LLMBackend):
                 "options": {
                     "temperature": temperature,
                     "num_predict": max_tokens,
+                    "num_ctx": 8192,
+                    "stop": stop,
                 },
             }
-            response = await client.post(f"{self.base_url}/api/chat", json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("message", {}).get("content", "")
+            try:
+                resp = await http_client.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                    timeout=120.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                content = data["message"]["content"]
+                logger.debug("[OllamaBackend] Response len: %d", len(content))
+                return content
+            except Exception as e:
+                logger.error("[OllamaBackend] Fetch error: %s", e)
+                raise
 
         tasks = [fetch(msgs) for msgs in messages_batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -62,7 +73,7 @@ class OllamaBackend(LLMBackend):
         processed = []
         for r in results:
             if isinstance(r, Exception):
-                logger.error("[OllamaBackend] Batch item failed after all retries: %s", r)
+                logger.error("[OllamaBackend] Batch item failed: %s", r)
                 processed.append(f"[Error: {r}]")
             else:
                 processed.append(str(r))

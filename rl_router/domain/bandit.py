@@ -240,6 +240,8 @@ class LinUCBBandit:
         buffer = io.BytesIO(data_bytes)
         with np.load(buffer) as data:
             with self._lock:
+                if "d" in data and int(data["d"]) != self.d:
+                    raise ValueError(f"Feature dimension changed from {int(data['d'])} to {self.d}. Please delete old weights to trigger Cold Start.")
                 self._A_inv = [arm_data for arm_data in data["A_inv"]]
                 self._b = [arm_data for arm_data in data["b"]]
                 self._violation_counts = data["violation_counts"]
