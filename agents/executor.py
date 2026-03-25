@@ -38,17 +38,19 @@ class ExecutorAgentWorker:
     def _load_prompt(self):
         # Optional: Load from llm/prompts/executor_agent_prompt.md if it exists
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "prompts", "executor.md")
+        prompt_path = os.path.join(root_dir, "assets", "prompts", "executor.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()
 
     async def _process_task(self, task: Node):
-        from agent_core.reasoning import parse_react_action # Temporarily
+        from agent_core.reasoning import parse_react_action
+        import time
         from datetime import datetime
         
+        start_time = time.time()
         query = task.payload.get("query", task.content or "No content")
-        print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Received Task {task.id}: {query[:50]}")
+        logger.info(f"Task received: node_id={task.id}, role={AgentRole.SPECIALIST.value}, goal='{query[:50]}...'")
         
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -56,42 +58,39 @@ class ExecutorAgentWorker:
         ]
 
         max_iterations = task.payload.get("max_turns", 5)
-        for i in range(max_iterations):
-            try:
-                print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Starting LLM generation...")
+        try:
+            for i in range(max_iterations):
+                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
                 response = await self.llm.generate_async(messages)
-                print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Received LLM response.")
                 messages.append({"role": "assistant", "content": response})
                 
                 action_data = parse_react_action(response)
                 if not action_data:
-                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] No action parsed. Completing task.")
+                    duration = time.time() - start_time
+                    logger.info(f"No action parsed. Completing task. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response})
                     return
 
                 action_type, action_payload = action_data
+                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
                 
                 if action_type in ["respond", "done", "complete", "finish"]:
-                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Action: {action_type}. Updating DB...")
+                    duration = time.time() - start_time
+                    logger.info(f"Action: {action_type}. Updating DB. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": action_payload})
                     return
                 
                 if action_type == "shell_execute":
-                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Action: shell_execute. Payload: {action_payload}")
                     if not is_safe_command(action_payload):
                         obs = f"Observation Error: Command '{action_payload}' is blocked for safety."
                     else:
                         loop = asyncio.get_running_loop()
-                        
-                        # Prepare environment with Task ID for direct reporting
                         env = os.environ.copy()
                         env["AGENTOS_TASK_ID"] = str(task.id)
                         
-                        # Use a 30s timeout and capture output
                         try:
-                            # Use a helper to run subprocess with custom env
                             def run_sub():
                                 return subprocess.run(
                                     action_payload, 
@@ -111,23 +110,23 @@ class ExecutorAgentWorker:
                         except Exception as e:
                             obs = f"Observation Error: {e}"
                     messages.append({"role": "user", "content": obs})
-                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Action completed. Observation captured.")
                 else:
                     messages.append({"role": "user", "content": f"Observation: Unknown action {action_type}"})
 
-            except Exception as e:
-                logger.error("ExecutorAgent loop error: %s", e)
-                assert task.id is not None
-                await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
-                return
-        
-        print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Max iterations ({max_iterations}) reached.")
-        assert task.id is not None
-        await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max iterations reached"})
+            duration = time.time() - start_time
+            logger.warning(f"Max iterations ({max_iterations}) reached. node_id={task.id}, duration={duration:.2f}s")
+            assert task.id is not None
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max iterations reached"})
+
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
+            assert task.id is not None
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
     async def run_forever(self):
         self._running = True
-        print("[ExecutorAgent] Worker started (listening on A2A bus).")
+        logger.info(f"ExecutorAgentWorker started (listening on A2A bus topic: {AgentRole.SPECIALIST.value})")
         
         async for msg in self.bus.listen(AgentRole.SPECIALIST.value):
             if not self._running:
@@ -139,4 +138,4 @@ class ExecutorAgentWorker:
                     if task:
                         await self._process_task(task)
             except Exception as e:
-                logger.error("Error processing A2A message: %s", e)
+                logger.error(f"Error processing A2A message: {e}")

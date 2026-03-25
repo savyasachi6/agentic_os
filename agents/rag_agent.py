@@ -29,7 +29,7 @@ ToolCallRequest = None
 
 logger = logging.getLogger("agentos.agents.rag")
 
-class ResearchAgent:
+class ResearchAgentWorker:
     """
     Background worker that polls for `AgentRole.RAG` nodes.
     Performs information retrieval and synthesis.
@@ -44,9 +44,8 @@ class ResearchAgent:
         self._running = False
 
     def _load_prompt(self):
-        # Adjusted for modular architecture: llm/prompts/research_agent_prompt.md
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "prompts", "rag.md")
+        prompt_path = os.path.join(root_dir, "assets", "prompts", "rag.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()
@@ -54,11 +53,13 @@ class ResearchAgent:
             self.system_prompt = "You are the RAGAgent. Perform research and retrieval."
 
     async def _process_task(self, task: Node):
+        from agent_core.reasoning import parse_react_action
+        import time
+        start_time = time.time()
         query_goal = task.payload.get("query", "Unknown Goal")
         session_id = str(task.chain_id)
-        print(f"[RAGAgent] Received Task {task.id}: {query_goal}")
+        logger.info(f"Task received: node_id={task.id}, role={AgentRole.RAG.value}, goal='{query_goal[:50]}...'")
         
-
         current_date = datetime.now().strftime("%B %d, %Y")
         system_content = self.system_prompt.replace("{current_date}", current_date)
         if "Today is" not in system_content:
@@ -72,19 +73,21 @@ class ResearchAgent:
         try:
             max_iterations = task.payload.get("max_turns", 4)
             for i in range(max_iterations):
+                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
                 response_text = await self.llm.generate_async(messages)
                 messages.append({"role": "assistant", "content": response_text})
                 
-                # Using a local parse helper or importing from intent in future
-                from agent_core.reasoning import parse_react_action
                 action_data = parse_react_action(response_text)
                 
                 if not action_data:
+                    duration = time.time() - start_time
+                    logger.info(f"No action parsed. Completing task. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response_text})
                     return
                 
                 action_type, action_payload = action_data
+                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
                 
                 if action_type in ["complete", "done", "respond", "finish"]:
                     try:
@@ -92,6 +95,8 @@ class ResearchAgent:
                     except Exception:
                         final_res = action_payload
 
+                    duration = time.time() - start_time
+                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": final_res})
                     return
@@ -108,24 +113,26 @@ class ResearchAgent:
                     if not PLAYWRIGHT_AVAILABLE:
                         obs = "Observation: web_fetch unavailable."
                     else:
-                        # Logic simplified for the refactor skeleton
                         obs = "Observation: [Simulated web_fetch content]"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
                 
                 messages.append({"role": "user", "content": obs})
                 
+            duration = time.time() - start_time
+            logger.warning(f"Max turns reached. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max turns reached"})
 
         except Exception as e:
-            logger.exception("RAGAgent error: %s", e)
+            duration = time.time() - start_time
+            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
     async def run_forever(self):
         self._running = True
-        print("[RAGAgent] Worker started (listening on A2A bus).")
+        logger.info(f"ResearchAgentWorker started (listening on A2A bus topic: {AgentRole.RAG.value})")
         
         async for msg in self.bus.listen(AgentRole.RAG.value):
             if not self._running:
@@ -137,4 +144,4 @@ class ResearchAgent:
                     if task:
                         await self._process_task(task)
             except Exception as e:
-                logger.error("Error processing A2A message: %s", e)
+                logger.error(f"Error processing A2A message: {e}")

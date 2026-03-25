@@ -23,6 +23,7 @@ from agent_core.agent_types import Intent, AgentRole, NodeStatus
 # Capability logic
 from agent_core.reasoning import parse_react_action
 from agents.a2a_bus import A2ABus
+from agent_core.config import get_links_markdown
 
 logger = logging.getLogger("agentos.agents.capability")
 
@@ -36,7 +37,7 @@ def _extract_sql_fallback(text: str) -> Optional[str]:
         return match.group(1).strip().rstrip(';')
     return None
 
-class CapabilityAgent:
+class CapabilityAgentWorker:
     """
     Background worker that handles `AgentRole.SCHEMA` (Capability) tasks.
     Queries the DB schema and available tools.
@@ -44,16 +45,14 @@ class CapabilityAgent:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        # self.cache = FractalCache()
         self.system_prompt = ""
         self._load_prompt()
         self.bus = A2ABus()
         self._running = False
 
     def _load_prompt(self):
-        # Adjusted for modular architecture: llm/prompts/sql_agent_prompt.md
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "prompts", "capability.md")
+        prompt_path = os.path.join(root_dir, "assets", "prompts", "capability.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()
@@ -80,9 +79,20 @@ class CapabilityAgent:
             return {"success": False, "error": str(e)}
 
     async def _process_task(self, task: Node):
+        from agent_core.reasoning import parse_react_action
+        import time
+        start_time = time.time()
         query_goal = task.payload.get("query", "Unknown Goal")
-        print(f"[CapabilityAgent] Received Task {task.id}: {query_goal}")
+        logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
+        # Immediate shortcut for project links
+        link_keywords = ["links", "url", "github", "repo", "documentation", "where is the code"]
+        if any(kw in query_goal.lower() for kw in link_keywords):
+            logger.info(f"Link query detected. Returning structured project links. node_id={task.id}")
+            links_md = get_links_markdown()
+            assert task.id is not None
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": links_md})
+            return
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -92,29 +102,33 @@ class CapabilityAgent:
         try:
             max_iterations = task.payload.get("max_turns", 5)
             for i in range(max_iterations):
+                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
                 response_text = await self.llm.generate_async(messages)
                 messages.append({"role": "assistant", "content": response_text})
                 
-                from agent_core.reasoning import ThoughtExtractor
                 action_data = parse_react_action(response_text)
                 if not action_data:
                     sql = _extract_sql_fallback(response_text)
                     if sql:
                         action_data = ("sql_query", sql)
                     else:
+                        duration = time.time() - start_time
+                        logger.error(f"Parse error. node_id={task.id}, duration={duration:.2f}s")
                         assert task.id is not None
                         await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Parse error"})
                         return
                 
                 action_type, action_payload = action_data
+                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
                 
                 if action_type in ["complete", "done", "respond", "finish", "complete_task", "respond_direct"]:
-                    # Unwrap JSON if the specialist returned a raw JSON string
                     try:
                         final_res = json.loads(action_payload) if isinstance(action_payload, str) and action_payload.strip().startswith("{") else action_payload
                     except Exception:
                         final_res = action_payload
 
+                    duration = time.time() - start_time
+                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": final_res})
                     return
@@ -128,17 +142,20 @@ class CapabilityAgent:
                 
                 messages.append({"role": "user", "content": obs})
                 
+            duration = time.time() - start_time
+            logger.warning(f"Max iterations reached. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max iterations reached"})
 
         except Exception as e:
-            logger.exception("CapabilityAgent error: %s", e)
+            duration = time.time() - start_time
+            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
     async def run_forever(self):
         self._running = True
-        print("[CapabilityAgent] Worker started (listening on A2A bus).")
+        logger.info(f"CapabilityAgentWorker started (listening on A2A bus topic: {AgentRole.SCHEMA.value})")
         
         async for msg in self.bus.listen(AgentRole.SCHEMA.value):
             if not self._running:
@@ -150,4 +167,4 @@ class CapabilityAgent:
                     if task:
                         await self._process_task(task)
             except Exception as e:
-                logger.error("Error processing A2A message: %s", e)
+                logger.error(f"Error processing A2A message: {e}")

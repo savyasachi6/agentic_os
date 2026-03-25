@@ -171,3 +171,18 @@ def load_settings() -> Settings:
     return settings
 
 settings = load_settings()
+
+# --- Project Links (Phase 4) ---
+PROJECT_LINKS = {
+    "GitHub Repository": "https://github.com/savya6/agentic_os",
+    "Documentation": "https://github.com/savya6/agentic_os#readme",
+    "Architecture Diagram": "https://github.com/savya6/agentic_os/blob/main/docs/architecture.md",
+    "Agent Roles": "https://github.com/savya6/agentic_os/blob/main/docs/agent-roles-and-workers.md",
+}
+
+def get_links_markdown() -> str:
+    """Return project links as a structured markdown list."""
+    lines = ["## 🔗 Project Links"]
+    for name, url in PROJECT_LINKS.items():
+        lines.append(f"- **{name}**: {url}")
+    return "\n".join(lines)

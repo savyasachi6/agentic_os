@@ -30,7 +30,7 @@ load_dotenv(os.path.join(root_dir, ".env"))
 
 from agents.coordinator import CoordinatorAgent
 from agents.capability_agent import CapabilityAgentWorker
-from agents.rag_agent import RAGAgentWorker
+from agents.rag_agent import ResearchAgentWorker
 from llm.client import LLMClient
 from db.connection import init_db_pool
 from rag.vector_store import VectorStore
@@ -65,7 +65,7 @@ async def startup():
     # Start specialist agent workers as background tasks.
     # Note: CodeAgentWorker and others should be imported from agents/
     # For now, starting the ones we have refactored.
-    rag_worker = RAGAgentWorker()
+    rag_worker = ResearchAgentWorker()
     _worker_tasks.append(asyncio.create_task(rag_worker.run_forever(), name="rag_agent_worker"))
     
     capability_worker = CapabilityAgentWorker()

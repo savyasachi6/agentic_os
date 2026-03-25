@@ -29,7 +29,7 @@ if root_dir not in sys.path:
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
     # Assuming projects are at the root
-    project_path = os.path.join(os.getcwd(), "projects", project_name)
+    project_path = os.path.join(root_dir, "dev", "projects", project_name)
     if os.path.exists(project_path):
         env_path = os.path.join(project_path, ".env")
         if os.path.exists(env_path):
@@ -227,7 +227,7 @@ def main():
 
     # index
     index_parser = subparsers.add_parser("index", help="Re-index skills into pgvector")
-    index_parser.add_argument("--skills-dir", default="skills", help="Path to skills directory")
+    index_parser.add_argument("--skills-dir", default="assets/skills", help="Path to skills directory")
     index_parser.set_defaults(func=cmd_index)
 
     # submit

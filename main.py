@@ -35,7 +35,7 @@ def main():
 
     # Index
     index_parser = subparsers.add_parser("index", help="Re-index skills")
-    index_parser.add_argument("--dir", default="skills")
+    index_parser.add_argument("--dir", default="assets/skills")
 
     # Submit
     submit_parser = subparsers.add_parser("submit", help="Submit task to background workers")

@@ -29,6 +29,17 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger("agentos.agents.coordinator")
 
+ROLE_TIMEOUTS = {
+    AgentRole.RAG: 90.0,
+    AgentRole.TOOLS: 60.0,
+    AgentRole.SCHEMA: 45.0,
+    AgentRole.SPECIALIST: 60.0,
+    AgentRole.PLANNER: 30.0,
+    AgentRole.PRODUCTIVITY: 30.0,
+    AgentRole.EMAIL: 45.0
+}
+DEFAULT_TIMEOUT = 60.0
+
 class BridgeAgent:
     """Helper to bridge between the Coordinator and background specialist workers."""
     def __init__(self, role: AgentRole, tree_store: TreeStore, bus: Optional[A2ABus] = None):
@@ -53,13 +64,27 @@ class BridgeAgent:
         if self.bus:
             await self.bus.send(self.role.value, {"node_id": task_node.id, "payload": payload})
         
+        # Pattern 1: Role-based timeouts
+        timeout_sec = ROLE_TIMEOUTS.get(self.role, DEFAULT_TIMEOUT)
+        poll_interval = 0.5
+        max_iters = int(timeout_sec / poll_interval)
+
+        import time
+        start_t = time.time()
+
         # Poll for completion (accelerated for agentic flow)
-        for _ in range(180): # 180 * 0.5s = 90s timeout
-            await asyncio.sleep(0.5)
+        for _ in range(max_iters): 
+            await asyncio.sleep(poll_interval)
             updated = self.tree_store.get_node_by_id(task_node.id)
             if updated and updated.status in (NodeStatus.DONE, NodeStatus.FAILED):
                 return updated.result or {}
-        return {"error": "Specialist timeout"}
+        
+        elapsed = time.time() - start_t
+        logger.warning(
+            f"Specialist timeout: role={self.role.value}, chain_id={chain_id}, "
+            f"node_id={task_node.id}, elapsed={elapsed:.2f}s"
+        )
+        return {"error": "Specialist timeout", "role": self.role.value, "elapsed": elapsed}
 
 class CoordinatorAgent:
     """

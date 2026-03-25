@@ -22,7 +22,7 @@ graph TD
         C <-->|Research| RAG[RAGAgent]
         C <-->|Search| WS[WebSearchAgent]
         C <-->|Execute| EX[ExecutorAgent]
-        C <-->|Capabilities| CAP[CapabilityAgent]
+        C <-->|Capabilities| CAP[CapabilityAgentWorker]
         C <-->|Audit| AD[AuditorAgent]
     end
 
@@ -53,7 +53,18 @@ graph TD
 
 ---
 
-## 🚀 Quickstart
+## Repository Layout
+
+Organized for clarity and runtime stability:
+
+- **runtime/**: Core app packages (`agent_core`, `agents`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `lane_queue`, `tools`, `ui`, `productivity`, `sandbox`, `voice`)
+- **assets/**: Specialist assets (`prompts/`, `skills/`, `training/`)
+- **infra/**: DevOps and infrastructure (`docker/`, `devops_auto/`, `.env` templates)
+- **dev/**: Development and scripts (`scripts/`, `projects/`, `experiments/`, `tests/`)
+
+For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md).
+
+## Getting Started
 
 1. **Environment Setup**:
    ```bash
@@ -68,6 +79,8 @@ graph TD
 
 3. **Run the OS (Backend)**:
    ```bash
+   git clone https://github.com/agentic-os/agentic-os.git
+   cd agentic-os
    python gateway/main.py serve
    ```
 

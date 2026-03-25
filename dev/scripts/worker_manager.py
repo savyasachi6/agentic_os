@@ -11,13 +11,13 @@ import signal
 from typing import List
 
 # Root calculation
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(_ROOT)
 
 from agents.worker import AgentWorker
-from agents.rag_agent import ResearchAgent
-from agents.code_agent import CodeAgent
-from agents.capability_agent import CapabilityAgent
+from agents.rag_agent import ResearchAgentWorker
+from agents.code_agent import CodeAgentWorker
+from agents.capability_agent import CapabilityAgentWorker
 from agents.email_agent import EmailAgent
 from agents.productivity import ProductivityAgent
 from db.queries.commands import TreeStore
@@ -35,9 +35,9 @@ def main():
     
     # Instantiate agents and workers mapped to AgentRole enums
     spec_agents = {
-        AgentRole.RAG: ResearchAgent(),
-        AgentRole.TOOLS: CodeAgent(),
-        AgentRole.SCHEMA: CapabilityAgent(),
+        AgentRole.RAG: ResearchAgentWorker(),
+        AgentRole.TOOLS: CodeAgentWorker(),
+        AgentRole.SCHEMA: CapabilityAgentWorker(),
         AgentRole.EMAIL: EmailAgent(),
         AgentRole.PRODUCTIVITY: ProductivityAgent(),
         AgentRole.SPECIALIST: ExecutorAgentWorker(),

@@ -35,7 +35,7 @@ if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
 
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
-    project_path = os.path.join(os.path.dirname(current_dir), "projects", project_name)
+    project_path = os.path.join(root_dir, "dev", "projects", project_name)
     if os.path.exists(project_path):
         env_path = os.path.join(project_path, ".env")
         if os.path.exists(env_path):
@@ -157,14 +157,14 @@ def cmd_worker(args):
 
         try:
             if args.agent == "sql":
-                from agents.capability_agent import CapabilityAgent
-                worker = CapabilityAgent(model_name=args.model)
+                from agents.capability_agent import CapabilityAgentWorker
+                worker = CapabilityAgentWorker(model_name=args.model)
             elif args.agent == "research":
-                from agents.rag_agent import ResearchAgent
-                worker = ResearchAgent(model_name=args.model)
+                from agents.rag_agent import ResearchAgentWorker
+                worker = ResearchAgentWorker(model_name=args.model)
             elif args.agent == "code":
-                from agents.code_agent import CodeAgent
-                worker = CodeAgent(model_name=args.model)
+                from agents.code_agent import CodeAgentWorker
+                worker = CodeAgentWorker(model_name=args.model)
             elif args.agent == "email":
                 from agents.email_agent import EmailAgent
                 worker = EmailAgent()
@@ -216,7 +216,7 @@ def main():
 
     # index
     index_parser = subparsers.add_parser("index", help="Re-index skills into pgvector")
-    index_parser.add_argument("--skills-dir", default="skills", help="Path to skills directory")
+    index_parser.add_argument("--skills-dir", default="assets/skills", help="Path to skills directory")
     index_parser.set_defaults(func=cmd_index)
 
     # worker

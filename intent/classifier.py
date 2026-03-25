@@ -16,7 +16,8 @@ CAPABILITY_KEYWORDS = [
     "what can you do", "what are you", "capabilities", "help me",
     "how can you help", "what skills", "list skills", "show skills",
     "available tools", "abilities", "what is indexed", "what are some of the skills",
-    "tell me about your skills"
+    "tell me about your skills", "list your skills", "project links", "github", "documentation",
+    "repo", "where is the code", "links to this project", "github url", "repo url"
 ]
 CAPABILITY_SINGLE_WORDS = {
     "menu", "commands", "list"

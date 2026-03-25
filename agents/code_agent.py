@@ -56,7 +56,7 @@ def _parse_code_action(response_text: str) -> Optional[Tuple[str, str]]:
     payload = response_text[start:idx - 1].strip()
     return action_type, payload
 
-class CodeAgent:
+class CodeAgentWorker:
     """
     Background worker that polls the TreeStore for `AgentRole.TOOLS` nodes.
     Handles file read, diff proposal, write, and narrow shell command execution.
@@ -72,9 +72,8 @@ class CodeAgent:
         self._running = False
 
     def _load_prompt(self):
-        # Adjusted path for refactored structure: llm/prompts/code_agent_prompt.md
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "prompts", "code.md")
+        prompt_path = os.path.join(root_dir, "assets", "prompts", "code.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()
@@ -87,7 +86,7 @@ class CodeAgent:
             p = Path(path).resolve()
             return p.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
-            logger.error("[CodeAgent] Failed to read file %s: %s", path, e)
+            logger.error(f"[CodeAgentWorker] Failed to read file {path}: {e}")
             return f"[Error reading file: {e}]"
 
     def _list_dir(self, path: str) -> str:
@@ -101,7 +100,7 @@ class CodeAgent:
                 lines.append(f"[{tag}] {entry.name}{size}")
             return "\n".join(lines) or "(empty)"
         except Exception as e:
-            logger.error("[CodeAgent] Failed to list dir %s: %s", path, e)
+            logger.error(f"[CodeAgentWorker] Failed to list dir {path}: {e}")
             return f"[Error listing dir: {e}]"
 
     def _run_command(self, cmd: str) -> str:
@@ -120,7 +119,7 @@ class CodeAgent:
         except subprocess.TimeoutExpired:
             return "[Error: command timed out after 15s]"
         except Exception as e:
-            logger.error("[CodeAgent] Failed to run command %s: %s", cmd, e)
+            logger.error(f"[CodeAgentWorker] Failed to run command {cmd}: {e}")
             return f"[Error running command: {e}]"
 
     def _write_file(self, path: str, content: str) -> str:
@@ -130,20 +129,15 @@ class CodeAgent:
             p.write_text(content, encoding="utf-8")
             return f"[Written {len(content)} chars to {p}]"
         except Exception as e:
-            logger.error("[CodeAgent] Failed to write file %s: %s", path, e)
+            logger.error(f"[CodeAgentWorker] Failed to write file {path}: {e}")
             return f"[Error writing file: {e}]"
 
     # --- Main task processor ---
     async def _process_task(self, task: Node):
+        import time
+        start_time = time.time()
         goal = task.payload.get("query", task.payload.get("goal", "Unknown Goal"))
-        print(f"[CodeAgent] Received Task {task.id}: {goal}")
-
-        # cached = await self.cache.get_cached_response_async(goal)
-        # if cached:
-        #     print(f"[CodeAgent] Cache hit. Resolving instantly.")
-        #     assert task.id is not None
-        #     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result=cached["response"])
-        #     return
+        logger.info(f"Task received: node_id={task.id}, role={AgentRole.TOOLS.value}, goal='{goal[:50]}...'")
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -152,12 +146,15 @@ class CodeAgent:
 
         try:
             max_iterations = 6
-            for _ in range(max_iterations):
+            for i in range(max_iterations):
+                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
                 response_text = await self.llm.generate_async(messages)
                 messages.append({"role": "assistant", "content": response_text})
 
                 action_data = _parse_code_action(response_text)
                 if not action_data:
+                    duration = time.time() - start_time
+                    logger.error(f"Parse error. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(
                         task.id, NodeStatus.FAILED,
@@ -166,14 +163,13 @@ class CodeAgent:
                     return
 
                 action_type, payload = action_data
+                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
 
                 if action_type in ("complete", "done", "respond", "finish"):
-                    # asyncio.create_task(self.cache.set_cached_response_async(
-                    #     query=goal, response={"summary": payload}, strategy_used="code_worker"
-                    # ))
+                    duration = time.time() - start_time
+                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"summary": payload})
-                    print(f"[CodeAgent] Finished task {task.id}")
                     return
 
                 elif action_type == "read_file":
@@ -198,6 +194,8 @@ class CodeAgent:
 
                 messages.append({"role": "user", "content": f"Observation: {obs}"})
 
+            duration = time.time() - start_time
+            logger.warning(f"Exceeded max iterations. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(
                 task.id, NodeStatus.FAILED,
@@ -205,13 +203,14 @@ class CodeAgent:
             )
 
         except Exception as e:
-            logger.exception("[CodeAgent] Critical error processing task %s: %s", task.id, e)
+            duration = time.time() - start_time
+            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
     async def run_forever(self, poll_interval: float = 2.0):
         self._running = True
-        print("[CodeAgent] Worker started.")
+        logger.info(f"CodeAgentWorker started (polling TreeStore for role: {AgentRole.TOOLS.value})")
         while self._running:
             try:
                 task = await self.tree_store.dequeue_task_async(agent_role=AgentRole.TOOLS)
@@ -220,5 +219,5 @@ class CodeAgent:
                 else:
                     await asyncio.sleep(poll_interval)
             except Exception as e:
-                logger.error("[CodeAgent] Polling error: %s", e)
+                logger.error(f"Polling error: {e}")
                 await asyncio.sleep(poll_interval)

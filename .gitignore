@@ -1,11 +1,11 @@
 # Build and checkpoints
-checkpoints/
+dev/checkpoints/
 __pycache__/
 *.pyc
 .env
 
 # Large model files — store locally, never commit
-models/
+dev/models/
 *.gguf
 *.bin
 *.safetensors
