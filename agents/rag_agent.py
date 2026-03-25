@@ -29,7 +29,7 @@ ToolCallRequest = None
 
 logger = logging.getLogger("agentos.agents.rag")
 
-class RAGAgentWorker:
+class ResearchAgent:
     """
     Background worker that polls for `AgentRole.RAG` nodes.
     Performs information retrieval and synthesis.

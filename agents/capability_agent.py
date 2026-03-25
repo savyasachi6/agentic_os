@@ -36,7 +36,7 @@ def _extract_sql_fallback(text: str) -> Optional[str]:
         return match.group(1).strip().rstrip(';')
     return None
 
-class CapabilityAgentWorker:
+class CapabilityAgent:
     """
     Background worker that handles `AgentRole.SCHEMA` (Capability) tasks.
     Queries the DB schema and available tools.

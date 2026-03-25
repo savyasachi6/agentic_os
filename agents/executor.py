@@ -78,15 +78,30 @@ class ExecutorAgentWorker:
                         obs = f"Observation Error: Command '{action_payload}' is blocked for safety."
                     else:
                         loop = asyncio.get_running_loop()
+                        
+                        # Prepare environment with Task ID for direct reporting
+                        env = os.environ.copy()
+                        env["AGENTOS_TASK_ID"] = str(task.id)
+                        
                         # Use a 30s timeout and capture output
                         try:
-                            res = await loop.run_in_executor(
-                                None, 
-                                lambda: subprocess.run(action_payload, shell=True, capture_output=True, text=True, timeout=30)
-                            )
+                            # Use a helper to run subprocess with custom env
+                            def run_sub():
+                                return subprocess.run(
+                                    action_payload, 
+                                    shell=True, 
+                                    capture_output=True, 
+                                    text=True, 
+                                    timeout=30,
+                                    env=env
+                                )
+                            
+                            res = await loop.run_in_executor(None, run_sub)
                             obs = f"Observation: {res.stdout}\n{res.stderr}"
+                            if res.returncode != 0:
+                                obs = f"Observation Error (code {res.returncode}): {res.stderr}\n{res.stdout}"
                         except subprocess.TimeoutExpired:
-                            obs = "Observation Error: Command timed out."
+                            obs = "Observation Error: Command timed out after 30 seconds."
                         except Exception as e:
                             obs = f"Observation Error: {e}"
                     messages.append({"role": "user", "content": obs})

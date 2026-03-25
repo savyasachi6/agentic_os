@@ -11,7 +11,7 @@ from productivity.notes import NoteManager
 
 logger = logging.getLogger("agentos.agents.productivity")
 
-class ProductivityAgentWorker:
+class ProductivityAgent:
     """
     Background worker for productivity maintenance (todos/notes).
     """

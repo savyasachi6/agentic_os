@@ -130,7 +130,7 @@ async def cmd_submit(args):
         role = AgentRole.SCHEMA
         
     node = ts.add_node(Node(
-        chain_id=chain or 0, # Assuming ts.create_chain returns an ID or Node
+        chain_id=chain.id if chain else 0,
         agent_role=role,
         type=NodeType.TASK,
         content=args.task,

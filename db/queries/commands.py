@@ -268,3 +268,23 @@ class TreeStore:
             })
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:int(limit)], is_degraded
+    def get_recent_logs(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Fetch the most recent execution nodes regardless of status."""
+        from psycopg2.extras import RealDictCursor
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, chain_id, agent_role, type, status, priority, content, created_at, updated_at
+                    FROM nodes
+                    ORDER BY created_at DESC
+                    LIMIT %s;
+                    """,
+                    (limit,)
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    async def get_recent_logs_async(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Non-blocking version of get_recent_logs."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_recent_logs, limit)

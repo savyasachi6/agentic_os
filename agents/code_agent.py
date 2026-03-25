@@ -56,7 +56,7 @@ def _parse_code_action(response_text: str) -> Optional[Tuple[str, str]]:
     payload = response_text[start:idx - 1].strip()
     return action_type, payload
 
-class CodeAgentWorker:
+class CodeAgent:
     """
     Background worker that polls the TreeStore for `AgentRole.TOOLS` nodes.
     Handles file read, diff proposal, write, and narrow shell command execution.

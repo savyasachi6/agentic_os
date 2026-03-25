@@ -112,7 +112,7 @@ def load_settings() -> Settings:
 
     settings = Settings(
         database_url     = db_url,
-        redis_url        = os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+        redis_url        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
         ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2")),
         lightpanda_ws_url= os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222"),

@@ -20,23 +20,24 @@ from agents.code_agent import CodeAgent
 from agents.capability_agent import CapabilityAgent
 from agents.email_agent import EmailAgent
 from agents.productivity import ProductivityAgent
-from lane_queue.store import CommandStore
+from db.queries.commands import TreeStore
 from db.connection import init_db_pool
+from agent_core.types import AgentRole
 
 def main():
     print("--- Agentic OS Worker Manager ---")
     init_db_pool()
-    store = CommandStore()
+    store = TreeStore()
     
     workers: List[AgentWorker] = []
     
-    # Instantiate agents and workers
+    # Instantiate agents and workers mapped to AgentRole enums
     spec_agents = {
-        "research": ResearchAgent(),
-        "code": CodeAgent(),
-        "capability": CapabilityAgent(),
-        "email": EmailAgent(),
-        "productivity": ProductivityAgent(),
+        AgentRole.RAG: ResearchAgent(),
+        AgentRole.TOOLS: CodeAgent(),
+        AgentRole.SCHEMA: CapabilityAgent(),
+        AgentRole.EMAIL: EmailAgent(),
+        AgentRole.PRODUCTIVITY: ProductivityAgent(),
     }
     
     for role, agent in spec_agents.items():

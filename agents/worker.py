@@ -7,18 +7,20 @@ Base class for Specialist Agent Workers that consume commands from a lane.
 import threading
 import time
 import traceback
+import asyncio
+import json
 from typing import Optional, Any
-from lane_queue.store import CommandStore
-from lane_queue.models import CommandStatus
+from db.queries.commands import TreeStore
+from agent_core.types import NodeStatus, AgentRole
 
 class AgentWorker:
     """
-    Poller that pulls tasks from a TreeStore (Lane Queue) and executes them using a Specialist Agent.
+    Poller that pulls tasks from a TreeStore (Execution Tree) and executes them using a Specialist Agent.
     """
-    def __init__(self, role: str, agent: Any, store: CommandStore, poll_interval: float = 1.0):
+    def __init__(self, role: AgentRole, agent: Any, store: TreeStore, poll_interval: float = 1.0):
         self.role = role
         self.agent = agent
-        self.store = store
+        self.tree_store = store
         self.poll_interval = poll_interval
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -27,43 +29,48 @@ class AgentWorker:
         if self._thread and self._thread.is_alive():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._loop, name=f"worker-{self.role}", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name=f"worker-{self.role.value}", daemon=True)
         self._thread.start()
-        print(f"[AgentWorker] Started worker for role: {self.role}")
+        print(f"[AgentWorker] Started worker for role: {self.role.value}")
 
     def stop(self):
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=10)
-        print(f"[AgentWorker] Stopped worker for role: {self.role}")
+        print(f"[AgentWorker] Stopped worker for role: {self.role.value}")
 
     def _loop(self):
+        # Create a local event loop for this thread's async operations
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
         while not self._stop_event.is_set():
             try:
-                # Find an active lane for this role
-                # In this simplified model, we assume a one-to-one mapping for now or use a global queue
-                # For now, let's assume we poll a "global" lane named after the role
-                cmd = self.store.claim_next(self.role) 
-                if cmd is None:
+                # Dequeue from TreeStore nodes table
+                task = loop.run_until_complete(self.tree_store.dequeue_task_async(self.role))
+                if task is None:
                     self._stop_event.wait(timeout=self.poll_interval)
                     continue
 
-                print(f"[AgentWorker] Processing {cmd.cmd_type} (seq={cmd.seq}) for {self.role}")
+                print(f"[AgentWorker] Processing Task {task.id} for {self.role.value}")
                 
-                # Execute agent logic
                 try:
-                    # Payload is the query or task
-                    query = cmd.payload.get("query", cmd.payload.get("task", ""))
-                    result = self.agent.execute(query) # Specialist agents should have an .execute() or .run_turn()
+                    # Execute agent logic (support both task object and query string)
+                    if hasattr(self.agent, "_process_task"):
+                        loop.run_until_complete(self.agent._process_task(task))
+                    else:
+                        query = task.payload.get("query", task.payload.get("task", task.content))
+                        result = self.agent.execute(query)
+                        loop.run_until_complete(self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"content": result}))
                     
-                    self.store.complete(cmd.id, {"content": result})
-                    print(f"[AgentWorker] ✓ Completed {cmd.id}")
+                    print(f"[AgentWorker] ✓ Completed Task {task.id}")
                 except Exception as e:
                     error_msg = f"{type(e).__name__}: {str(e)}"
-                    self.store.fail(cmd.id, error_msg)
-                    print(f"[AgentWorker] ✗ Failed {cmd.id}: {error_msg}")
+                    loop.run_until_complete(self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": error_msg}))
+                    print(f"[AgentWorker] ✗ Failed Task {task.id}: {error_msg}")
                     traceback.print_exc()
 
             except Exception as e:
-                print(f"[AgentWorker] Global error in {self.role} loop: {e}")
+                print(f"[AgentWorker] Global error in {self.role.value} loop: {e}")
                 time.sleep(self.poll_interval)
+        loop.close()

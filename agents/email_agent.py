@@ -17,7 +17,7 @@ from agent_core.types import Intent, AgentRole, NodeStatus
 
 logger = logging.getLogger("agentos.agents.email")
 
-class EmailAgentWorker:
+class EmailAgent:
     """
     Worker for processing email tasks (AgentRole.EMAIL).
     """
