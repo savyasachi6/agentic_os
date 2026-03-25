@@ -87,7 +87,9 @@ class CoordinatorAgent:
             "capability": BridgeAgent(AgentRole.SCHEMA, self.tree_store, self.bus),
             "executor": BridgeAgent(AgentRole.SPECIALIST, self.tree_store, self.bus),
             "planner": BridgeAgent(AgentRole.PLANNER, self.tree_store, self.bus),
-            "productivity": BridgeAgent(AgentRole.PRODUCTIVITY, self.tree_store, self.bus)
+            "productivity": BridgeAgent(AgentRole.PRODUCTIVITY, self.tree_store, self.bus),
+            "email": BridgeAgent(AgentRole.EMAIL, self.tree_store, self.bus),
+            "memory": BridgeAgent(AgentRole.RAG, self.tree_store, self.bus) # Memory currently routes to RAG
         }
         self.agents = default_agents
         if agent_registry:
@@ -96,7 +98,9 @@ class CoordinatorAgent:
         # Initialize Patterns 5, 6, 7
         self.specialist_tools = [
             make_specialist_tool(self.agents["research"], "research_agent", "Searches knowledge base and retrieves factual information"),
-            make_specialist_tool(self.agents["code"], "code_agent", "Executes code and handles technical tasks")
+            make_specialist_tool(self.agents["code"], "code_agent", "Executes code and handles technical tasks"),
+            make_specialist_tool(self.agents["email"], "email_agent", "Sends and lists emails"),
+            make_specialist_tool(self.agents["memory"], "memory_agent", "Stores and retrieves long-term memory")
         ]
         
         # MCP Client (Pattern 6) - Configured for local node server

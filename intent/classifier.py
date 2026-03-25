@@ -16,7 +16,7 @@ CAPABILITY_KEYWORDS = [
     "what can you do", "what are you", "capabilities", "help me",
     "how can you help", "what skills", "list skills", "show skills",
     "available tools", "abilities", "what is indexed", "what are some of the skills",
-    "tell me about your skills", "what can you do"
+    "tell me about your skills"
 ]
 CAPABILITY_SINGLE_WORDS = {
     "menu", "commands", "list"
@@ -75,13 +75,18 @@ def classify_intent(message: str) -> Intent:
     if any(topic in msg for topic in INDEXED_TOPICS):
         return Intent.RAG_LOOKUP
 
+    # Default logic (must be after all keyword matches)
+    word_count = len(msg.split())
+    
+    # If it's a known LLM-friendly task like "explain X", use LLM_DIRECT
     if is_llm_generatable(msg):
         return Intent.LLM_DIRECT
 
-    # Default logic (must be after all keyword matches)
-    word_count = len(msg.split())
-    if word_count <= 2: # Very short queries are simple tasks
+    # Very short queries (1-2 words) that aren't keywords are SIMPLE_TASK
+    if word_count <= 2:
         return Intent.SIMPLE_TASK
+        
+    # Everything else long is a COMPLEX_TASK for the orchestrator
     return Intent.COMPLEX_TASK
 
 def is_llm_generatable(task: str) -> bool:
@@ -93,6 +98,9 @@ def is_llm_generatable(task: str) -> bool:
     ]
     OS_TASKS = ["run", "execute", "pip", "install", "launch", "delete", "remove"]
     
-    # If it contains LLM keywords and no obvious OS destructive commands, it's generatable.
-    # Also, architectural queries are usually generatable.
-    return any(kw in lower for kw in LLM_TASKS) or (len(lower.split()) > 3 and not any(kw in lower for kw in OS_TASKS))
+    # Narrower definition: MUST contain an LLM task keyword AND be relatively simple content-wise
+    # If it has specific OS keywords, it's NOT purely generatable.
+    if any(kw in lower for kw in OS_TASKS):
+        return False
+        
+    return any(kw in lower for kw in LLM_TASKS)

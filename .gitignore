@@ -15,6 +15,12 @@ models/
 *.egg-info/
 dist/
 build/
+py_compile_output*.txt
+pyright_report.json
+compile_audit*.txt
+mypy_report.txt
+init_count.txt
+py_typed_count.txt
 
 # Temporary / scratch files
 tmp/

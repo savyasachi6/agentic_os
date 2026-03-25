@@ -7,7 +7,7 @@ from agents.coordinator import CoordinatorAgent
 
 @pytest.mark.asyncio
 @patch("lane_queue.store.CommandStore")
-@patch("agent_sandbox.manager.SandboxManager")
+@patch("sandbox.manager.SandboxManager")
 @patch("lane_queue.runner.LaneRunner")
 async def test_local_agent_project_loading(mock_runner, mock_sandbox, mock_store):
     """Verify that LocalAgent loads project-specific system prompts."""
@@ -19,7 +19,7 @@ async def test_local_agent_project_loading(mock_runner, mock_sandbox, mock_store
 
 @pytest.mark.asyncio
 @patch("lane_queue.store.CommandStore")
-@patch("agent_sandbox.manager.SandboxManager")
+@patch("sandbox.manager.SandboxManager")
 @patch("lane_queue.runner.LaneRunner")
 async def test_local_agent_project_fallback(mock_runner, mock_sandbox, mock_store):
     """Verify fallback behavior when no system_prompt.md exists."""

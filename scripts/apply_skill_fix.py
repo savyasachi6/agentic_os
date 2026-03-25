@@ -1,7 +1,7 @@
 import sys
 import os
 
-# Add the project root to sys.path to import agent_memory
+# Add the project root to sys.path to import rag
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db.connection import get_db_connection

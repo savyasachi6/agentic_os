@@ -35,6 +35,7 @@ class AgentRole(str, Enum):
     TOOLS = "tools"
     ORCHESTRATOR = "orchestrator"
     EMAIL = "email"
+    MEMORY = "memory"
     PLANNER = "planner"
     PRODUCTIVITY = "productivity"
     SPECIALIST = "specialist"
