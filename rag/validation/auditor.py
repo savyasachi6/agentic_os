@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import ollama
 
 from agent_config import model_settings
-from agent_rag.retrieval.retriever import RetrievedChunk
+from rag.retrieval.retriever import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 

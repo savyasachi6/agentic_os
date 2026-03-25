@@ -17,9 +17,9 @@ def get_hybrid_retriever():
 
 @pytest.fixture
 def mock_stores():
-    with patch("agent_rag.retrieval.retriever.RagStore") as MockRag, \
-         patch("agent_rag.retrieval.retriever.VectorStore") as MockVec, \
-         patch("agent_rag.retrieval.retriever.SemanticCache") as MockCache:
+    with patch("rag.retrieval.retriever.RagStore") as MockRag, \
+         patch("rag.retrieval.retriever.VectorStore") as MockVec, \
+         patch("rag.retrieval.retriever.SemanticCache") as MockCache:
         
         mock_rag = MockRag.return_value
         mock_vec = MockVec.return_value

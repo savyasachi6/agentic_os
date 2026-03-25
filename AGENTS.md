@@ -5,7 +5,7 @@ Welcome to the Agentic OS repository! This document (`AGENTS.md`) outlines the e
 ## 1. System Architecture
 - **Core Reasoning**: `agent_core/` handles the ReAct loops, context management, and sandbox execution. It is the brain.
 - **Abilities**: Modules in `agent_skills/`, `skills/`, `agent_productivity/`, etc.
-- **Memory & RAG**: `agent_memory/` and `agent_rag/` back the system `pgvector` dependencies.
+- **Memory & RAG**: `agent_memory/` and `rag/` back the system `pgvector` dependencies.
 - **Routing**: `llm_router/` and `rl_router/` manage dynamic bandwidth and decision-making depth.
 - **Entry Points**: 
   - `gateway/main.py` is the main Python CLI and Server.

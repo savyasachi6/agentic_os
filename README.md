@@ -32,7 +32,7 @@ graph TD
 
 ### Main Components
 
-- **[Core & Coordinator](core/)**: The primary entry point and reasoning engine. Handles intent classification and agent routing.
+- **[Core & Coordinator](agent_core/)**: The primary entry point and reasoning engine. Handles intent classification and agent routing.
 - **[Autonomous Agents](agents/)**: specialized modular agents (RAG, Executor, Planner, Auditor, etc.) each with a strict domain and risk profile.
 - **[Agent Memory](agent_memory/)**: The semantic storage layer. Managed `pgvector` RAG, semantic caching, and tree-store persistence.
 - **[Database Layer](db/)**: Clean SQL-based command and query interfaces for all system state.
