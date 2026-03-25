@@ -45,9 +45,10 @@ class ExecutorAgentWorker:
 
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action # Temporarily
+        from datetime import datetime
         
         query = task.payload.get("query", task.content or "No content")
-        print(f"[ExecutorAgent] Received Task {task.id}: {query[:50]}")
+        print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Received Task {task.id}: {query[:50]}")
         
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -57,11 +58,14 @@ class ExecutorAgentWorker:
         max_iterations = task.payload.get("max_turns", 5)
         for i in range(max_iterations):
             try:
+                print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Starting LLM generation...")
                 response = await self.llm.generate_async(messages)
+                print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Received LLM response.")
                 messages.append({"role": "assistant", "content": response})
                 
                 action_data = parse_react_action(response)
                 if not action_data:
+                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] No action parsed. Completing task.")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response})
                     return
@@ -69,11 +73,13 @@ class ExecutorAgentWorker:
                 action_type, action_payload = action_data
                 
                 if action_type in ["respond", "done", "complete", "finish"]:
+                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Action: {action_type}. Updating DB...")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": action_payload})
                     return
                 
                 if action_type == "shell_execute":
+                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Action: shell_execute. Payload: {action_payload}")
                     if not is_safe_command(action_payload):
                         obs = f"Observation Error: Command '{action_payload}' is blocked for safety."
                     else:
@@ -105,6 +111,7 @@ class ExecutorAgentWorker:
                         except Exception as e:
                             obs = f"Observation Error: {e}"
                     messages.append({"role": "user", "content": obs})
+                    print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Turn {i+1}: Action completed. Observation captured.")
                 else:
                     messages.append({"role": "user", "content": f"Observation: Unknown action {action_type}"})
 
@@ -114,6 +121,7 @@ class ExecutorAgentWorker:
                 await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
                 return
         
+        print(f"[{datetime.now().isoformat()}] [ExecutorAgent] Max iterations ({max_iterations}) reached.")
         assert task.id is not None
         await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max iterations reached"})
 

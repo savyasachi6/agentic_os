@@ -52,7 +52,9 @@ class AgentWorker:
                     self._stop_event.wait(timeout=self.poll_interval)
                     continue
 
-                print(f"[AgentWorker] Processing Task {task.id} for {self.role.value}")
+                from datetime import datetime
+                ts = datetime.now().isoformat()
+                print(f"[{ts}] [AgentWorker] Processing Task {task.id} for {self.role.value}")
                 
                 try:
                     # Execute agent logic (support both task object and query string)
@@ -63,11 +65,13 @@ class AgentWorker:
                         result = self.agent.execute(query)
                         loop.run_until_complete(self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"content": result}))
                     
-                    print(f"[AgentWorker] ✓ Completed Task {task.id}")
+                    ts_done = datetime.now().isoformat()
+                    print(f"[{ts_done}] [AgentWorker] ✓ Completed Task {task.id}")
                 except Exception as e:
+                    ts_fail = datetime.now().isoformat()
                     error_msg = f"{type(e).__name__}: {str(e)}"
                     loop.run_until_complete(self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": error_msg}))
-                    print(f"[AgentWorker] ✗ Failed Task {task.id}: {error_msg}")
+                    print(f"[{ts_fail}] [AgentWorker] ✗ Failed Task {task.id}: {error_msg}")
                     traceback.print_exc()
 
             except Exception as e:

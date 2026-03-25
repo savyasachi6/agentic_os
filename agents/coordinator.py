@@ -54,7 +54,7 @@ class BridgeAgent:
             await self.bus.send(self.role.value, {"node_id": task_node.id, "payload": payload})
         
         # Poll for completion (accelerated for agentic flow)
-        for _ in range(60): # 60 * 0.5s = 30s timeout
+        for _ in range(180): # 180 * 0.5s = 90s timeout
             await asyncio.sleep(0.5)
             updated = self.tree_store.get_node_by_id(task_node.id)
             if updated and updated.status in (NodeStatus.DONE, NodeStatus.FAILED):
@@ -187,7 +187,7 @@ class CoordinatorAgent:
 
     async def _wait_for_task(self, task_id: int) -> Dict[str, Any]:
         """Shim for tests. In production, use BridgeAgent.execute."""
-        for _ in range(60):
+        for _ in range(180): # parity with BridgeAgent
             await asyncio.sleep(0.5)
             updated = self.tree_store.get_node_by_id(task_id)
             if updated and updated.status in (NodeStatus.DONE, NodeStatus.FAILED):

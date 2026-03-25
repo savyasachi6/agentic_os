@@ -31,6 +31,8 @@ def main():
     
     workers: List[AgentWorker] = []
     
+    from agents.executor import ExecutorAgentWorker
+    
     # Instantiate agents and workers mapped to AgentRole enums
     spec_agents = {
         AgentRole.RAG: ResearchAgent(),
@@ -38,6 +40,7 @@ def main():
         AgentRole.SCHEMA: CapabilityAgent(),
         AgentRole.EMAIL: EmailAgent(),
         AgentRole.PRODUCTIVITY: ProductivityAgent(),
+        AgentRole.SPECIALIST: ExecutorAgentWorker(),
     }
     
     for role, agent in spec_agents.items():
