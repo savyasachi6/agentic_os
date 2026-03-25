@@ -37,3 +37,7 @@ class AgentState(TypedDict):
     agents: Dict[str, Any]       # BridgeAgent registry
     llm: Any                     # LLM client for graph
     guard: Any                   # AgentCallGuard instance
+    
+    # ── Trajectory Metrics (RL Feedback) ──────────
+    step_count: int              # Total ReAct steps (T)
+    invalid_call_count: int      # Count of failed/invalid tool calls (γ)

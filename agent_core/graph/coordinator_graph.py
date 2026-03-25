@@ -47,6 +47,8 @@ def classify_node(state: AgentState) -> AgentState:
         **state,
         "intent": intent.value,
         "last_action_status": "pending",
+        "step_count": state.get("step_count", 0) + 1,
+        "invalid_call_count": state.get("invalid_call_count", 0),
     }
 
 
@@ -128,11 +130,14 @@ async def execute_node(state: AgentState) -> AgentState:
     guard: AgentCallGuard = state.get("guard") or AgentCallGuard(max_per_agent=2, max_total=8)
 
     if guard.exhausted():
+        guard.record_invalid() # One last step for budget error
         return {
             **state,
             "next_node": "respond",
             "direct_response": f"Agent budget exhausted. {guard.summary()}",
             "last_action_status": "error",
+            "step_count": state["step_count"] + 1,
+            "invalid_call_count": state["invalid_call_count"] + 1,
         }
 
     if not guard.can_call(action_name):
@@ -168,6 +173,8 @@ async def execute_node(state: AgentState) -> AgentState:
         "last_action_status": status,
         "next_node": "route",
         "retry_count": state.get("retry_count", 0),
+        "step_count": state["step_count"] + 1,
+        "invalid_call_count": state["invalid_call_count"] + (1 if status == "error" else 0),
     }
 
 

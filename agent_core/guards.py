@@ -70,6 +70,7 @@ class AgentCallGuard:
         self.max_total = max_total
         self._counts: Dict[str, int] = {}
         self._total: int = 0
+        self._invalid_calls: int = 0
         self._call_log: List[Dict[str, Any]] = []
 
     def can_call(self, agent_name: str) -> bool:
@@ -86,8 +87,16 @@ class AgentCallGuard:
             "call_number": self._counts[agent_name],
             "total": self._total,
             "timestamp": time.time(),
-            "payload_preview": payload[:80]
+            "payload_preview": str(payload)[:80]
         })
+
+    def record_invalid(self):
+        self._invalid_calls += 1
+        self._total += 1 # Counts as a step
+        
+    @property
+    def invalid_calls(self) -> int:
+        return self._invalid_calls
 
     def exhausted(self) -> bool:
         return self._total >= self.max_total

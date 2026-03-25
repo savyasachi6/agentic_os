@@ -105,6 +105,7 @@ class CoordinatorAgent:
         # LangGraph Orchestrator (Pattern 4)
         self.graph = build_coordinator_graph()
 
+        self.last_run_metrics: Dict[str, Any] = {}
         self.system_prompt = "You are the Coordinator. Rule: Route requests to specialists."
         self._load_prompt()
 
@@ -166,6 +167,13 @@ class CoordinatorAgent:
             # Execute the graph flow
             final_state = await self.graph.ainvoke(initial_state)
             
+            # Capture trajectory metrics for RL feedback
+            self.last_run_metrics = {
+                "step_count": final_state.get("step_count", 0),
+                "invalid_call_count": final_state.get("invalid_call_count", 0),
+                "guard_log": guard.get_log()
+            }
+
             # Return final_response from graph
             return final_state.get("final_response") or "Error: Coordinator produced no response."
             

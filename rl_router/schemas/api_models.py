@@ -92,6 +92,9 @@ class FeedbackRequest(BaseModel):
         le=1,
         description="Explicit user feedback (+1 for thumbs up, -1 for thumbs down)",
     )
+    # TRAJECTORY METRICS (New)
+    step_count: int = Field(default=1, ge=1, description="Number of ReAct steps (T)")
+    invalid_call_count: int = Field(default=0, ge=0, description="Number of invalid/hallucinated tool calls")
 
 
 class FeedbackResponse(BaseModel):
