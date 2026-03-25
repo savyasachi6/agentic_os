@@ -2,10 +2,11 @@
 The Actor / Planner Node binding Ollama models to our Action Registry framework.
 """
 import json
+import os
 from langchain_community.chat_models import ChatOllama
 from langchain_core.messages import AIMessage
 from agent_core.graph.state import AgentState
-from agent_core.tools import build_tool_registry
+from agent_core.tools.tools import build_tool_registry
 
 def call_model(state: AgentState) -> dict:
     """
@@ -22,13 +23,22 @@ def call_model(state: AgentState) -> dict:
     context_str = json.dumps(state.get("relational_context", {}), indent=2)
     plan_str = json.dumps(state.get("plan", []))
     
-    system_prompt = (
-        f"You are the Agentic OS Kernel.\n\n"
-        f"Available Tools (JSON Schema form):\n{json.dumps(tools_schemas, indent=2)}\n\n"
-        f"Active Objective Plan:\n{plan_str}\n\n"
-        f"Relational Semantic Graph Context:\n{context_str}\n\n"
-        f"Respond in JSON. You must either provide a plain text response via the {{'response': 'text'}} key, "
-        f"or execute a tool via the {{'tool_call': {{'name': 'tool_name', 'args': {{...}} }} }} key."
+    # Load System Prompt from canonical location
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    prompt_path = os.path.join(root_dir, "prompts", "coordinator.md")
+    
+    if os.path.exists(prompt_path):
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            system_prompt_template = f.read()
+    else:
+        # Fallback if file missing
+        system_prompt_template = "You are the Agentic OS Kernel. Respond in JSON."
+
+    system_prompt = system_prompt_template.format(
+        tools_schemas=json.dumps(tools_schemas, indent=2),
+        plan_str=plan_str,
+        context_str=context_str,
+        original_message=state["messages"][-1].content if state["messages"] else ""
     )
     
     messages = [{"role": "system", "content": system_prompt}] + state.get("messages", [])

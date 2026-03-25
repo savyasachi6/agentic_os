@@ -5,15 +5,15 @@ import hashlib
 import json
 import numpy as np
 import httpx
-from config import config
+from agent_core.config import settings
 from .connection import get_pool, get_redis
 
 async def embed(text: str) -> list[float]:
     """Generate 1024-dim embedding via Ollama."""
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            f"{config.LLM_BASE_URL}/api/embeddings",
-            json={"model": config.EMBED_MODEL, "prompt": text}
+            f"{settings.ollama_base_url}/api/embeddings",
+            json={"model": settings.ollama_model, "prompt": text}
         )
         return resp.json()["embedding"]
 
@@ -95,4 +95,4 @@ async def write_semantic_cache(
     """, query_hash, query_embedding, payload_json, strategy, context_json)
     
     # Write to Redis (L1)
-    await r.setex(f"rag:{query_hash}", config.CACHE_TTL_SECONDS, payload_json)
+    await r.setex(f"rag:{query_hash}", settings.cache_ttl_seconds, payload_json)

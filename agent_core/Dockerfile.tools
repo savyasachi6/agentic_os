@@ -1,0 +1,28 @@
+FROM python:3.11-slim
+
+WORKDIR /sandbox
+
+# Install basic system utilities
+RUN apt-get update && apt-get install -y \
+    curl \
+    iproute2 \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user to run the sandbox
+RUN useradd -m -s /bin/bash sandboxuser
+RUN chown -R sandboxuser:sandboxuser /sandbox
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn pydantic
+
+# Copy ALL code for the modular architecture
+# Leveraging .dockerignore to keep it lean
+COPY . .
+
+# Switch to the non-root user
+USER sandboxuser
+
+# Use the new modular sandbox worker entry point
+CMD ["python", "-m", "sandbox.worker", "--port", "9100", "--sandbox-id", "default", "--session-id", "default"]

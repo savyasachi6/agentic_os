@@ -8,7 +8,7 @@ mock_model_settings.embed_model = "test-model"
 
 def get_vector_store():
     with patch.dict("sys.modules", {"config": MagicMock(db_settings=mock_db_settings, model_settings=mock_model_settings)}):
-        from agent_memory.vector_store import VectorStore
+        from rag.vector_store import VectorStore
         return VectorStore()
 
 @pytest.fixture
@@ -29,7 +29,7 @@ def mock_db_conn():
 
 class TestVectorStore:
     def test_generate_embedding(self, mock_ollama):
-        from agent_memory.vector_store import VectorStore
+        from rag.vector_store import VectorStore
         from config import model_settings
         vs = VectorStore(embed_model="test-model")
         emb, is_degraded = vs.generate_embedding("hello world")

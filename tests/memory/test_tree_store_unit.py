@@ -11,12 +11,12 @@ import pytest
 from unittest.mock import patch
 from datetime import datetime
 
-from agent_memory.tree_store import TreeStore
-from agent_memory.models import Chain, Node, AgentRole, NodeType, NodeStatus
+from db.queries.commands import TreeStore
+from db.models import Chain, Node, AgentRole, NodeType, NodeStatus
 
 @pytest.fixture
 def mock_db():
-    with patch("agent_memory.tree_store.get_db_connection") as mock:
+    with patch("db.queries.commands.get_db_connection") as mock:
         yield mock
 
 @pytest.fixture

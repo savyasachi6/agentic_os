@@ -5,7 +5,6 @@ import subprocess
 from typing import Dict, Any, List, Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from config import config
 
 class MCPClient:
     """

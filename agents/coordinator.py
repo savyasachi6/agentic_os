@@ -15,20 +15,26 @@ from typing import Optional, List, Dict, Any, Callable, Awaitable
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus, NodeType, Intent
+from agent_core.types import AgentRole, NodeStatus, NodeType, Intent
 from intent.classifier import classify_intent
 from rag.retriever import HybridRetriever as SkillRetriever
 from intent.routing import route_action_to_agent
-from core.guards import AgentCallGuard
-from core.graph.state import AgentState
+from agent_core.guards import AgentCallGuard
+from agent_core.graph.state import AgentState
+from agent_core.graph.coordinator_graph import build_coordinator_graph
+from agents.tools.specialist_tools import make_specialist_tool
+from agents.a2a_bus import A2ABus
+from tools.mcp.mcp_client import MCPClient
+from langchain_core.messages import HumanMessage, AIMessage
 
 logger = logging.getLogger("agentos.agents.coordinator")
 
 class BridgeAgent:
     """Helper to bridge between the Coordinator and background specialist workers."""
-    def __init__(self, role: AgentRole, tree_store: TreeStore):
+    def __init__(self, role: AgentRole, tree_store: TreeStore, bus: Optional[A2ABus] = None):
         self.role = role
         self.tree_store = tree_store
+        self.bus = bus
 
     async def execute(self, payload: Dict[str, Any], chain_id: int) -> Dict[str, Any]:
         node = Node(
@@ -42,6 +48,10 @@ class BridgeAgent:
             payload=payload
         )
         task_node = await self.tree_store.add_node_async(node)
+        
+        # Pattern 7: Notify via Redis A2A Bus
+        if self.bus:
+            await self.bus.send(self.role.value, {"node_id": task_node.id, "payload": payload})
         
         # Poll for completion (accelerated for agentic flow)
         for _ in range(60): # 60 * 0.5s = 30s timeout
@@ -68,14 +78,38 @@ class CoordinatorAgent:
             "user_roles": [],
             "messages": []
         }
-        self.agents = agent_registry or {
-            "research": BridgeAgent(AgentRole.RAG, self.tree_store),
-            "code": BridgeAgent(AgentRole.TOOLS, self.tree_store),
-            "capability": BridgeAgent(AgentRole.SCHEMA, self.tree_store),
-            "executor": BridgeAgent(AgentRole.SPECIALIST, self.tree_store),
-            "planner": BridgeAgent(AgentRole.PLANNER, self.tree_store),
-            "productivity": BridgeAgent(AgentRole.PRODUCTIVITY, self.tree_store)
+        # A2A Bus (Pattern 7)
+        self.bus = A2ABus()
+        
+        default_agents = {
+            "research": BridgeAgent(AgentRole.RAG, self.tree_store, self.bus),
+            "code": BridgeAgent(AgentRole.TOOLS, self.tree_store, self.bus),
+            "capability": BridgeAgent(AgentRole.SCHEMA, self.tree_store, self.bus),
+            "executor": BridgeAgent(AgentRole.SPECIALIST, self.tree_store, self.bus),
+            "planner": BridgeAgent(AgentRole.PLANNER, self.tree_store, self.bus),
+            "productivity": BridgeAgent(AgentRole.PRODUCTIVITY, self.tree_store, self.bus),
+            "email": BridgeAgent(AgentRole.EMAIL, self.tree_store, self.bus),
+            "memory": BridgeAgent(AgentRole.RAG, self.tree_store, self.bus) # Memory currently routes to RAG
         }
+        self.agents = default_agents
+        if agent_registry:
+            self.agents.update(agent_registry)
+        
+        # Initialize Patterns 5, 6, 7
+        self.specialist_tools = [
+            make_specialist_tool(self.agents["research"], "research_agent", "Searches knowledge base and retrieves factual information"),
+            make_specialist_tool(self.agents["code"], "code_agent", "Executes code and handles technical tasks"),
+            make_specialist_tool(self.agents["email"], "email_agent", "Sends and lists emails"),
+            make_specialist_tool(self.agents["memory"], "memory_agent", "Stores and retrieves long-term memory")
+        ]
+        
+        # MCP Client (Pattern 6) - Configured for local node server
+        self.mcp = MCPClient("local-tools", {"command": "node McpServer/index.js"}) 
+        
+        # LangGraph Orchestrator (Pattern 4)
+        self.graph = build_coordinator_graph()
+
+        self.last_run_metrics: Dict[str, Any] = {}
         self.system_prompt = "You are the Coordinator. Rule: Route requests to specialists."
         self._load_prompt()
 
@@ -99,86 +133,57 @@ class CoordinatorAgent:
     async def run_turn(self, message: str, status_callback: Optional[Callable[[str, str], Awaitable[Any]]] = None) -> str:
         if status_callback:
             await status_callback("status", "Classifying intent...")
-        intent = classify_intent(message)
         
-        await self._ensure_chain()
-        assert self.chain_id is not None
         await self._ensure_chain()
         chain_id = self.chain_id
         if chain_id is None:
             return "Error: Failed to initialize execution chain."
         
-        # Capability query shortcut
-        if intent == Intent.CAPABILITY_QUERY:
-            res = await self.agents["capability"].execute({"query": message}, chain_id=chain_id)
-            return res.get("message", str(res))
-
-        if intent == Intent.CODE_GEN:
-            res = await self.agents["code"].execute({"goal": message}, chain_id=chain_id)
-            return res.get("message", str(res))
-
-        if intent == Intent.CODE_GEN:
-            res = await self.agents["code"].execute({"goal": message}, chain_id=chain_id)
-            return res.get("message", str(res))
+        # Initial Intent Classification
+        intent = classify_intent(message)
         
-        if intent == Intent.GREETING:
-            return "Hello! I'm the Agentic OS Coordinator. How can I help you today?"
+        # Guard instantiation
+        guard = AgentCallGuard(max_per_agent=2, max_total=8)
 
-        # Main ReAct loop for COMPLEX_TASK or others
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": message}
-        ]
+        # LangGraph-based Orchestration (Pattern 4)
+        initial_state: AgentState = {
+            "messages": [HumanMessage(content=message)],
+            "plan": [],
+            "relational_context": {},
+            "last_action_status": "pending",
+            "retry_count": 0,
+            "user_roles": self.state.get("user_roles", []),
+            "user_id": self.state.get("user_id", ""),
+            "intent": intent.value,
+            "next_node": "route",
+            "action_name": "",
+            "action_goal": "",
+            "direct_response": "",
+            "final_response": "",
+            "system_prompt": self.system_prompt,
+            "chain_id": chain_id,
+            "agents": self.agents,
+            "llm": self.llm,
+            "guard": guard
+        }
 
-        from core.reasoning import parse_react_action
-        
-        last_action = None
-        for _ in range(5): # Max coordinator turns
-            try:
-                response = await self.llm.generate_async(messages)
-                messages.append({"role": "assistant", "content": response})
-                
-                action_data = parse_react_action(response)
-                
-                if not action_data:
-                    return response
-                
-                action_name, action_goal = action_data
-                
-                # Circuit Breaker: Stop if we repeat the exact same action
-                if last_action == (action_name, action_goal):
-                    return f"Action loop detected: {action_name}. Returning last observation."
-                last_action = (action_name, action_goal)
+        try:
+            # Execute the graph flow
+            final_state = await self.graph.ainvoke(initial_state)
+            
+            # Capture trajectory metrics for RL feedback
+            self.last_run_metrics = {
+                "step_count": final_state.get("step_count", 0),
+                "invalid_call_count": final_state.get("invalid_call_count", 0),
+                "guard_log": guard.get_log()
+            }
 
-                if status_callback:
-                    await status_callback("thought", response)
-                
-                agent_type = route_action_to_agent(action_name)
-                
-                if agent_type == "respond":
-                    return action_goal
-
-                bridge = self.agents.get(agent_type)
-                if bridge:
-                    # Budget tracking for specialists
-                    guard = AgentCallGuard(max_total=8) # Default or session-based
-                    # For the test, we need to know how many turns were used.
-                    # Simplified for refactor: coordinator turn = 1
-                    turn_budget = guard.max_total - 1
-                    
-                    res = await bridge.execute({"goal": action_goal, "max_turns": turn_budget}, chain_id=chain_id)
-                    obs = f"Observation: {json.dumps(res)}"
-                    if status_callback:
-                        await status_callback("observation", json.dumps(res))
-                else:
-                    obs = f"Observation Error: Agent {agent_type} not found."
-                    
-                messages.append({"role": "user", "content": obs})
-            except Exception as e:
-                obs = f"Observation Error: {e}"
-                messages.append({"role": "user", "content": obs})
-        
-        return "Max coordinator turns reached."
+            # Return final_response from graph
+            return final_state.get("final_response") or "Error: Coordinator produced no response."
+            
+        except Exception as e:
+            logger.exception("Graph execution error: %s", e)
+            return f"Error during orchestration: {e}"
 
     async def _wait_for_task(self, task_id: int) -> Dict[str, Any]:
         """Shim for tests. In production, use BridgeAgent.execute."""

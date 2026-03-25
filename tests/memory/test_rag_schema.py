@@ -1,11 +1,11 @@
 import pytest
 import uuid
 from unittest.mock import patch, MagicMock
-from agent_memory.rag_store import RagStore
+from rag.rag_store import RagStore
 
 @pytest.fixture
 def mock_db():
-    with patch("agent_memory.rag_store.get_db_connection") as mock_get_conn:
+    with patch("rag.rag_store.get_db_connection") as mock_get_conn:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         

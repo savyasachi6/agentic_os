@@ -13,13 +13,15 @@ from typing import Optional, Generator
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 from pgvector.psycopg2 import register_vector
+import redis.asyncio as redis
 
-from core.config import settings
-from core.logging_config import setup_logging
+from agent_core.config import settings
+from agent_core.logging_config import setup_logging
 
 logger = logging.getLogger("agentos.db")
 
 _pool: Optional[SimpleConnectionPool] = None
+_redis: Optional[redis.Redis] = None
 
 # psycopg2 errors that indicate a dropped / stale connection
 _TRANSIENT_DB_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
@@ -67,6 +69,20 @@ def get_pool() -> SimpleConnectionPool:
     if _pool is None:
         init_db_pool()
     return _pool
+
+async def get_redis() -> redis.Redis:
+    """Get the async Redis client, initializing if necessary."""
+    global _redis
+    if _redis is None:
+        from urllib.parse import urlparse
+        u = urlparse(settings.redis_url)
+        _redis = redis.Redis(
+            host=u.hostname or "localhost",
+            port=u.port or 6379,
+            db=int(u.path.lstrip("/") or "0"),
+            decode_responses=True
+        )
+    return _redis
 
 def reset_pool():
     """Tear down and rebuild the pool after a fatal connection error."""

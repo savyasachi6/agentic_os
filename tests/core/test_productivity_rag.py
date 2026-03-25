@@ -5,11 +5,14 @@ Validates the 'Semantic Memory' and 'Resilient RAG Pipeline' skills in [skill.md
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from agent_productivity.todo_manager import TodoManager
-from agent_productivity.notes import NoteManager
-from agent_memory.cache import FractalCache, SemanticCache
-from agent_memory.models import Chain, Node, AgentRole, NodeType, NodeStatus
-from agent_memory.rag_store import RagStore
+from productivity.todo_manager import TodoManager
+from productivity.notes import NoteManager
+try:
+    from db.cache import FractalCache, SemanticCache
+except ImportError:
+    import pytest
+from db.models import Chain, Node, AgentRole, NodeType, NodeStatus
+from rag.rag_store import RagStore
 
 @pytest.mark.asyncio
 async def test_todo_semantic_search_stub():

@@ -2,27 +2,19 @@
 import asyncio
 from typing import Dict, List, Any
 from .mcp_client import MCPClient
-from ..registry import registry
-from ..base_tool import BaseTool
-from config import config
+from agent_core.tools.base import BaseAction, ActionResult
+from agent_core.tools.registry import registry
+from agent_core.config import settings
 
-class MCPToolWrapper(BaseTool):
-    """
-    Wrapper to expose an external MCP tool as a BaseTool.
-    """
-    def __init__(self, client: MCPClient, name: str, description: str):
-        super().__init__()
-        self.client = client
-        self.name = f"mcp_{client.server_name}_{name}"
-        self.description = description
-        self.risk_level = "normal"  # MCP tools default to normal risk
-        self.tags = ["mcp", client.server_name]
-        self._original_tool_name = name
-
-    async def run(self, payload: Dict[str, Any], session_id: str) -> Dict[str, Any]:
-        result = await self.client.call_tool(self._original_tool_name, payload)
-        await self.log_execution(session_id, payload, result)
-        return result
+class MCPToolAction(BaseAction):
+    """Wrapper for external MCP tools."""
+    client: Any
+    original_tool_name: str
+    
+    async def run_async(self) -> Any:
+        # Parameters are injected via self by Pydantic
+        payload = self.model_dump(exclude={'client', 'original_tool_name'})
+        return await self.client.call_tool(self.original_tool_name, payload)
 
 class MCPRegistry:
     """
@@ -33,7 +25,9 @@ class MCPRegistry:
 
     async def initialize(self):
         """Connect to all configured MCP servers and discover their tools."""
-        for server_name, server_config in config.MCP_SERVERS.items():
+        # Use settings from core.config
+        mcp_servers = getattr(settings, 'mcp_servers', {})
+        for server_name, server_config in mcp_servers.items():
             client = MCPClient(server_name, server_config)
             try:
                 await client.connect()
@@ -41,9 +35,14 @@ class MCPRegistry:
                 
                 tools = await client.list_tools()
                 for tool_def in tools:
-                    wrapper = MCPToolWrapper(client, tool_def.name, tool_def.description)
-                    registry.register_tool(wrapper)
-                    print(f"[MCP] Registered external tool: {wrapper.name}")
+                    action = MCPToolAction(
+                        name=f"mcp_{server_name}_{tool_def.name}",
+                        description=tool_def.description,
+                        client=client,
+                        original_tool_name=tool_def.name
+                    )
+                    registry.register(action)
+                    print(f"[MCP] Registered external tool: {action.name}")
             except Exception as e:
                 print(f"[MCP] Failed to connect to server {server_name}: {e}")
 

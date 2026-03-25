@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 from agents.coordinator import CoordinatorAgent
-from core.types import Intent
+from agent_core.types import Intent
 from intent.classifier import classify_intent
 
 @pytest.mark.asyncio

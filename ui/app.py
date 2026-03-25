@@ -16,7 +16,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(_ROOT)
 
 
-from agent_memory.db import get_db_connection, init_db_pool
+from db.connection import get_db_connection, init_db_pool
 
 # Configure the page
 st.set_page_config(

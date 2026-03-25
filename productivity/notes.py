@@ -7,8 +7,8 @@ from typing import List, Optional
 from .models import Note
 
 
-from agent_memory.vector_store import VectorStore
-from agent_core.llm import LLMClient
+from rag.vector_store import VectorStore
+from llm.client import LLMClient
 
 class NoteManager:
     def __init__(self, vector_store: Optional[VectorStore] = None):

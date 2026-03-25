@@ -9,7 +9,7 @@ import logging
 import asyncio
 from typing import List, Tuple, Optional
 import ollama
-from core.config import settings
+from agent_core.config import settings
 
 logger = logging.getLogger("agentos.rag.embedder")
 

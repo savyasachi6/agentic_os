@@ -21,8 +21,11 @@ class HybridRetriever:
     Unified retriever for all RAG needs in agentic_os.
     Supports skill discovery, documentation lookup, and CoT memory retrieval.
     """
-    def __init__(self, embedder: Optional[Embedder] = None):
+    def __init__(self, embedder: Optional[Embedder] = None, **kwargs):
         self.embedder = embedder or Embedder()
+        # Accept but ignore legacy args like top_k in constructor
+        # (they are now passed to retrieve_context methods)
+        self.default_top_k = kwargs.get("top_k", 5)
 
     async def retrieve_context_async(
         self, 

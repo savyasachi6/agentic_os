@@ -6,8 +6,8 @@ Handles background maintenance for todos and notes.
 """
 import asyncio
 import logging
-from agent_productivity.todo_manager import TodoManager
-from agent_productivity.notes import NoteManager
+from productivity.todo_manager import TodoManager
+from productivity.notes import NoteManager
 
 logger = logging.getLogger("agentos.agents.productivity")
 

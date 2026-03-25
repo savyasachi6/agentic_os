@@ -1,7 +1,7 @@
 from typing import List, Optional
 import os
 from projects.desktop_agent.models import FileCategory
-from core.core.llm import generate_structured_output
+from llm.client import generate_structured_output
 from lane_queue.store import CommandStore
 from lane_queue.models import CommandType
 

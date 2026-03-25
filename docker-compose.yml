@@ -20,7 +20,7 @@ services:
       - agentos-net
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init-keycloak-db.sql:/docker-entrypoint-initdb.d/init-keycloak-db.sql
+      - ./db/init:/docker-entrypoint-initdb.d
 
   redis:
     image: redis:7-alpine
@@ -44,22 +44,24 @@ services:
   tools-api:
     build:
       context: .
-      dockerfile: core/Dockerfile.tools
+      dockerfile: agent_core/Dockerfile.tools
+    ports:
+      - "9101:9101"
     expose:
-      - "9100"
+      - "9101"
     environment:
-      WORKER_PORT: "9100"
+      WORKER_PORT: "9101"
       PYTHONPATH: /sandbox
     volumes:
       - .:/sandbox
-    command: ["python", "-u", "-m", "agent_sandbox.worker", "--port", "9100", "--sandbox-id", "docker-tools", "--session-id", "global"]
+    command: ["python", "-u", "-m", "sandbox.worker", "--port", "9101", "--sandbox-id", "docker-tools", "--session-id", "global"]
     networks:
       - agentos-net
 
   agent-core:
     build:
       context: .
-      dockerfile: core/Dockerfile
+      dockerfile: agent_core/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -71,7 +73,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       LIGHTPANDA_CDP_URL: ws://lightpanda:9222
-      TOOLS_API_URL: http://tools-api:9100
+      TOOLS_API_URL: http://tools-api:9101
       RL_ROUTER_URL: http://rl-router:8100/rl
       LLM_MODEL: gemma3:4b
       EMBED_MODEL: mxbai-embed-large

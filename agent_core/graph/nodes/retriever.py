@@ -8,8 +8,8 @@ import time
 import random
 import hashlib
 
-from agent_core.graph.state import AgentState
-from agent_memory.vector_store import VectorStore
+from ..state import AgentState
+from rag.vector_store import VectorStore
 
 def _send_feedback_async(query_hash: str, action: int, depth: int, latency_ms: int, success: bool, auditor_score: float):
     def _send():

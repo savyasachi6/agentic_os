@@ -8,7 +8,7 @@ import json
 from typing import Optional, List
 from datetime import datetime, timezone
 
-from agent_memory.db import get_db_connection
+from db.connection import get_db_connection
 from .models import (
     Lane, Command, CommandStatus, CommandType, RiskLevel,
 )

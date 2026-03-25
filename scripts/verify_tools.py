@@ -3,11 +3,11 @@
 
 import asyncio
 import asyncpg
-from config import config
+from agent_core.config import settings
 
 async def verify():
     try:
-        pool = await asyncpg.create_pool(config.POSTGRES_DSN)
+        pool = await asyncpg.create_pool(settings.database_url)
     except Exception as e:
         print(f"Failed to connect to DB: {e}")
         return

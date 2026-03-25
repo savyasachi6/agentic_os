@@ -11,9 +11,15 @@ import json
 from typing import List, Dict, Optional, Any, AsyncGenerator, Type
 from pydantic import BaseModel
 
-from core.config import settings
+from agent_core.config import settings
 from llm_router import LLMRouter # Temporarily until moved to llm/router.py
 from llm_router.models import Priority
+
+try:
+    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+    HAS_LANGCHAIN = True
+except ImportError:
+    HAS_LANGCHAIN = False
 
 logger = logging.getLogger("agentos.llm.client")
 
@@ -33,17 +39,45 @@ class LLMClient:
         self.max_tokens = max_tokens or 2048
         self.router = LLMRouter.get_instance()
 
+    def _normalize_messages(self, messages: List[Any]) -> List[Dict[str, str]]:
+        """
+        Normalizes a list of messages (which could be dicts, LangChain objects, or strings)
+        into the standard List[Dict[str, str]] format for the router.
+        """
+        normalized = []
+        for msg in messages:
+            if isinstance(msg, dict):
+                normalized.append(msg)
+            elif HAS_LANGCHAIN and isinstance(msg, BaseMessage):
+                role = "user"
+                if isinstance(msg, HumanMessage): role = "user"
+                elif isinstance(msg, AIMessage): role = "assistant"
+                elif isinstance(msg, SystemMessage): role = "system"
+                else:
+                    # Fallback for other LangChain message types (e.g. ToolMessage)
+                    role = getattr(msg, "type", "user")
+                    if role == "ai": role = "assistant"
+                
+                normalized.append({"role": role, "content": str(msg.content)})
+            elif isinstance(msg, str):
+                normalized.append({"role": "user", "content": msg})
+            else:
+                # Last resort string conversion
+                normalized.append({"role": "user", "content": str(msg)})
+        return normalized
+
     async def generate_async(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Any],
         session_id: str = "default_session",
         priority: Priority = Priority.NORMAL,
         stop: Optional[List[str]] = None
     ) -> str:
         """Asynchronously generate a response via the router."""
         try:
+            norm_messages = self._normalize_messages(messages)
             return await self.router.submit(
-                messages=messages,
+                messages=norm_messages,
                 session_id=session_id,
                 model=self.model_name,
                 max_tokens=self.max_tokens,
@@ -57,7 +91,7 @@ class LLMClient:
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Any],
         priority: Priority = Priority.NORMAL,
         stop: Optional[List[str]] = None
     ) -> str:
@@ -75,16 +109,17 @@ class LLMClient:
 
     async def generate_streaming(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Any],
         stop: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """Streaming generation bypassing the router for direct Ollama access."""
+        norm_messages = self._normalize_messages(messages)
         from ollama import AsyncClient
         client = AsyncClient(host=settings.ollama_base_url)
         try:
-            async for chunk in await client.chat(
+            async for chunk in client.chat(
                 model=self.model_name,
-                messages=messages,
+                messages=norm_messages,
                 stream=True,
                 options={
                     "temperature": self.temperature,
