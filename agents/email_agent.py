@@ -9,10 +9,11 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 
-from agent_productivity.integrations import EmailConnector
+from productivity.integrations import EmailConnector
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
+from agent_core.graph.state import AgentState
+from agent_core.types import Intent, AgentRole, NodeStatus
 
 logger = logging.getLogger("agentos.agents.email")
 

@@ -16,17 +16,16 @@ from typing import Optional, Dict, Any, List
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
-from agent_memory.cache import FractalCache # Temporarily
-from agent_rag.retrieval.retriever import HybridRetriever # Temporarily
+from agent_core.graph.state import AgentState
+from agent_core.types import NodeType, AgentRole, AgentResult
+# RAG logic
+from rag.retriever import HybridRetriever
+from agents.a2a_bus import A2ABus
 
-try:
-    from agent_sandbox.browser_tools import handle_browser_navigate, PLAYWRIGHT_AVAILABLE
-    from agent_sandbox.models import ToolCallRequest
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-    handle_browser_navigate = None
-    ToolCallRequest = None
+# Sandbox tools temporarily disabled until moved to core/sandbox
+PLAYWRIGHT_AVAILABLE = False
+handle_browser_navigate = None
+ToolCallRequest = None
 
 logger = logging.getLogger("agentos.agents.rag")
 
@@ -38,8 +37,8 @@ class RAGAgentWorker:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        self.cache = FractalCache()
         self.retriever = HybridRetriever()
+        self.bus = A2ABus()
         self.system_prompt = ""
         self._load_prompt()
         self._running = False
@@ -59,12 +58,6 @@ class RAGAgentWorker:
         session_id = str(task.chain_id)
         print(f"[RAGAgent] Received Task {task.id}: {query_goal}")
         
-        cached = await self.cache.get_cached_response_async(query_goal)
-        if cached:
-            print(f"[RAGAgent] Cache hit.")
-            assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result=cached["response"])
-            return
 
         current_date = datetime.now().strftime("%B %d, %Y")
         system_content = self.system_prompt.replace("{current_date}", current_date)
@@ -83,7 +76,7 @@ class RAGAgentWorker:
                 messages.append({"role": "assistant", "content": response_text})
                 
                 # Using a local parse helper or importing from intent in future
-                from agent_core.loop.thought_loop import parse_react_action
+                from agent_core.reasoning import parse_react_action
                 action_data = parse_react_action(response_text)
                 
                 if not action_data:
@@ -99,9 +92,6 @@ class RAGAgentWorker:
                     except Exception:
                         final_res = action_payload
 
-                    asyncio.create_task(self.cache.set_cached_response_async(
-                        query=query_goal, response={"message": final_res}, strategy_used="rag_worker"
-                    ))
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": final_res})
                     return
@@ -133,16 +123,18 @@ class RAGAgentWorker:
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
-    async def run_forever(self, poll_interval: float = 2.0):
+    async def run_forever(self):
         self._running = True
-        print("[RAGAgent] Worker started.")
-        while self._running:
+        print("[RAGAgent] Worker started (listening on A2A bus).")
+        
+        async for msg in self.bus.listen(AgentRole.RAG.value):
+            if not self._running:
+                break
             try:
-                task = await self.tree_store.dequeue_task_async(agent_role=AgentRole.RAG)
-                if task:
-                    await self._process_task(task)
-                else:
-                    await asyncio.sleep(poll_interval)
+                node_id = msg.get("node_id")
+                if node_id:
+                    task = self.tree_store.get_node_by_id(node_id)
+                    if task:
+                        await self._process_task(task)
             except Exception as e:
-                logger.error("Polling error: %s", e)
-                await asyncio.sleep(poll_interval)
+                logger.error("Error processing A2A message: %s", e)

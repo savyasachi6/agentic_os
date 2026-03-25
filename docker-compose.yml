@@ -44,7 +44,7 @@ services:
   tools-api:
     build:
       context: .
-      dockerfile: core/Dockerfile.tools
+      dockerfile: agent_core/Dockerfile.tools
     ports:
       - "9101:9101"
     expose:
@@ -61,7 +61,7 @@ services:
   agent-core:
     build:
       context: .
-      dockerfile: core/Dockerfile
+      dockerfile: agent_core/Dockerfile
     ports:
       - "8000:8000"
     environment:

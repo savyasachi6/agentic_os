@@ -4,7 +4,7 @@ import os
 # Add the project root to sys.path to import agent_memory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_memory.db import get_db_connection
+from db.connection import get_db_connection
 
 def apply_sql_fix():
     sql_path = os.path.join(os.path.dirname(__file__), "fix_skill_types.sql")

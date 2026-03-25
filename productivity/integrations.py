@@ -4,7 +4,7 @@ Connector stubs for external services (Email, Calendar, Web).
 from typing import List, Optional
 
 
-from agent_config import email_settings
+from agent_core.config import settings as email_settings
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart

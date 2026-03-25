@@ -15,8 +15,10 @@ from typing import Optional, Dict, Any
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
-from core.guards import is_safe_command
+from agent_core.graph.state import AgentState
+from agent_core.types import Intent, AgentRole, NodeStatus
+from agent_core.guards import is_safe_command
+from agents.a2a_bus import A2ABus
 
 logger = logging.getLogger("agentos.agents.executor")
 
@@ -28,6 +30,7 @@ class ExecutorAgentWorker:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
+        self.bus = A2ABus()
         self.system_prompt = "You are the ExecutorAgent. Use shell_execute for CLI tasks or respond() to finish."
         self._running = False
         self._load_prompt()
@@ -41,7 +44,7 @@ class ExecutorAgentWorker:
                 self.system_prompt = f.read()
 
     async def _process_task(self, task: Node):
-        from agent_core.loop.thought_loop import parse_react_action # Temporarily
+        from agent_core.reasoning import parse_react_action # Temporarily
         
         query = task.payload.get("query", task.content or "No content")
         print(f"[ExecutorAgent] Received Task {task.id}: {query[:50]}")
@@ -99,17 +102,18 @@ class ExecutorAgentWorker:
         assert task.id is not None
         await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max iterations reached"})
 
-    async def run_forever(self, poll_interval: float = 2.0):
+    async def run_forever(self):
         self._running = True
-        print("[ExecutorAgent] Worker started.")
-        while self._running:
+        print("[ExecutorAgent] Worker started (listening on A2A bus).")
+        
+        async for msg in self.bus.listen(AgentRole.SPECIALIST.value):
+            if not self._running:
+                break
             try:
-                # Polling for SPECIALIST (or UNIVERSAL) role tasks
-                task = await self.tree_store.dequeue_task_async(agent_role=AgentRole.SPECIALIST)
-                if task:
-                    await self._process_task(task)
-                else:
-                    await asyncio.sleep(poll_interval)
+                node_id = msg.get("node_id")
+                if node_id:
+                    task = self.tree_store.get_node_by_id(node_id)
+                    if task:
+                        await self._process_task(task)
             except Exception as e:
-                logger.error("Polling error: %s", e)
-                await asyncio.sleep(poll_interval)
+                logger.error("Error processing A2A message: %s", e)

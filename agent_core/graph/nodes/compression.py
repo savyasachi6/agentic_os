@@ -3,7 +3,7 @@ Memory Compression Node to prevent Context Window Bloat.
 Summarizes older parts of the conversation and moves them to relational_context.
 """
 from langchain_core.messages import SystemMessage, RemoveMessage
-from agent_core.graph.state import AgentState
+from ..state import AgentState
 
 def memory_compression(state: AgentState) -> dict:
     """

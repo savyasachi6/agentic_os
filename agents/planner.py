@@ -12,9 +12,11 @@ import logging
 from typing import Optional, Dict, Any, List
 
 from llm.client import LLMClient
+from agent_core.graph.state import AgentState
+from agent_core.types import AgentRole, NodeStatus, Intent
+from agent_core.cache import FractalCache
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
 
 logger = logging.getLogger("agentos.agents.planner")
 

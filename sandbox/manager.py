@@ -13,7 +13,7 @@ from typing import Optional, Dict, List
 
 import httpx
 
-from agent_config import sandbox_settings
+from agent_core.config import settings
 from .models import SandboxInfo, SandboxConfig, WorkerStatus
 
 
@@ -51,12 +51,12 @@ class SandboxManager:
     ) -> SandboxInfo:
         """Spawn a new sandboxed worker subprocess."""
         config = config or SandboxConfig(
-            timeout_seconds=sandbox_settings.worker_timeout_seconds,
-            max_memory_mb=sandbox_settings.max_memory_mb,
+            timeout_seconds=settings.sandbox_worker_timeout,
+            max_memory_mb=settings.sandbox_max_memory_mb,
         )
         u = uuid.uuid4().hex
         sandbox_id = f"sbx-{u[:12]}"
-        port = _find_free_port(start=sandbox_settings.worker_base_port)
+        port = _find_free_port(start=settings.sandbox_port_range_start)
 
         # Launch worker.py as a subprocess
         worker_script = os.path.join(os.path.dirname(__file__), "worker.py")

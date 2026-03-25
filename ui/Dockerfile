@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r ui-requirements.txt
 # Copy all application code (monorepo structure)
 COPY . .
 
-# Ensure all project packages are importable (agent_memory, agent_config, etc.)
+# Ensure all project packages are importable
 ENV PYTHONPATH=/app
 
 # Expose Streamlit port

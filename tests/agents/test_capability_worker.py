@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from core.types import AgentRole, NodeStatus, NodeType
+from agent_core.types import AgentRole, NodeStatus, NodeType
 from db.models import Node
 from agents.capability_agent import CapabilityAgentWorker
 

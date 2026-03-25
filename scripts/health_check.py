@@ -7,20 +7,22 @@ import os
 sys.path.insert(0, os.getcwd())
 
 from db.connection import get_pool, get_redis
-from config import config
+from agent_core.config import settings
 
 async def check_health():
     print("--- Agentic OS Health Check ---")
     
     # 1. DB Check
     try:
-        pool = await get_pool()
-        async with pool.acquire() as conn:
-            val = await conn.fetchval("SELECT 1")
-            if val == 1:
-                print("[OK] Postgres Connection")
-            else:
-                print("[FAIL] Postgres Connection (Unexpected Result)")
+        from db.connection import get_db_connection
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                val = cur.fetchone()[0]
+                if val == 1:
+                    print("[OK] Postgres Connection")
+                else:
+                    print("[FAIL] Postgres Connection (Unexpected Result)")
     except Exception as e:
         print(f"[FAIL] Postgres Connection: {e}")
 
@@ -39,9 +41,9 @@ async def check_health():
     try:
         import httpx
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{config.LLM_BASE_URL}/api/tags")
+            resp = await client.get(f"{settings.ollama_base_url}/api/tags")
             if resp.status_code == 200:
-                print(f"[OK] LLM Provider ({config.LLM_PROVIDER})")
+                print(f"[OK] LLM Provider ({settings.router_backend})")
             else:
                 print(f"[FAIL] LLM Provider (Status {resp.status_code})")
     except Exception as e:

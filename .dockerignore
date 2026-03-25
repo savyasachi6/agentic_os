@@ -1,20 +1,50 @@
+# Version Control
 .git
-.venv
+.gitignore
+
+# Python
 __pycache__
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Local Environment
 .env
-.ipynb_checkpoints
-.pytest_cache
-node_modules
-agentic_os.egg-info
-bandit_weights.npz
-checkpoints/
-models/
+.env.example
+
+# IDEs
+.vscode
+.idea
+
+# Project Specific
+brain/
 tmp/
-*.npz
-*.gguf
-*.bin
-*.safetensors
-post_install.js
+checkpoints/
+logs/
+*.log
+node_modules/
 dist/
 build/
+*.egg-info/
+
+# Large Files & Models (DO NOT BUNDLE)
+models/
+*.gguf
+*.npz
+*.bin
+*.pt
+*.onnx

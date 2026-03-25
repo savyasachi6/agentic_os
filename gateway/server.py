@@ -21,14 +21,13 @@ if PROJECT_ROOT not in sys.path:
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, HTTPException
 from pydantic import BaseModel
-from core.utils.auth import KeycloakManager
 from agents.coordinator import CoordinatorAgent
-from db.connection import init_schema
-from agent_memory.vector_store import VectorStore
+from rag.vector_store import VectorStore
 from rag.indexer import SkillIndexer
-from llm_router import LLMRouter
+from llm_router.router import LLMRouter
 from rl_router.server import create_app as create_rl_app
-from core.config import settings
+from agent_core.config import settings
+from agent_core.utils.auth import KeycloakManager
 
 
 app = FastAPI(
@@ -49,39 +48,11 @@ _sessions: dict[str, CoordinatorAgent] = {}
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
-    schema_path = os.path.join(PROJECT_ROOT, "agent_memory", "schema.sql")
-    init_schema(schema_path)
+    # Note: DB Migration/Init is handled by entry points or externally
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
-
-    # Start Background Workers (SQL and Researcher)
-    # Start Background Workers
-    from agents.capability_agent import CapabilityAgentWorker as SQLAgentWorker
-    from agents.rag_agent import RAGAgentWorker as ResearcherAgentWorker
-    from agents.code_agent import CodeAgentWorker
-    from agents.email_agent import EmailAgentWorker
-    from agents.productivity import ProductivityAgentWorker
-    from agents.planner import PlannerAgentWorker
-    from agents.executor import ExecutorAgentWorker as UniversalAgentWorker
-    
-    sql_worker = SQLAgentWorker()
-    res_worker = ResearcherAgentWorker()
-    code_worker = CodeAgentWorker()
-    email_worker = EmailAgentWorker()
-    prod_worker = ProductivityAgentWorker()
-    plan_worker = PlannerAgentWorker()
-    univ_worker = UniversalAgentWorker()
-    
-    asyncio.create_task(sql_worker.run_forever())
-    asyncio.create_task(res_worker.run_forever())
-    asyncio.create_task(code_worker.run_forever())
-    asyncio.create_task(email_worker.run_forever())
-    asyncio.create_task(prod_worker.run_forever())
-    asyncio.create_task(plan_worker.run_forever())
-    asyncio.create_task(univ_worker.run_forever())
-
-    print("[server] Agent OS ready (LLM Router started, background workers active).")
+    print("[server] Agent OS ready (LLM Router started). Specialist workers should be running via scripts/worker_manager.py")
 
 
 @app.on_event("shutdown")
@@ -224,7 +195,7 @@ class FeedbackProxyRequest(BaseModel):
 @app.post("/rl/chat/feedback")
 async def chat_feedback(req: FeedbackProxyRequest):
     """Bridge UI feedback to the RL Router."""
-    from agent_rag.retrieval.rl_client import RLRoutingClient
+    from rag.retrieval.rl_client import RLRoutingClient
     rl_client = RLRoutingClient()
     
     # We simplified it here: the UI transmits the RL metadata it received during streaming.

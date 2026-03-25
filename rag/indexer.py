@@ -21,7 +21,7 @@ from typing import List, Dict, Tuple, Optional
 
 import yaml
 
-from core.config import settings
+from agent_core.config import settings
 from db.queries.skills import upsert_skill, delete_skill_chunks, insert_skill_chunk
 from rag.embedder import Embedder
 

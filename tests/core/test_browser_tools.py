@@ -17,8 +17,8 @@ from unittest.mock import MagicMock, patch, PropertyMock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Global import for the tools being tested
-from agent_sandbox import browser_tools as bt
-from agent_sandbox.models import ToolCallRequest
+from sandbox import browser_tools as bt
+from sandbox.models import ToolCallRequest
 
 
 def _make_request(**kwargs):

@@ -18,8 +18,11 @@ from llm.client import LLMClient
 from db.connection import get_db_connection
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
-from agent_memory.cache import FractalCache # Temporarily
+from agent_core.graph.state import AgentState
+from agent_core.types import Intent, AgentRole, NodeStatus
+# Capability logic
+from agent_core.reasoning import parse_react_action
+from agents.a2a_bus import A2ABus
 
 logger = logging.getLogger("agentos.agents.capability")
 
@@ -41,9 +44,10 @@ class CapabilityAgentWorker:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        self.cache = FractalCache()
+        # self.cache = FractalCache()
         self.system_prompt = ""
         self._load_prompt()
+        self.bus = A2ABus()
         self._running = False
 
     def _load_prompt(self):
@@ -79,11 +83,6 @@ class CapabilityAgentWorker:
         query_goal = task.payload.get("query", "Unknown Goal")
         print(f"[CapabilityAgent] Received Task {task.id}: {query_goal}")
         
-        cached = await self.cache.get_cached_response_async(query_goal)
-        if cached:
-            assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result=cached["response"])
-            return
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -96,7 +95,7 @@ class CapabilityAgentWorker:
                 response_text = await self.llm.generate_async(messages)
                 messages.append({"role": "assistant", "content": response_text})
                 
-                from agent_core.loop.thought_loop import parse_react_action
+                from agent_core.reasoning import ThoughtExtractor
                 action_data = parse_react_action(response_text)
                 if not action_data:
                     sql = _extract_sql_fallback(response_text)
@@ -116,9 +115,6 @@ class CapabilityAgentWorker:
                     except Exception:
                         final_res = action_payload
 
-                    asyncio.create_task(self.cache.set_cached_response_async(
-                        query=query_goal, response={"message": final_res}, strategy_used="capability_worker"
-                    ))
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": final_res})
                     return
@@ -140,16 +136,18 @@ class CapabilityAgentWorker:
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
 
-    async def run_forever(self, poll_interval: float = 2.0):
+    async def run_forever(self):
         self._running = True
-        print("[CapabilityAgent] Worker started.")
-        while self._running:
+        print("[CapabilityAgent] Worker started (listening on A2A bus).")
+        
+        async for msg in self.bus.listen(AgentRole.SCHEMA.value):
+            if not self._running:
+                break
             try:
-                task = await self.tree_store.dequeue_task_async(agent_role=AgentRole.SCHEMA)
-                if task:
-                    await self._process_task(task)
-                else:
-                    await asyncio.sleep(poll_interval)
+                node_id = msg.get("node_id")
+                if node_id:
+                    task = self.tree_store.get_node_by_id(node_id)
+                    if task:
+                        await self._process_task(task)
             except Exception as e:
-                logger.error("Polling error: %s", e)
-                await asyncio.sleep(poll_interval)
+                logger.error("Error processing A2A message: %s", e)

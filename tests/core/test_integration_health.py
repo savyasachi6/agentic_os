@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from agent_core.loop.coordinator import CoordinatorAgent
-from agent_core.state import AgentState
-from agent_skills.retriever import SkillRetriever
-from agent_memory.vector_store import VectorStore
+from agents.coordinator import CoordinatorAgent
+from agent_core.state_legacy import AgentState
+from rag.retriever import SkillRetriever
+from rag.vector_store import VectorStore
 
 @pytest.mark.asyncio
 async def test_system_of_systems_health():

@@ -4,7 +4,7 @@ import sys
 
 # DATABASE_URL: postgresql://user:password@host:port/dbname
 DB_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/agent_os")
-MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "agent_memory", "migration_v4.sql")
+MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "db", "migration_v4.sql")
 
 def apply_migration():
     try:

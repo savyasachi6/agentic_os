@@ -1,7 +1,6 @@
 # tools/mcp/mcp_server.py
 from fastmcp import FastMCP
 from ..registry import registry
-from config import config
 
 # Initialize FastMCP server
 mcp_server = FastMCP("AgenticOS")

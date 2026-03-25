@@ -17,8 +17,9 @@ from typing import Optional, Tuple, Dict, Any
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
-from core.types import AgentRole, NodeStatus
-from agent_memory.cache import FractalCache # Temporarily until moved to core/ or rag/
+from agent_core.graph.state import AgentState
+from agent_core.types import Intent, AgentRole, NodeStatus
+from agent_core.cache import FractalCache
 
 logger = logging.getLogger("agentos.agents.code")
 
@@ -64,7 +65,7 @@ class CodeAgentWorker:
     def __init__(self, model_name: Optional[str] = None, workspace_root: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        self.cache = FractalCache()
+        # self.cache = FractalCache()
         self.workspace_root = Path(workspace_root or os.getcwd()).resolve()
         self.system_prompt: str = ""
         self._load_prompt()
@@ -137,12 +138,12 @@ class CodeAgentWorker:
         goal = task.payload.get("query", task.payload.get("goal", "Unknown Goal"))
         print(f"[CodeAgent] Received Task {task.id}: {goal}")
 
-        cached = await self.cache.get_cached_response_async(goal)
-        if cached:
-            print(f"[CodeAgent] Cache hit. Resolving instantly.")
-            assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result=cached["response"])
-            return
+        # cached = await self.cache.get_cached_response_async(goal)
+        # if cached:
+        #     print(f"[CodeAgent] Cache hit. Resolving instantly.")
+        #     assert task.id is not None
+        #     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result=cached["response"])
+        #     return
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -167,9 +168,9 @@ class CodeAgentWorker:
                 action_type, payload = action_data
 
                 if action_type in ("complete", "done", "respond", "finish"):
-                    asyncio.create_task(self.cache.set_cached_response_async(
-                        query=goal, response={"summary": payload}, strategy_used="code_worker"
-                    ))
+                    # asyncio.create_task(self.cache.set_cached_response_async(
+                    #     query=goal, response={"summary": payload}, strategy_used="code_worker"
+                    # ))
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"summary": payload})
                     print(f"[CodeAgent] Finished task {task.id}")

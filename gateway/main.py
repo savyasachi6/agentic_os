@@ -41,11 +41,10 @@ def load_project_env(project_name: str):
 async def cmd_cli(args):
     """Start the interactive CLI agent loop."""
     from agents.coordinator import CoordinatorAgent
-    from db.connection import init_schema
-    from llm_router import LLMRouter
+    from db.connection import init_db_pool
+    from llm_router.router import LLMRouter
 
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "agent_memory", "schema.sql")
-    init_schema(schema_path)
+    init_db_pool()
     
     # Load project env if specified
     project_dir = None
@@ -83,7 +82,7 @@ async def cmd_cli(args):
 def cmd_serve(args):
     """Start the FastAPI server."""
     import uvicorn
-    from core.config import settings
+    from agent_core.config import settings
 
     if args.project:
         load_project_env(args.project)
@@ -100,11 +99,10 @@ def cmd_serve(args):
 async def cmd_index(args):
     """Re-index all skills into pgvector."""
     from rag.indexer import SkillIndexer
-    from db.connection import init_schema
-    from llm_router import LLMRouter
+    from db.connection import init_db_pool
+    from llm_router.router import LLMRouter
 
-    schema_path = os.path.join(os.path.dirname(__file__), "..", "agent_memory", "schema.sql")
-    init_schema(schema_path)
+    init_db_pool()
     
     # Start the LLM Router (for embeddings)
     router = LLMRouter.get_instance()
@@ -121,7 +119,7 @@ async def cmd_submit(args):
     """Submit a task to the background processing system."""
     from db.queries.commands import TreeStore
     from db.models import Node
-    from core.types import AgentRole, NodeType, NodeStatus
+    from agent_core.types import AgentRole, NodeType, NodeStatus
     
     ts = TreeStore()
     chain = ts.create_chain(session_id=f"terminal_{int(time.time())}", description=args.task)
@@ -148,7 +146,7 @@ async def cmd_submit(args):
 async def cmd_status(args):
     """Check the status of a specific task."""
     from db.queries.commands import TreeStore
-    from core.types import NodeStatus
+    from agent_core.types import NodeStatus
     
     ts = TreeStore()
     node = ts.get_node_by_id(args.id)
@@ -167,7 +165,7 @@ async def cmd_status(args):
 
 async def cmd_remote_chat(args):
     """Terminal chat interface using the REST API (non-WebSocket)."""
-    from core.config import settings
+    from agent_core.config import settings
     
     host = args.host or "localhost"
     port = args.port or 8000 # Default port
@@ -206,7 +204,7 @@ async def cmd_remote_chat(args):
 
 
 def main():
-    # from core.config import settings # Already loaded as a singleton
+    # from agent_core.config import settings # Already loaded as a singleton
     
     parser = argparse.ArgumentParser(
         prog="agent-os",

@@ -2,7 +2,7 @@
 
 import asyncio
 import asyncpg
-from config import config
+from agent_core.config import settings
 import os
 
 MISSING_TOOLS = [
@@ -41,11 +41,9 @@ MISSING_TOOLS = [
 
 async def register():
     host = os.getenv("POSTGRES_HOST", "localhost")
-    dsn = config.POSTGRES_DSN.replace("@postgres:", f"@{host}:") # Simple replace for local
-    
-    # Or just use the config as is if we passed the env var
+    # Or just use the settings as is if we passed the env var
     try:
-        pool = await asyncpg.create_pool(config.POSTGRES_DSN)
+        pool = await asyncpg.create_pool(settings.database_url)
     except Exception as e:
         print(f"Failed to connect to DB: {e}")
         return

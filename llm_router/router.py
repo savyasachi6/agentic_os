@@ -3,7 +3,7 @@ import time
 import uuid
 from typing import List, Dict, Any, Optional
 
-from agent_config import llm_router_settings
+from agent_core.config import settings
 from llm_router.backends import LLMBackend, OllamaBackend, LlamaCPPBackend
 
 from .models import LLMRequest, LLMResponse, BatchGroup, Priority
@@ -53,19 +53,19 @@ class LLMRouter:
 
     def __init__(self, batch_interval_ms: Optional[int] = None, max_batch_size: Optional[int] = None):
         self._batch_interval = 0.0
-        self._max_batch_size = max_batch_size or llm_router_settings.max_batch_size
+        self._max_batch_size = max_batch_size or settings.router_batch_size
         
         # Determine backend based on configuration
-        backend_type = getattr(llm_router_settings, "backend", "ollama")
+        backend_type = getattr(settings, "router_backend", "ollama")
         if backend_type == "llama-cpp":
-            print(f"[LLMRouter] Configuring Native Llama-CPP backend with {getattr(llm_router_settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')}")
+            from llm_router.backends import LlamaCPPBackend
+            print(f"[LLMRouter] Configuring Native Llama-CPP backend with {getattr(settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')}")
             self.backend: LLMBackend = LlamaCPPBackend(
-                model_path=getattr(llm_router_settings, "llama_cpp_model_path", "models/qwen3-vl-8b.gguf")
+                model_path=getattr(settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')
             )
         else:
-            print(f"[LLMRouter] Configuring HTTP API Ollama backend at {getattr(llm_router_settings, 'ollama_base_url', 'http://localhost:11434')}")
             self.backend: LLMBackend = OllamaBackend(
-                base_url=getattr(llm_router_settings, "ollama_base_url", "http://localhost:11434")
+                base_url=getattr(settings, "ollama_base_url", "http://localhost:11434")
             )
         
         self.batch_manager = BatchManager(

@@ -1,11 +1,15 @@
+import pytest
 import os
 import uuid
 import time
-import agent_memory.cache as cache_module
-from agent_memory.cache import FractalCache, SemanticCache
-from agent_memory.rag_store import RagStore
-from agent_memory.vector_store import VectorStore
-from agent_rag.retrieval.retriever import HybridRetriever
+import agent_core.cache as cache_module
+try:
+    from db.cache import FractalCache, SemanticCache
+except ImportError:
+    import pytest
+from rag.rag_store import RagStore
+from rag.vector_store import VectorStore
+from rag.retriever import HybridRetriever
 
 def test_rag_flow():
     print("--- Starting End-to-End RAG Test ---")

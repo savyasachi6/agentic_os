@@ -20,9 +20,9 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 import uvicorn
 
-from security.jwt_auth import JWTMiddleware, TokenPayload
-from security.rbac import get_required_scope_for_tool
-from core import system_tools
+from agent_core.security.jwt_auth import JWTMiddleware, TokenPayload
+from agent_core.security.rbac import get_required_scope_for_tool
+from agent_core.tools import system_tools
 from .models import ToolCallRequest, ToolCallResponse
 
 try:
@@ -230,7 +230,7 @@ def main():
     args = parser.parse_args()
 
     app = create_app(args.sandbox_id, args.session_id)
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

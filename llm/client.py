@@ -11,7 +11,7 @@ import json
 from typing import List, Dict, Optional, Any, AsyncGenerator, Type
 from pydantic import BaseModel
 
-from core.config import settings
+from agent_core.config import settings
 from llm_router import LLMRouter # Temporarily until moved to llm/router.py
 from llm_router.models import Priority
 
@@ -117,7 +117,7 @@ class LLMClient:
         from ollama import AsyncClient
         client = AsyncClient(host=settings.ollama_base_url)
         try:
-            async for chunk in await client.chat(
+            async for chunk in client.chat(
                 model=self.model_name,
                 messages=norm_messages,
                 stream=True,
