@@ -99,7 +99,7 @@ This document is the authoritative catalog of the **Agentic OS** capabilities. I
 - **Outputs**: Verified context snippets with confidence scores.
 - **Preconditions / Assumptions**: Knowledge base must be indexed.
 - **Failure Modes**: Divergence in multi-hop reasoning, validation rejection (false negatives).
-- **Implementation**: [agent_rag/](agent_rag/)
+- **Implementation**: [rag/](rag/)
 - **Tests**: [test_productivity_rag.py](tests/core/test_productivity_rag.py)
 - **Related Skills**: [Semantic Storage](#skill-semantic-storage), [Skill Indexing](#skill-skill-indexing).
 - **Signals / Metrics**: Hallucination rate (verified), context relevance score.
