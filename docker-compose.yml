@@ -138,11 +138,32 @@ services:
       CORE_API_URL: http://agent-core:8000
       CORE_WS_URL: ws://agent-core:8000/ws
       PYTHONPATH: /app
+    networks:
+      - agentos-net
+
+  workers:
+    build:
+      context: .
+      dockerfile: agent_core/Dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      PYTHONPATH: /app
+      LLM_MODEL: gemma3:4b
+      OLLAMA_HOST: http://host.docker.internal:11434
+    volumes:
+      - .:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["python", "scripts/worker_manager.py"]
     depends_on:
       agent-core:
         condition: service_healthy
-    volumes:
-      - .:/app
     networks:
       - agentos-net
 

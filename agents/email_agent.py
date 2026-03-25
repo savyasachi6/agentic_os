@@ -13,7 +13,7 @@ from productivity.integrations import EmailConnector
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
-from agent_core.types import Intent, AgentRole, NodeStatus
+from agent_core.agent_types import Intent, AgentRole, NodeStatus
 
 logger = logging.getLogger("agentos.agents.email")
 

@@ -1,19 +1,35 @@
--- =============================================================
--- Migration v4: Parent-Child Hierarchical Indexing
--- =============================================================
--- Adds a nullable self-referencing FK on the chunks table so that
--- each child chunk can point to its parent chunk.
--- Existing rows remain valid (NULL parent_chunk_id = no hierarchy).
--- =============================================================
+-- migration_v4.sql
+-- Final Alignment: 1024-dim parity across all infrastructure.
+-- This fixes the "expected 1536, not 1024" error in the RAG Agent.
 
-ALTER TABLE chunks
-    ADD COLUMN IF NOT EXISTS parent_chunk_id UUID
-        REFERENCES chunks(id) ON DELETE SET NULL;
+BEGIN;
 
-CREATE INDEX IF NOT EXISTS idx_chunks_parent_id
-    ON chunks (parent_chunk_id)
-    WHERE parent_chunk_id IS NOT NULL;
+-- 1. Align 'semantic_cache'
+-- We drop the indexes first, then alter the column type.
+DROP INDEX IF EXISTS idx_semantic_cache_hnsw;
+DROP INDEX IF EXISTS idx_semantic_cache_hot_hnsw;
 
--- =============================================================
--- End of migration v4
--- =============================================================
+-- TRUNCATE as old 1536 embeddings are useless
+TRUNCATE TABLE semantic_cache;
+
+ALTER TABLE semantic_cache 
+ALTER COLUMN query_vector TYPE vector(1024);
+
+-- Recreate indexes
+CREATE INDEX idx_semantic_cache_hnsw ON semantic_cache USING hnsw (query_vector vector_cosine_ops);
+
+-- 2. Align 'nodes'
+-- TreeStore nodes often have embeddings for similarity search.
+DROP INDEX IF EXISTS idx_nodes_hnsw;
+
+-- We don't truncate 'nodes' as it contains the Task/Chat history!
+-- Instead we NULL out old 1536 embeddings.
+UPDATE nodes SET embedding = NULL;
+
+ALTER TABLE nodes 
+ALTER COLUMN embedding TYPE vector(1024);
+
+-- Recreate index
+CREATE INDEX idx_nodes_hnsw ON nodes USING hnsw (embedding vector_cosine_ops);
+
+COMMIT;

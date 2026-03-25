@@ -128,15 +128,15 @@ def extract_linguistic_features(query: str) -> LinguisticFeatures:
 class ContextFeatureBuilder:
     """Builds a dense numeric context vector for the bandit.
 
-    Layout (1564-d default):
-        [0..1535]     query embedding
-        [1536..1539]  intent logits
-        [1540..1556]  17-d binary linguistic features
-        [1557..1560]  session stats
-        [1561..1563]  advanced stats (entropy, complexity, cluster_id)
+    Layout (1052-d default):
+        [0..1023]     query embedding
+        [1024..1027]  intent logits
+        [1028..1044]  17-d binary linguistic features
+        [1045..1048]  session stats
+        [1049..1051]  advanced stats (entropy, complexity, cluster_id)
     """
 
-    def __init__(self, embedding_dim: int = 1536) -> None:
+    def __init__(self, embedding_dim: int = 1024) -> None:
         self._embedding_dim = embedding_dim
 
     @property

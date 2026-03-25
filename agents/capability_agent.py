@@ -19,7 +19,7 @@ from db.connection import get_db_connection
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
-from agent_core.types import Intent, AgentRole, NodeStatus
+from agent_core.agent_types import Intent, AgentRole, NodeStatus
 # Capability logic
 from agent_core.reasoning import parse_react_action
 from agents.a2a_bus import A2ABus
@@ -53,7 +53,7 @@ class CapabilityAgent:
     def _load_prompt(self):
         # Adjusted for modular architecture: llm/prompts/sql_agent_prompt.md
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "llm", "prompts", "sql_agent_prompt.md")
+        prompt_path = os.path.join(root_dir, "prompts", "capability.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()

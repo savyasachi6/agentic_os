@@ -6,7 +6,7 @@ Exposes modular agents as LangChain tools for reuse in graphs and agents.
 import logging
 from typing import Dict, Any, Optional
 from langchain_core.tools import StructuredTool
-from agent_core.types import AgentRole
+from agent_core.agent_types import AgentRole
 
 logger = logging.getLogger("agentos.agents.tools.specialist")
 

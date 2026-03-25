@@ -15,7 +15,7 @@ from typing import Optional, List, Dict, Any, Callable, Awaitable
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
-from agent_core.types import AgentRole, NodeStatus, NodeType, Intent
+from agent_core.agent_types import AgentRole, NodeStatus, NodeType, Intent
 from intent.classifier import classify_intent
 from rag.retriever import HybridRetriever as SkillRetriever
 from intent.routing import route_action_to_agent
@@ -115,7 +115,7 @@ class CoordinatorAgent:
 
     def _load_prompt(self):
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "llm", "prompts", "coordinator_prompt.md")
+        prompt_path = os.path.join(root_dir, "prompts", "coordinator.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()

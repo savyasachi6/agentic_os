@@ -16,16 +16,13 @@ import os
 import argparse
 from dotenv import load_dotenv
 
-# Ensure project root is in Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
+# Ensure project root is in Python path for absolute imports
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
-if current_dir not in sys.path: 
-    sys.path.insert(0, current_dir)
 
 # Load root .env
-load_dotenv(os.path.join(os.path.dirname(current_dir), ".env"))
+load_dotenv(os.path.join(root_dir, ".env"))
 
 import io
 if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
@@ -57,8 +54,6 @@ def cmd_run(args):
     from db.connection import init_db_pool
     from agent_core.config import settings
     
-    # CLI mode defaults to native local inference (llama-cpp)
-    settings.model_name = "llama-cpp" # Or similar toggle
     
     init_db_pool()
     
@@ -112,8 +107,6 @@ def cmd_serve(args):
     if args.project:
         load_project_env(args.project)
         
-    # Server mode defaults to HTTP inference (ollama)
-    settings.model_name = "ollama"
 
     # LLMRouter will be started in server.py @app.on_event("startup")
     uvicorn.run(
@@ -164,14 +157,17 @@ def cmd_worker(args):
 
         try:
             if args.agent == "sql":
-                from agents.capability_agent import CapabilityAgentWorker
-                worker = CapabilityAgentWorker(model_name=args.model)
+                from agents.capability_agent import CapabilityAgent
+                worker = CapabilityAgent(model_name=args.model)
             elif args.agent == "research":
-                from agents.rag_agent import RAGAgentWorker
-                worker = RAGAgentWorker(model_name=args.model)
+                from agents.rag_agent import ResearchAgent
+                worker = ResearchAgent(model_name=args.model)
+            elif args.agent == "code":
+                from agents.code_agent import CodeAgent
+                worker = CodeAgent(model_name=args.model)
             elif args.agent == "email":
-                from agents.email_agent import EmailAgentWorker
-                worker = EmailAgentWorker()
+                from agents.email_agent import EmailAgent
+                worker = EmailAgent()
             else:
                 print(f"Unknown agent type: {args.agent}")
                 import sys

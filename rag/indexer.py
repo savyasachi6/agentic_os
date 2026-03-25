@@ -22,7 +22,7 @@ from typing import List, Dict, Tuple, Optional
 import yaml
 
 from agent_core.config import settings
-from db.queries.skills import upsert_skill, delete_skill_chunks, insert_skill_chunk
+from db.queries.skills import upsert_skill, delete_skill_chunks, insert_skill_chunk, get_skill_metadata
 from rag.embedder import Embedder
 
 
@@ -232,6 +232,12 @@ class SkillIndexer:
         normalized_name = name.lower().replace(" ", "_")
         skill_type = combined_metadata.get("skill_type", "framework")
 
+        # --- Incremental Indexing Check ---
+        existing = get_skill_metadata(normalized_name)
+        if existing and existing["checksum"] == checksum:
+            print(f"[indexer] Skipping {'dir' if is_dir else 'file'}: {rel_path} (unchanged)")
+            return True
+
         print(f"[indexer] Indexing {'dir' if is_dir else 'file'}: {rel_path} ({name})")
 
         # Upsert skill record
@@ -257,15 +263,16 @@ class SkillIndexer:
 
             for chunk in chunks:
                 token_count = _estimate_tokens(chunk["content"])
-                # Note: Embeddings should reach the DB. 
-                # For now we'll just insert the chunk. 
-                # Ideally we'd call an embedding generation step here too.
+                # Generate embedding for the chunk content
+                embedding, is_degraded = self.embedder.generate_embedding_sync(chunk["content"])
+                
                 insert_skill_chunk(
                     skill_id=skill_id,
                     chunk_type=chunk["chunk_type"],
                     heading=chunk["heading"],
                     content=chunk["content"],
                     token_count=token_count,
+                    embedding=embedding
                 )
         return True
 

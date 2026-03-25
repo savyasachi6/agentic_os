@@ -17,7 +17,7 @@ from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
-from agent_core.types import NodeType, AgentRole, AgentResult
+from agent_core.agent_types import NodeType, AgentRole, AgentResult
 # RAG logic
 from rag.retriever import HybridRetriever
 from agents.a2a_bus import A2ABus
@@ -46,7 +46,7 @@ class ResearchAgent:
     def _load_prompt(self):
         # Adjusted for modular architecture: llm/prompts/research_agent_prompt.md
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "llm", "prompts", "research_agent_prompt.md")
+        prompt_path = os.path.join(root_dir, "prompts", "rag.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()
@@ -100,8 +100,8 @@ class ResearchAgent:
                 if action_type == "hybrid_search":
                     try:
                         p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
-                        chunks = await self.retriever.retrieve_async(query=p.get("query", query_goal), session_id=session_id)
-                        obs = f"Observation: Found {len(chunks)} chunks: " + json.dumps([{"c": c.content[:100]} for c in chunks])
+                        chunks_text = await self.retriever.retrieve_context_async(query=p.get("query", query_goal), session_id=session_id)
+                        obs = f"Observation: Found relevant context:\n{chunks_text}"
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_fetch":

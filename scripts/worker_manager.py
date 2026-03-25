@@ -22,7 +22,7 @@ from agents.email_agent import EmailAgent
 from agents.productivity import ProductivityAgent
 from db.queries.commands import TreeStore
 from db.connection import init_db_pool
-from agent_core.types import AgentRole
+from agent_core.agent_types import AgentRole
 
 def main():
     print("--- Agentic OS Worker Manager ---")

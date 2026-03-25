@@ -13,7 +13,7 @@ from datetime import datetime
 
 from db.connection import get_db_connection
 from db.models import Chain, Node
-from agent_core.types import AgentRole, NodeType, NodeStatus
+from agent_core.agent_types import AgentRole, NodeType, NodeStatus
 from rag.vector_store import VectorStore
 
 logger = logging.getLogger("agentos.db.queries")

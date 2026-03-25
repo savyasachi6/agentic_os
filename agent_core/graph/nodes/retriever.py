@@ -13,7 +13,7 @@ from rag.vector_store import VectorStore
 
 def _send_feedback_async(query_hash: str, action: int, depth: int, latency_ms: int, success: bool, auditor_score: float):
     def _send():
-        url = "http://localhost:8100/feedback"
+        url = "http://rl-router:8100/feedback"
         payload = {
             "query_hash": query_hash,
             "arm_index": action,
@@ -36,10 +36,10 @@ def call_rl_router(query: str) -> tuple[int, int]:
         depth = random.choice([0, 1, 2, 3])
         return depth, depth * 2
 
-    url = "http://localhost:8100/route"
+    url = "http://rl-router:8100/route"
     payload = {
         "query_text": query,
-        "query_embedding": [0.0] * 1536
+        "query_embedding": [0.0] * 1024
     }
     try:
         req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'}, method='POST')

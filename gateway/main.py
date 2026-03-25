@@ -119,7 +119,7 @@ async def cmd_submit(args):
     """Submit a task to the background processing system."""
     from db.queries.commands import TreeStore
     from db.models import Node
-    from agent_core.types import AgentRole, NodeType, NodeStatus
+    from agent_core.agent_types import AgentRole, NodeType, NodeStatus
     
     ts = TreeStore()
     chain = ts.create_chain(session_id=f"terminal_{int(time.time())}", description=args.task)
@@ -146,7 +146,7 @@ async def cmd_submit(args):
 async def cmd_status(args):
     """Check the status of a specific task."""
     from db.queries.commands import TreeStore
-    from agent_core.types import NodeStatus
+    from agent_core.agent_types import NodeStatus
     
     ts = TreeStore()
     node = ts.get_node_by_id(args.id)

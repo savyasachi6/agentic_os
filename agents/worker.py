@@ -11,7 +11,7 @@ import asyncio
 import json
 from typing import Optional, Any
 from db.queries.commands import TreeStore
-from agent_core.types import NodeStatus, AgentRole
+from agent_core.agent_types import NodeStatus, AgentRole
 
 class AgentWorker:
     """

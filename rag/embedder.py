@@ -19,16 +19,16 @@ class Embedder:
     Uses centralized configuration from core.config.
     """
     def __init__(self, model: Optional[str] = None):
-        self.model = model or settings.ollama_model # Or a specific embedding model if separate
-        self.dim = 1536 # Match schema.sql VECTOR(1536)
+        self.model = model or settings.embed_model
+        self.dim = 1024 # Match schema.sql VECTOR(1024) for mxbai-embed-large
 
     def generate_embedding_sync(self, text: str) -> Tuple[List[float], bool]:
         """Generate a vector embedding. Returns (vector, is_fallback)."""
         if not text or not text.strip():
             return [0.0] * self.dim, True
             
-        # Truncation to stay within model context limits
-        safe_text = text[:4000]
+        # Truncation to stay within model context limits (safe 800 chars)
+        safe_text = text[:800]
         
         try:
             response = ollama.embeddings(model=self.model, prompt=safe_text)

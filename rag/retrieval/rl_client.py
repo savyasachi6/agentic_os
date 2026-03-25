@@ -38,6 +38,16 @@ class RLRoutingClient:
         """
         Submit feedback for a routing decision to the RL Router.
         """
+        # Validate query_type
+        valid_types = {"analytical", "lookup", "code"}
+        if query_type not in valid_types:
+            logger.warning(f"Invalid query_type '{query_type}' provided. Defaulting to 'analytical'.")
+            query_type = "analytical"
+
+        # Clip telemetry to avoid extreme outliers
+        latency_ms = min(float(latency_ms), 600_000.0)
+        depth_used = min(int(depth_used), 50)
+
         url = f"{self.base_url}/feedback"
         
         # Build payload compatible with rl_router.schemas.api_models.FeedbackRequest
@@ -87,9 +97,9 @@ class RLRoutingClient:
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Failed to get routing decision from {url}: {e}")
+            logger.error(f"Failed to get routing decision from {url}. Reason: {e}. Falling back to standard RAG.")
             # Default fallback: Standard RAG (Arm 2)
-            return {"action": 2, "arm_index": 2, "status": "fallback"}
+            return {"action": 2, "arm_index": 2, "status": "fallback", "error": str(e)}
 
     async def route(
         self, 

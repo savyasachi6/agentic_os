@@ -10,14 +10,14 @@ from db.connection import get_db_connection
 
 logger = logging.getLogger("agentos.db.queries.skills")
 
-def get_skill_by_id(skill_id: int) -> Optional[Dict[str, Any]]:
-    """Retrieve basic skill metadata."""
+def get_skill_metadata(normalized_name: str) -> Optional[Dict[str, Any]]:
+    """Retrieve skill metadata including checksum for incremental indexing."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name, description, eval_lift FROM knowledge_skills WHERE id = %s", (skill_id,))
+            cur.execute("SELECT id, checksum FROM knowledge_skills WHERE normalized_name = %s", (normalized_name,))
             row = cur.fetchone()
             if row:
-                return {"id": row[0], "name": row[1], "description": row[2], "eval_lift": row[3]}
+                return {"id": row[0], "checksum": row[1]}
     return None
 
 def update_skill_eval_lift(skill_id: int, new_lift: float):
@@ -84,15 +84,15 @@ def delete_skill_chunks(skill_id: int):
             cur.execute("DELETE FROM skill_chunks WHERE skill_id = %s", (skill_id,))
         conn.commit()
 
-def insert_skill_chunk(skill_id: int, chunk_type: str, heading: str, content: str, token_count: int):
+def insert_skill_chunk(skill_id: int, chunk_type: str, heading: str, content: str, token_count: int, embedding: Optional[List[float]] = None):
     """Insert a single skill chunk. Note: embeddings should be handled by a separate process or updated later."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO skill_chunks (skill_id, chunk_type, heading, content, token_count)
-                VALUES (%s, %s, %s, %s, %s);
+                INSERT INTO skill_chunks (skill_id, chunk_type, heading, content, token_count, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s);
                 """,
-                (skill_id, chunk_type, heading, content, token_count)
+                (skill_id, chunk_type, heading, content, token_count, embedding)
             )
         conn.commit()

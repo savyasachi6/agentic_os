@@ -35,6 +35,18 @@ class FeedbackService:
         self._tool_repo = tool_exec_repo
 
     def process_feedback(self, request: FeedbackRequest) -> FeedbackResponse:
+        # 0. Log incoming telemetry for observability
+        import logging
+        logger = logging.getLogger("rl_router.feedback")
+        logger.info(
+            f"Processing feedback: query_hash={request.query_hash}, arm={request.arm_index}, "
+            f"success={request.success}, latency={request.latency_ms}ms, "
+            f"steps={request.step_count}, invalid_calls={request.invalid_call_count}, "
+            f"query_type={request.query_type}"
+        )
+        if request.tool_calls:
+            logger.info(f"Feedback includes {len(request.tool_calls)} tool calls")
+
         # 1. Map API tool calls to Domain tool calls
         domain_tool_calls = [
             ToolCallLog(

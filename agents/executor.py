@@ -16,7 +16,7 @@ from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
-from agent_core.types import Intent, AgentRole, NodeStatus
+from agent_core.agent_types import Intent, AgentRole, NodeStatus
 from agent_core.guards import is_safe_command
 from agents.a2a_bus import A2ABus
 
@@ -38,7 +38,7 @@ class ExecutorAgentWorker:
     def _load_prompt(self):
         # Optional: Load from llm/prompts/executor_agent_prompt.md if it exists
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "llm", "prompts", "executor_agent_prompt.md")
+        prompt_path = os.path.join(root_dir, "prompts", "executor.md")
         if os.path.exists(prompt_path):
             with open(prompt_path, "r", encoding="utf-8") as f:
                 self.system_prompt = f.read()

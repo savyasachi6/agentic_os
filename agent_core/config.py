@@ -20,6 +20,7 @@ class Settings:
     redis_url: str
     ollama_base_url: str
     ollama_model: str
+    embed_model: str
     lightpanda_ws_url: str
     log_level: str
     admin_secret: str
@@ -32,8 +33,8 @@ class Settings:
     
     # --- RAG & Skills ---
     skills_dir: str
-    chunk_min_tokens: int
-    chunk_max_tokens: int
+    chunk_min_tokens: int = 100
+    chunk_max_tokens: int = 250
     retrieval_top_k: int = 4
     
     # --- LLM Router ---
@@ -44,7 +45,7 @@ class Settings:
     # --- RL Router (Contextual Bandit) ---
     bandit_alpha: float = 0.25
     bandit_arms: int = 8
-    bandit_dim: int = 1561
+    bandit_dim: int = 1052
     
     # --- Rewards ---
     reward_lambda_h: float = 0.8
@@ -66,7 +67,7 @@ class Settings:
     cache_ttl_seconds: int = 3600
     
     # --- Vector & Models ---
-    embed_dim: int = 1536
+    embed_dim: int = 1024
     
     # --- MCP Servers ---
     mcp_servers: Dict[str, Dict[str, Any]] = None
@@ -114,7 +115,8 @@ def load_settings() -> Settings:
         database_url     = db_url,
         redis_url        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
-        ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2")),
+        ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "gemma3:4b")),
+        embed_model      = os.getenv("EMBED_MODEL", "mxbai-embed-large"),
         lightpanda_ws_url= os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222"),
         log_level        = os.getenv("LOG_LEVEL", "INFO"),
         admin_secret     = os.getenv("ADMIN_SECRET", os.getenv("JWT_SECRET", "change-me-immediately")),
@@ -123,13 +125,9 @@ def load_settings() -> Settings:
         keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "agent-os"),
         keycloak_client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET", "change-me"),
         skills_dir       = os.getenv("SKILLS_DIR", "skills"),
-        chunk_min_tokens = int(os.getenv("CHUNK_MIN_TOKENS", "500")),
-        chunk_max_tokens = int(os.getenv("CHUNK_MAX_TOKENS", "800")),
+        chunk_min_tokens = int(os.getenv("CHUNK_MIN_TOKENS", "100")),
+        chunk_max_tokens = int(os.getenv("CHUNK_MAX_TOKENS", "250")),
         retrieval_top_k  = int(os.getenv("RETRIEVAL_TOP_K", "4")),
-        router_backend   = os.getenv("ROUTER_BACKEND", "ollama"),
-        router_batch_size= int(os.getenv("ROUTER_MAX_BATCH_SIZE", "8")),
-        bandit_alpha     = float(os.getenv("BANDIT_ALPHA", "0.25")),
-        reward_lambda_h  = float(os.getenv("REWARD_LAMBDA_H", "0.8")),
         
         mcp_servers = {
             "filesystem": {

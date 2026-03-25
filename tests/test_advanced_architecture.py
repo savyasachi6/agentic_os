@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agents.coordinator import CoordinatorAgent, BridgeAgent
 from agents.a2a_bus import A2ABus
-from agent_core.types import AgentRole, Intent
+from agent_core.agent_types import AgentRole, Intent
 
 @pytest.mark.asyncio
 async def test_a2a_bus_transmission():

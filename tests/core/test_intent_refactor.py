@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from intent.classifier import classify_intent
-from agent_core.types import Intent
+from agent_core.agent_types import Intent
 from agents.coordinator import CoordinatorAgent
 from agent_core.graph.state import AgentState
 

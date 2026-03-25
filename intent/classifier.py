@@ -7,7 +7,7 @@ Replaces core/intent_classifier.py.
 import re
 import logging
 from typing import Optional
-from agent_core.types import Intent # Now imported from centralized core/types.py
+from agent_core.agent_types import Intent # Now imported from centralized core/types.py
 
 logger = logging.getLogger("agentos.intent.classifier")
 

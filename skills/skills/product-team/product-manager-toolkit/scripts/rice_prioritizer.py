@@ -13,7 +13,7 @@ if root_dir not in sys.path:
 
 from llm.client import LLMClient
 from db.queries.commands import TreeStore
-from agent_core.types import NodeStatus
+from agent_core.agent_types import NodeStatus
 
 class RICECalculator:
     """Calculate RICE scores and prioritize using LLM reasoning"""

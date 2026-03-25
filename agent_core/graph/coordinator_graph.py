@@ -19,7 +19,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent_core.graph.state import AgentState
-from agent_core.types import Intent
+from agent_core.agent_types import Intent
 from agent_core.guards import AgentCallGuard
 from agent_core.reasoning import parse_react_action
 from intent.classifier import classify_intent
