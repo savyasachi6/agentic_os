@@ -16,7 +16,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 # Mock the enrichment and search logic to avoid deep dependency chain collisions
-sys.modules["agent_rag.ingestion.enrichment"] = MagicMock()
+sys.modules["rag.ingestion.enrichment"] = MagicMock()
 sys.modules["memory.rag_store"] = MagicMock()
 sys.modules["memory.vector_store"] = MagicMock()
 
@@ -57,7 +57,7 @@ class TestDoclingIntegration(unittest.TestCase):
             mock_chunk.meta.export_json_dict.return_value = {"headings": ["Header 1"]}
             
             # We mock the internal docling chunker's chunk method
-            with patch("agent_rag.ingestion.docling_chunker.HybridChunker.chunk", return_value=[mock_chunk]):
+            with patch("rag.ingestion.docling_chunker.HybridChunker.chunk", return_value=[mock_chunk]):
                 results = chunker.chunk_document(MagicMock(spec=DoclingDocument))
                 
                 self.assertEqual(len(results), 1)
@@ -71,10 +71,10 @@ class TestDoclingIntegration(unittest.TestCase):
     def test_worker_routing(self):
         """Test that ingest_document correctly routes to Docling when requested."""
         # Mocking the stores to avoid DB hits
-        with patch("agent_rag.ingestion.worker.RagStore") as mock_rag, \
-             patch("agent_rag.ingestion.worker.VectorStore") as mock_vec, \
-             patch("agent_rag.ingestion.worker.DoclingParser") as mock_parser, \
-             patch("agent_rag.ingestion.worker.DoclingChunker") as mock_chunker:
+        with patch("rag.ingestion.worker.RagStore") as mock_rag, \
+             patch("rag.ingestion.worker.VectorStore") as mock_vec, \
+             patch("rag.ingestion.worker.DoclingParser") as mock_parser, \
+             patch("rag.ingestion.worker.DoclingChunker") as mock_chunker:
             
             # Set up mocks
             mock_rag_instance = mock_rag.return_value

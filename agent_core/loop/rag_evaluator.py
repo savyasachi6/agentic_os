@@ -1,7 +1,7 @@
 import logging
 import time
 from typing import Dict, Any, Optional
-from agent_rag.retrieval.rl_client import RLRoutingClient
+from rag.retrieval.rl_client import RLRoutingClient
 
 logger = logging.getLogger(__name__)
 
