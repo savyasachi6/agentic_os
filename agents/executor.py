@@ -36,12 +36,12 @@ class ExecutorAgentWorker:
         self._load_prompt()
 
     def _load_prompt(self):
-        # Optional: Load from llm/prompts/executor_agent_prompt.md if it exists
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "assets", "prompts", "executor.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("core", "executor")
+        except Exception as e:
+            logger.error(f"Failed to load executor prompt: {e}")
+            self.system_prompt = "You are the ExecutorAgent. Use shell_execute for CLI tasks or respond() to finish."
 
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action

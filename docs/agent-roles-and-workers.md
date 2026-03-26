@@ -19,10 +19,12 @@ This document maps the logical agents in Agentic OS to their `AgentRole`, A2A to
 ## Startup Governance
 
 ### Worker Manager
+
 Most specialist workers are started by `scripts/worker_manager.py`. It uses the `AgentWorker` class (from `agents/worker.py`) as a poller wrapper around the agent implementations.
 
 ### Polling vs. Listening
 - **Polling (`AgentWorker`)**: Periodically checks the `TreeStore` (DB) for `PENDING` nodes of a specific role.
+
 - **Listening (`A2ABus`)**: Many agents (`ResearchAgentWorker`, `ExecutorAgentWorker`, `CapabilityAgentWorker`) have a `run_forever` method that listens to an A2A bus (Redis). However, `worker_manager.py` currently favors the polling wrapper for most roles.
 
 ## Missing Workers

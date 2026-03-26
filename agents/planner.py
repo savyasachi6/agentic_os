@@ -33,13 +33,11 @@ class PlannerAgentWorker:
         self._running = False
 
     def _load_prompt(self):
-        # Modular architecture path: llm/prompts/planner_agent_prompt.md (or similar)
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "llm", "prompts", "planner_agent_prompt.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
-        else:
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("core", "planner")
+        except Exception as e:
+            logger.error(f"Failed to load planner prompt: {e}")
             self.system_prompt = "You are the PlannerAgent. Decompose goals into task nodes."
 
     async def _process_task(self, task: Node):

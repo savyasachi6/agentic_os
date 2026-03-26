@@ -2,7 +2,7 @@
 
 To maintain a clean and scalable codebase, the repository is organized into four main categories.
 
-## 1. Runtime (`runtime/`)
+## 1. Core Packages (Root)
 Core application code and agent logic. These are the packages that build and run the Agentic OS ecosystem.
 
 | Directory | Description |

@@ -73,18 +73,24 @@ class BridgeAgent:
         start_t = time.time()
 
         # Poll for completion (accelerated for agentic flow)
-        for _ in range(max_iters): 
+        for i in range(max_iters): 
+            if i % 10 == 0: # Log every 5 seconds (0.5s * 10)
+                logger.info(f"Polling specialist {self.role.value}... (elapsed: {i*poll_interval:.1f}s)")
+            
             await asyncio.sleep(poll_interval)
-            updated = self.tree_store.get_node_by_id(task_node.id)
+            updated = await self.tree_store.get_node_by_id_async(task_node.id)
             if updated and updated.status in (NodeStatus.DONE, NodeStatus.FAILED):
-                return updated.result or {}
+                res = updated.result or {}
+                if updated.status == NodeStatus.FAILED:
+                    logger.error(f"Specialist failed: role={self.role.value}, node_id={task_node.id}, result={res}")
+                return res
         
         elapsed = time.time() - start_t
         logger.warning(
             f"Specialist timeout: role={self.role.value}, chain_id={chain_id}, "
             f"node_id={task_node.id}, elapsed={elapsed:.2f}s"
         )
-        return {"error": "Specialist timeout", "role": self.role.value, "elapsed": elapsed}
+        return {"error_type": "timeout", "error": "Specialist timeout", "role": self.role.value, "elapsed": elapsed}
 
 class CoordinatorAgent:
     """
@@ -139,11 +145,12 @@ class CoordinatorAgent:
         self._load_prompt()
 
     def _load_prompt(self):
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "prompts", "coordinator.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("core", "coordinator")
+        except Exception as e:
+            logger.error(f"Failed to load coordinator prompt: {e}")
+            # Keep default if loading fails
 
     async def _ensure_chain(self):
         """Ensure a database chain exists for this session."""

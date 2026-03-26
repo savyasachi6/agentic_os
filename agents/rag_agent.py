@@ -17,7 +17,7 @@ from llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
-from agent_core.agent_types import NodeType, AgentRole, AgentResult
+from agent_core.agent_types import NodeType, AgentRole, AgentResult, NodeStatus
 # RAG logic
 from rag.retriever import HybridRetriever
 from agents.a2a_bus import A2ABus
@@ -44,12 +44,11 @@ class ResearchAgentWorker:
         self._running = False
 
     def _load_prompt(self):
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "assets", "prompts", "rag.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
-        else:
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("agents", "rag")
+        except Exception as e:
+            logger.error(f"Failed to load RAG prompt: {e}")
             self.system_prompt = "You are the RAGAgent. Perform research and retrieval."
 
     async def _process_task(self, task: Node):
@@ -106,7 +105,12 @@ class ResearchAgentWorker:
                     try:
                         p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
                         chunks_text = await self.retriever.retrieve_context_async(query=p.get("query", query_goal), session_id=session_id)
-                        obs = f"Observation: Found relevant context:\n{chunks_text}"
+                        if not chunks_text or chunks_text.strip() == "":
+                            obs = "Observation: No relevant context found in local knowledge base."
+                        else:
+                            obs = f"Observation: Found relevant context:\n{chunks_text}"
+                    except asyncio.TimeoutError:
+                        obs = "Observation: Search timed out. Please try a narrower query."
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_fetch":
@@ -122,13 +126,21 @@ class ResearchAgentWorker:
             duration = time.time() - start_time
             logger.warning(f"Max turns reached. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Max turns reached"})
+            await self.tree_store.update_node_status_async(
+                task.id, 
+                NodeStatus.FAILED, 
+                result={"error_type": "max_turns", "error": "Max reasoning turns reached without finding an answer."}
+            )
 
         except Exception as e:
             duration = time.time() - start_time
             logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": str(e)})
+            await self.tree_store.update_node_status_async(
+                task.id, 
+                NodeStatus.FAILED, 
+                result={"error_type": "critical_failure", "error": str(e), "traceback": traceback.format_exc()}
+            )
 
     async def run_forever(self):
         self._running = True

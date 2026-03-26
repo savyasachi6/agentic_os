@@ -20,6 +20,7 @@ from agents.code_agent import CodeAgentWorker
 from agents.capability_agent import CapabilityAgentWorker
 from agents.email_agent import EmailAgent
 from agents.productivity import ProductivityAgent
+from agents.planner import PlannerAgentWorker
 from db.queries.commands import TreeStore
 from db.connection import init_db_pool
 from agent_core.agent_types import AgentRole
@@ -41,6 +42,7 @@ def main():
         AgentRole.EMAIL: EmailAgent(),
         AgentRole.PRODUCTIVITY: ProductivityAgent(),
         AgentRole.SPECIALIST: ExecutorAgentWorker(),
+        AgentRole.PLANNER: PlannerAgentWorker(),
     }
     
     for role, agent in spec_agents.items():

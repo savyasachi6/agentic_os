@@ -51,12 +51,11 @@ class CapabilityAgentWorker:
         self._running = False
 
     def _load_prompt(self):
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "assets", "prompts", "capability.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
-        else:
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("agents", "capability")
+        except Exception as e:
+            logger.error(f"Failed to load capability prompt: {e}")
             self.system_prompt = "You are the CapabilityAgent (SQL). Discover tools and schema."
 
     def _execute_query(self, query: str) -> Dict[str, Any]:
@@ -85,13 +84,29 @@ class CapabilityAgentWorker:
         query_goal = task.payload.get("query", "Unknown Goal")
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
-        # Immediate shortcut for project links
+        # Immediate shortcut for project links and general info
         link_keywords = ["links", "url", "github", "repo", "documentation", "where is the code"]
         if any(kw in query_goal.lower() for kw in link_keywords):
             logger.info(f"Link query detected. Returning structured project links. node_id={task.id}")
             links_md = get_links_markdown()
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": links_md})
+            return
+
+        capability_keywords = ["what can you do", "list tools", "your abilities", "available agents", "how do you work", "skills", "discovery"]
+        if any(kw in query_goal.lower() for kw in capability_keywords):
+            logger.info(f"Capability discovery detected. Returning system manifest. node_id={task.id}")
+            # Provide a summary of standard tools and links
+            response = "I am an Agentic OS assistant with several core capabilities:\n\n"
+            response += "- **RAG**: Semantic search across documentation and codebases.\n"
+            response += "- **Code**: Execution and analysis of Python/technical tasks.\n"
+            response += "- **Planning**: Complex task decomposition and sequential execution.\n"
+            response += "- **Email/Productivity**: Integration with communication tools (Slack/Gmail).\n"
+            response += "- **Executor**: General task execution and tool orchestration.\n\n"
+            response += "For more details, check the project links:\n" + get_links_markdown()
+            
+            assert task.id is not None
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response})
             return
 
         messages = [
@@ -112,10 +127,11 @@ class CapabilityAgentWorker:
                     if sql:
                         action_data = ("sql_query", sql)
                     else:
+                        # Harden: Fallback to direct response if no Action was found
+                        logger.info(f"No Action block found for capability query. Using direct response. node_id={task.id}")
                         duration = time.time() - start_time
-                        logger.error(f"Parse error. node_id={task.id}, duration={duration:.2f}s")
                         assert task.id is not None
-                        await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error": "Parse error"})
+                        await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response_text})
                         return
                 
                 action_type, action_payload = action_data

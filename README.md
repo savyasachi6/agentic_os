@@ -57,7 +57,7 @@ graph TD
 
 Organized for clarity and runtime stability:
 
-- **runtime/**: Core app packages (`agent_core`, `agents`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `lane_queue`, `tools`, `ui`, `productivity`, `sandbox`, `voice`)
+- **Core Packages**: `agent_core`, `agents`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `lane_queue`, `tools`, `ui`, `productivity`, `sandbox`, `voice`
 - **assets/**: Specialist assets (`prompts/`, `skills/`, `training/`)
 - **infra/**: DevOps and infrastructure (`docker/`, `devops_auto/`, `.env` templates)
 - **dev/**: Development and scripts (`scripts/`, `projects/`, `experiments/`, `tests/`)
@@ -100,7 +100,7 @@ For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md).
 ---
 
 ## 🛠️ Development
- 
+
 See [development setup](docs/architecture.md#development-setup) for details on testing, linting, and local debugging.
 For a detailed overview of the system structure, see the [Canonical Package Map](docs/canonical-package-map.md).
 

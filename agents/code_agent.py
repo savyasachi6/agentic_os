@@ -72,12 +72,11 @@ class CodeAgentWorker:
         self._running = False
 
     def _load_prompt(self):
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        prompt_path = os.path.join(root_dir, "assets", "prompts", "code.md")
-        if os.path.exists(prompt_path):
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.system_prompt = f.read()
-        else:
+        from agent_core.prompts import load_prompt
+        try:
+            self.system_prompt = load_prompt("agents", "code")
+        except Exception as e:
+            logger.error(f"Failed to load code prompt: {e}")
             self.system_prompt = "You are the CodeAgent. Read files, propose diffs, write files safely."
 
     # --- Tool implementations ---
