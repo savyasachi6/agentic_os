@@ -13,8 +13,8 @@ from datetime import datetime
 
 from db.connection import get_db_connection
 from db.models import Chain, Node
-from agent_core.types import AgentRole, NodeType, NodeStatus
-from rag.vector_store import VectorStore
+from agent_core.agent_types import AgentRole, NodeType, NodeStatus
+from agent_core.rag.vector_store import VectorStore
 
 logger = logging.getLogger("agentos.db.queries")
 
@@ -137,27 +137,35 @@ class TreeStore:
                 cur.execute(query, params)
             conn.commit()
 
-    def dequeue_task(self, agent_role: AgentRole) -> Optional[Node]:
+    def dequeue_task(self, agent_role: AgentRole, node_id: Optional[int] = None) -> Optional[Node]:
         """Atomically pop the highest priority pending task for a given agent via SKIP LOCKED."""
         from psycopg2.extras import RealDictCursor
-        
+        role_val = agent_role.value if hasattr(agent_role, "value") else str(agent_role)
+
         with get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
+                query_sql = """
                     UPDATE nodes
                     SET status = %s, updated_at = CURRENT_TIMESTAMP
                     WHERE id = (
                         SELECT id FROM nodes
                         WHERE agent_role = %s AND status = %s
-                        ORDER BY priority DESC, planned_order ASC, created_at ASC
+                """
+                params = [NodeStatus.RUNNING.value, role_val, NodeStatus.PENDING.value]
+                
+                if node_id:
+                    query_sql += " AND id = %s "
+                    params.append(node_id)
+                
+                query_sql += """
+                        ORDER BY priority DESC, created_at DESC
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
                     )
                     RETURNING *;
-                    """,
-                    (NodeStatus.RUNNING.value, agent_role.value, NodeStatus.PENDING.value),
-                )
+                """
+                
+                cur.execute(query_sql, params)
                 row = cur.fetchone()
                 if not row:
                     conn.commit()
@@ -173,13 +181,14 @@ class TreeStore:
                     payload=row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"] or '{}'),
                     result=row["result"] if isinstance(row["result"], dict) else json.loads(row["result"]) if row["result"] else None,
                     embedding=row["embedding"], deadline_at=row["deadline_at"],
+                    fractal_depth=row.get("fractal_depth", 0),
                     created_at=row["created_at"], updated_at=row["updated_at"]
                 )
 
-    async def dequeue_task_async(self, agent_role: AgentRole) -> Optional[Node]:
+    async def dequeue_task_async(self, agent_role: AgentRole, node_id: Optional[int] = None) -> Optional[Node]:
         """Non-blocking atomic task dequeuing."""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.dequeue_task, agent_role)
+        return await loop.run_in_executor(None, self.dequeue_task, agent_role, node_id)
 
     def get_node_by_id(self, node_id: int) -> Optional[Node]:
         """Fetch a specific node by ID."""
@@ -206,6 +215,11 @@ class TreeStore:
                     result=row[10] if isinstance(row[10], dict) else (json.loads(row[10]) if row[10] else None),
                     embedding=row[11], deadline_at=row[12], created_at=row[13], updated_at=row[14]
                 )
+
+    async def get_node_by_id_async(self, node_id: int) -> Optional[Node]:
+        """Non-blocking version of get_node_by_id."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_node_by_id, node_id)
 
     async def build_context_async(self, chain_id: int, query: str, current_node_id: Optional[int] = None, limit: int = 5) -> Tuple[List[Dict[str, Any]], bool]:
         """Rank candidate nodes for an LLM call context window."""
@@ -268,3 +282,23 @@ class TreeStore:
             })
         candidates.sort(key=lambda x: x["score"], reverse=True)
         return candidates[:int(limit)], is_degraded
+    def get_recent_logs(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Fetch the most recent execution nodes regardless of status."""
+        from psycopg2.extras import RealDictCursor
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT id, chain_id, agent_role, type, status, priority, content, created_at, updated_at
+                    FROM nodes
+                    ORDER BY created_at DESC
+                    LIMIT %s;
+                    """,
+                    (limit,)
+                )
+                return [dict(r) for r in cur.fetchall()]
+
+    async def get_recent_logs_async(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Non-blocking version of get_recent_logs."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.get_recent_logs, limit)

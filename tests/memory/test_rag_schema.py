@@ -1,7 +1,7 @@
 import pytest
 import uuid
 from unittest.mock import patch, MagicMock
-from rag.rag_store import RagStore
+from agent_core.rag.rag_store import RagStore
 
 @pytest.fixture
 def mock_db():

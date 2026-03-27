@@ -12,7 +12,7 @@ import re
 from typing import Any, Optional, List, Dict, Set
 from agent_core.config import settings
 
-from agent_core.types import Intent
+from agent_core.agent_types import Intent
 logger = logging.getLogger(__name__)
 
 def safe_str(value: Any, context: str = "") -> str:

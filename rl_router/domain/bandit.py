@@ -21,7 +21,7 @@ class LinUCBBandit:
     def __init__(
         self,
         n_arms: int = 8,
-        d: int = 1561,
+        d: int = 1052,
         alpha: float = 1.5,
         tau: float = 0.995,
         viol_lambda: float = 0.3,

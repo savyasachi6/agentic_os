@@ -25,7 +25,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from db.connection import get_db_connection
-from rag.vector_store import VectorStore
+from agent_core.rag.vector_store import VectorStore
 from .config import settings
 from urllib.parse import urlparse
 
@@ -42,7 +42,7 @@ def _make_redis_client():
         url = urlparse(settings.redis_url)
         import redis as redis_lib
         client = redis_lib.Redis(
-            host=url.hostname or "localhost",
+            host=url.hostname or "127.0.0.1",
             port=url.port or 6379,
             password=url.password or None,
             db=int(url.path.lstrip('/') or 0),

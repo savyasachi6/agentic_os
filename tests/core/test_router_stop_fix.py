@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
-from llm_router.router import LLMRouter
-from llm_router.models import Priority
+from agent_core.llm_router.router import LLMRouter
+from agent_core.llm_router.models import Priority
 
 @pytest.mark.asyncio
 async def test_router_stop_propagation():

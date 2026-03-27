@@ -4,7 +4,7 @@ import pytest
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agents.coordinator import UniversalAgentWorker
+from agent_core.agents.core.coordinator import UniversalAgentWorker
 from db.models import Node, AgentRole, NodeType, NodeStatus
 
 @pytest.fixture

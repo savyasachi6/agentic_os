@@ -16,6 +16,7 @@ from typing import Optional
 import sys
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -28,14 +29,14 @@ if root_dir not in sys.path:
 # Load root .env
 load_dotenv(os.path.join(root_dir, ".env"))
 
-from agents.coordinator import CoordinatorAgent
-from agents.capability_agent import CapabilityAgentWorker
-from agents.rag_agent import RAGAgentWorker
-from llm.client import LLMClient
+from agent_core.agents.core.coordinator import CoordinatorAgent
+from agent_core.agents.specialists.capability_agent import CapabilityAgentWorker
+from agent_core.agents.specialists.rag_agent import ResearchAgentWorker
+from agent_core.llm.client import LLMClient
 from db.connection import init_db_pool
-from rag.vector_store import VectorStore
-from rag.indexer import SkillIndexer
-from llm_router.router import LLMRouter
+from agent_core.rag.vector_store import VectorStore
+from agent_core.rag.indexer import SkillIndexer
+from agent_core.llm.router import LLMRouter
 from agent_core.config import settings
 
 
@@ -43,6 +44,14 @@ app = FastAPI(
     title="Agent OS",
     description="Local LPX-ready agent with skills, pgvector RAG, and batched ReAct reasoning.",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Store active sessions: session_id → CoordinatorAgent
@@ -63,9 +72,9 @@ async def startup():
     router.start()
     
     # Start specialist agent workers as background tasks.
-    # Note: CodeAgentWorker and others should be imported from agents/
+    # Note: CodeAgentWorker and others should be imported from agent_core.agents/
     # For now, starting the ones we have refactored.
-    rag_worker = RAGAgentWorker()
+    rag_worker = ResearchAgentWorker()
     _worker_tasks.append(asyncio.create_task(rag_worker.run_forever(), name="rag_agent_worker"))
     
     capability_worker = CapabilityAgentWorker()
@@ -160,10 +169,9 @@ async def get_chat_history(session_id: str):
         return {"status": "error", "message": str(e)}
 
 
-# ---------------------------------------------------------------------------
 # WebSocket chat
 # ---------------------------------------------------------------------------
-@app.websocket("/chat")
+@app.websocket("/ws")
 async def chat_ws(ws: WebSocket):
     """
     Streaming ReAct chat over WebSocket.

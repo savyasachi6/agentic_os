@@ -19,38 +19,38 @@ graph TD
 
 ## Core Subsystems
 
-### 1. [Agent OS Core](file:///c:/Users/savya/projects/agentic_os/core/)
+### 1. [Agent Core](agents/core/)
 
-The central orchestration layer.
+The central orchestration and communication layer.
 
-- **Agent Loop**: Implements the ReAct (Reasoning + Acting) loop.
-- **Lane Queue**: Manages strictly ordered execution lanes for concurrent users.
-- **LLM Router**: A high-performance proxy that batches token requests to the local inference engine.
-- **RL Router**: Multi-objective contextual bandit that dynamically selects optimal RAG depth strategies to balance latency against hallucination risks.
+- **CoordinatorAgent**: Orchestrates the ReAct loop and tool dispatch.
+- **TreeStore**: Asynchronous execution tree for cross-process task persistence.
+- **A2ABus**: Redis-based message bus for low-latency agent-to-agent signaling.
+- **Heartbeat Monitoring**: Decoupled worker health tracking (30s TTL) with fail-fast logic in the Coordinator.
 
-### 2. [Memory & RAG](file:///c:/Users/savya/projects/agentic_os/memory/)
+### 2. [Memory & RAG](rag/)
 
 The long-term storage and knowledge retrieval engine.
 
-- **Vector Store**: Manages embeddings for thoughts, chunks, and sessions.
-- **RAG Pipeline**: A resilient "Verify-before-Generate" pipeline (Ingest -> Retrieve -> Validate).
+- **HybridRetriever**: Unified search across skills, docs, and sessions.
+- **Fail-Safe RAG**: Hardened retrieval with internal timeouts and non-blocking IO.
 - **History Compactor**: Summarizes conversation turns into stable session context.
 
-### 3. [Skills Layer](file:///c:/Users/savya/projects/agentic_os/skills/)
+### 3. [Specialists](agents/specialists/)
 
-The "knowledge modules" used by agents.
+Autonomous workers that perform specific domain tasks.
 
-- **Skill Indexer**: Parses `SKILL.md` files into prompt-ready chunks.
-- **Discovery Engine**: Ranks and selects skills based on "eval-lift" (cross-session utility).
+- **Segregated Workers**: RAG, Code Gen, Planner, and Capability workers run as distinct processes.
+- **Status Telemetry**: Workers provide real-time reasoning progress updates to the TreeStore.
 
 ## Data Flow: Reasoning Loop
 
-1. **Input**: User sends a message via WebSocket.
-2. **Context Retrieval**: Core asks Memory for relevant prior thoughts and Skills for relevant expertise.
-3. **Reasoning**: Core sends a batched request to the LLM Router.
-4. **Action**: If the LLM proposes a tool call, Core enqueues it in the Lane Queue.
-5. **Execution**: The Sandbox worker executes the tool and returns the observation.
-6. **Observation**: Core logs the result and returns to step 3 until a Final Answer is reached.
+1. **Input**: User sends a message via WebSocket/API.
+2. **Context Retrieval**: Coordinator asks RAG specialist for relevant knowledge.
+3. **Reasoning Turn**: Coordinator sends a batched request to the LLM.
+4. **Action**: If the LLM proposes a tool call, Coordinator enqueues it in the TreeStore and notifies the specialist via A2ABus.
+5. **Worker Execution**: The specialist (e.g., Code Agent) processes the task and updates its status.
+6. **Observation**: Coordinator monitors status, logs result, and proceeds until a Final Answer.
 
 ## Security Model
 

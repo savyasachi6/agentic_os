@@ -148,17 +148,21 @@ def get_router_stats():
         print(f"Router stats fetch error: {e}")
     return None
 
-def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int):
-    """Submit user feedback to the Gateway."""
+def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int, chain_id: int = 0, metrics: dict = None):
+    """Submit user feedback to the Gateway RLHF endpoint."""
     try:
+        metrics = metrics or {}
         payload = {
-            "session_id": st.session_state.session_id,
+            "chain_id": chain_id,
             "query_hash_rl": query_hash_rl,
-            "arm_index": arm_index,
-            "user_feedback": feedback,
-            "depth": depth
+            "arm": arm_index,
+            "feedback": feedback,
+            "depth": depth,
+            "step_count": metrics.get("step_count"),
+            "invalid_call_count": metrics.get("invalid_call_count")
         }
-        response = requests.post(f"{CORE_API_URL}/rl/chat/feedback", json=payload, timeout=5)
+        # Using the new human-specific gateway endpoint
+        response = requests.post(f"{CORE_API_URL}/api/feedback/human", json=payload, timeout=5)
         if response.status_code == 200:
             st.toast("Feedback recorded! 🚀" if feedback > 0 else "Feedback recorded. We'll improve! 🛠️")
         else:
@@ -362,12 +366,13 @@ if page == "💬 Terminal":
                     qh = metadata["query_hash_rl"]
                     arm = metadata["arm_index"]
                     depth = metadata.get("depth", 0)
+                    cid = metadata.get("chain_id", 0)
                     
                     c1, c2, c3 = st.columns([0.05, 0.05, 0.9])
                     if c1.button("👍", key=f"up_{qh}"):
-                        submit_feedback(qh, arm, depth, 1)
+                        submit_feedback(qh, arm, depth, 1, chain_id=cid, metrics=metadata)
                     if c2.button("👎", key=f"down_{qh}"):
-                        submit_feedback(qh, arm, depth, -1)
+                        submit_feedback(qh, arm, depth, -1, chain_id=cid, metrics=metadata)
             i += 1
                         
         elif msg["type"] == "thought":

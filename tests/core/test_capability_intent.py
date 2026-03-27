@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agents.coordinator import CoordinatorAgent
-from agent_core.types import Intent
-from intent.classifier import classify_intent
+from agent_core.agents.core.coordinator import CoordinatorAgent
+from agent_core.agent_types import Intent
+from agent_core.intent.classifier import classify_intent
 
 @pytest.mark.asyncio
 async def test_capability_intent_classification():
@@ -30,8 +30,7 @@ async def test_coordinator_direct_capability_call():
     
     mock_llm = AsyncMock()
     mock_llm.generate_async.side_effect = [
-        "Action: capability(What can you do?)",
-        "Action: respond(Final Answer)"
+        "Action: respond(I can help with RAG, code, and more. Final Answer)"
     ]
 
     agents = {

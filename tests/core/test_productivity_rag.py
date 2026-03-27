@@ -12,7 +12,7 @@ try:
 except ImportError:
     import pytest
 from db.models import Chain, Node, AgentRole, NodeType, NodeStatus
-from rag.rag_store import RagStore
+from agent_core.rag.rag_store import RagStore
 
 @pytest.mark.asyncio
 async def test_todo_semantic_search_stub():

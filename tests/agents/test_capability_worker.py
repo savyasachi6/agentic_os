@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
-from agent_core.types import AgentRole, NodeStatus, NodeType
+from agent_core.agent_types import AgentRole, NodeStatus, NodeType
 from db.models import Node
-from agents.capability_agent import CapabilityAgentWorker
+from agent_core.agents.capability_agent import CapabilityAgentWorker
 
 @pytest.mark.asyncio
 async def test_capability_worker_completion_recognition():

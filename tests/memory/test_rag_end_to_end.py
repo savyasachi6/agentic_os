@@ -7,9 +7,9 @@ try:
     from db.cache import FractalCache, SemanticCache
 except ImportError:
     import pytest
-from rag.rag_store import RagStore
-from rag.vector_store import VectorStore
-from rag.retriever import HybridRetriever
+from agent_core.rag.rag_store import RagStore
+from agent_core.rag.vector_store import VectorStore
+from agent_core.rag.retriever import HybridRetriever
 
 def test_rag_flow():
     print("--- Starting End-to-End RAG Test ---")

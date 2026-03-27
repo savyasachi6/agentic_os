@@ -32,7 +32,7 @@ class RewardSettings(BaseSettings):
 class BanditSettings(BaseSettings):
     alpha: float = Field(default=0.25)
     n_arms: int = Field(default=8)
-    context_dim: int = Field(default=1564)
+    context_dim: int = Field(default=1052)
     decay_tau: float = Field(default=0.995)
     violation_penalty_lambda: float = Field(default=0.3)
     model_config = SettingsConfigDict(env_prefix="BANDIT_", extra="ignore")

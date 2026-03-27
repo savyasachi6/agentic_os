@@ -43,6 +43,8 @@ build/
 
 # Large Files & Models (DO NOT BUNDLE)
 models/
+dev/models/
+dev/checkpoints/
 *.gguf
 *.npz
 *.bin

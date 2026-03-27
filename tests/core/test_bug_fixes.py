@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from intent.classifier import classify_intent, is_llm_generatable
-from agent_core.types import Intent
-from agents.coordinator import CoordinatorAgent
+from agent_core.intent.classifier import classify_intent, is_llm_generatable
+from agent_core.agent_types import Intent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 
 @pytest.mark.asyncio
 async def test_bug1_news_intent():

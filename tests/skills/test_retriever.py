@@ -16,7 +16,7 @@ def get_skill_retriever():
     # Mock both config and memory.vector_store if needed, 
     # but here we specifically need config to not crash during import.
     with patch.dict("sys.modules", {"config": MagicMock(agent_settings=mock_agent_settings)}):
-        from rag.retriever import SkillRetriever
+        from agent_core.rag.retriever import SkillRetriever
         return SkillRetriever
 
 

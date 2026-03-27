@@ -5,7 +5,7 @@ import uuid
 import logging
 from typing import List, Optional
 from .models import TaskPlan, PlanStep, PlanStepStatus
-from llm.client import generate_structured_output
+from agent_core.llm.client import generate_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class TaskPlanner:
                 
                 for i, step in enumerate(plan.steps):
                     from db.models import Node
-                    from agent_core.types import AgentRole, NodeType, NodeStatus
+                    from agent_core.agent_types import AgentRole, NodeType, NodeStatus
                     node = Node(
                         chain_id=chain.id,
                         agent_role=AgentRole.ORCHESTRATOR,
@@ -84,7 +84,7 @@ class TaskPlanner:
         # Update TreeStore if node_id exists
         node_id = step.args.get("node_id")
         if self.tree_store and node_id:
-            from agent_core.types import NodeStatus as DBNodeStatus
+            from agent_core.agent_types import NodeStatus as DBNodeStatus
             self.tree_store.update_node_status(int(node_id), DBNodeStatus.RUNNING)
         
         result = ""

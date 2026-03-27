@@ -41,3 +41,5 @@ class AgentState(TypedDict):
     # ── Trajectory Metrics (RL Feedback) ──────────
     step_count: int              # Total ReAct steps (T)
     invalid_call_count: int      # Count of failed/invalid tool calls (γ)
+    rl_metadata: Dict[str, Any]  # RL Router decisions (arm, depth, query_hash) for the UI
+

@@ -16,16 +16,13 @@ import os
 import argparse
 from dotenv import load_dotenv
 
-# Ensure project root is in Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)
+# Ensure project root is in Python path for absolute imports
+root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
-if current_dir not in sys.path: 
-    sys.path.insert(0, current_dir)
 
 # Load root .env
-load_dotenv(os.path.join(os.path.dirname(current_dir), ".env"))
+load_dotenv(os.path.join(root_dir, ".env"))
 
 import io
 if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
@@ -38,7 +35,7 @@ if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
 
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
-    project_path = os.path.join(os.path.dirname(current_dir), "projects", project_name)
+    project_path = os.path.join(root_dir, "dev", "projects", project_name)
     if os.path.exists(project_path):
         env_path = os.path.join(project_path, ".env")
         if os.path.exists(env_path):
@@ -52,13 +49,11 @@ def cmd_run(args):
     import asyncio
     
     # Imports specific to core runner
-    from agents.coordinator import CoordinatorAgent
-    from llm_router.router import LLMRouter
+    from agent_core.agents.core.coordinator import CoordinatorAgent
+    from agent_core.llm.router import LLMRouter
     from db.connection import init_db_pool
     from agent_core.config import settings
     
-    # CLI mode defaults to native local inference (llama-cpp)
-    settings.model_name = "llama-cpp" # Or similar toggle
     
     init_db_pool()
     
@@ -112,8 +107,6 @@ def cmd_serve(args):
     if args.project:
         load_project_env(args.project)
         
-    # Server mode defaults to HTTP inference (ollama)
-    settings.model_name = "ollama"
 
     # LLMRouter will be started in server.py @app.on_event("startup")
     uvicorn.run(
@@ -126,9 +119,9 @@ def cmd_serve(args):
 
 async def cmd_index(args):
     """Re-index all skills into pgvector."""
-    from rag.indexer import SkillIndexer
+    from agent_core.rag.indexer import SkillIndexer
     from db.connection import init_db_pool
-    from llm_router.router import LLMRouter
+    from agent_core.llm.router import LLMRouter
 
     init_db_pool()
     
@@ -150,7 +143,7 @@ def cmd_worker(args):
     """Start a background worker agent from the CLI."""
     import asyncio
     from db.connection import init_db_pool
-    from llm_router.router import LLMRouter
+    from agent_core.llm.router import LLMRouter
 
     init_db_pool()
 
@@ -164,14 +157,17 @@ def cmd_worker(args):
 
         try:
             if args.agent == "sql":
-                from agents.capability_agent import CapabilityAgentWorker
+                from agent_core.agents.capability_agent import CapabilityAgentWorker
                 worker = CapabilityAgentWorker(model_name=args.model)
             elif args.agent == "research":
-                from agents.rag_agent import RAGAgentWorker
-                worker = RAGAgentWorker(model_name=args.model)
+                from agent_core.agents.rag_agent import ResearchAgentWorker
+                worker = ResearchAgentWorker(model_name=args.model)
+            elif args.agent == "code":
+                from agent_core.agents.code_agent import CodeAgentWorker
+                worker = CodeAgentWorker(model_name=args.model)
             elif args.agent == "email":
-                from agents.email_agent import EmailAgentWorker
-                worker = EmailAgentWorker()
+                from agent_core.agents.email_agent import EmailAgent
+                worker = EmailAgent()
             else:
                 print(f"Unknown agent type: {args.agent}")
                 import sys
@@ -198,6 +194,19 @@ def cmd_rl_router(args):
     )
 
 
+def cmd_ui(args):
+    """Start the Streamlit UI."""
+    import subprocess
+    import sys
+    print("[UI] Starting Streamlit dashboard...")
+    # Streamlit needs to be run as a module: python -m streamlit run ui/app.py
+    subprocess.run([sys.executable, "-m", "streamlit", "run", "ui/app.py"])
+
+def cmd_system(args):
+    """Alias for 'cli' - starts the full Agentic OS system."""
+    cmd_run(args)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-os",
@@ -220,7 +229,7 @@ def main():
 
     # index
     index_parser = subparsers.add_parser("index", help="Re-index skills into pgvector")
-    index_parser.add_argument("--skills-dir", default="skills", help="Path to skills directory")
+    index_parser.add_argument("--skills-dir", default="assets/skills", help="Path to skills directory")
     index_parser.set_defaults(func=cmd_index)
 
     # worker
@@ -235,6 +244,15 @@ def main():
     rl_parser.add_argument("--port", type=int, default=8100, help="Port")
     rl_parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
     rl_parser.set_defaults(func=cmd_rl_router)
+
+    # ui
+    ui_parser = subparsers.add_parser("ui", help="Start the Streamlit UI")
+    ui_parser.set_defaults(func=cmd_ui)
+
+    # system
+    sys_parser = subparsers.add_parser("system", help="Start full Agentic OS (Alias for 'cli')")
+    sys_parser.add_argument("--model", default=None, help="Override LLM model name")
+    sys_parser.set_defaults(func=cmd_system)
 
     args = parser.parse_args()
 

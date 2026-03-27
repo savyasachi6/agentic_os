@@ -18,6 +18,9 @@ from rl_router.api.dependencies import get_bandit, get_bandit_repo
 
 logger = logging.getLogger(__name__)
 
+# Canonical Bandit ID for RAG depth optimization
+BANDIT_ID = "linucb_rag_depth"
+
 
 async def periodic_save_weights(interval_seconds: int = 300):
     """Background task to save bandit weights to the database periodically."""
@@ -26,11 +29,16 @@ async def periodic_save_weights(interval_seconds: int = 300):
         try:
             bandit = get_bandit()
             repo = get_bandit_repo()
-            weights = bandit.save_to_bytes()
-            if repo.save_weights("linucb_rag_depth", weights):
-                logger.info("[bandit] Periodically saved weights to Database")
         except Exception as e:
-            logger.error(f"[bandit] Failed periodic save: {e}")
+            logger.error(f"[bandit] Failed to retrieve bandit or repo for save: {e}")
+            continue
+
+        try:
+            weights = bandit.save_to_bytes()
+            if repo.save_weights(BANDIT_ID, weights):
+                logger.info(f"[bandit] Periodically saved weights for {BANDIT_ID} to Database")
+        except Exception as e:
+            logger.error(f"[bandit] Failed to save weights for {BANDIT_ID}: {e}")
 
 
 @asynccontextmanager
@@ -49,8 +57,8 @@ async def lifespan(app: FastAPI):
         bandit = get_bandit()
         repo = get_bandit_repo()
         weights = bandit.save_to_bytes()
-        if repo.save_weights("linucb_rag_depth", weights):
-            print("[bandit] Final weights saved to Database on shutdown")
+        if repo.save_weights(BANDIT_ID, weights):
+            print(f"[bandit] Final weights for {BANDIT_ID} saved to Database on shutdown")
     except Exception as e:
         print(f"[bandit] Failed final save on shutdown: {e}")
 

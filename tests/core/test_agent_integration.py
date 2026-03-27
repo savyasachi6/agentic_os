@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agents.coordinator import CoordinatorAgent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 from agent_core.graph.state import AgentState
-from agent_core.types import NodeType, Intent, AgentRole, NodeStatus
+from agent_core.agent_types import NodeType, Intent, AgentRole, NodeStatus
 
 @pytest.fixture
 def mock_tree_store():

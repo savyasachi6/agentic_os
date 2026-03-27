@@ -3,7 +3,7 @@ Documentation-driven tests for the Productivity Engine.
 Verifies that the examples in productivity/README.md are runnable and correct.
 """
 import pytest
-from agent_core.types import NodeType
+from agent_core.agent_types import NodeType
 from productivity.todo_manager import add_todo
 from productivity.models import TodoStatus
 
