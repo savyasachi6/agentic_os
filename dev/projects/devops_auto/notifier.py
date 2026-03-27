@@ -3,7 +3,7 @@ Alerting and metrics monitoring for DevOps automation.
 """
 import operator
 from typing import Dict, List
-from devops_auto.models import AlertRule
+from .models import AlertRule
 
 
 def evaluate_metrics(rules: List[AlertRule], current_values: Dict[str, float]) -> List[str]:

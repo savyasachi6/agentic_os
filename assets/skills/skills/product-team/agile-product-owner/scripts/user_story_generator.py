@@ -11,7 +11,7 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-from llm.client import LLMClient
+from agent_core.llm.client import LLMClient
 from db.queries.commands import TreeStore
 from agent_core.agent_types import NodeStatus
 

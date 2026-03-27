@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Optional
 
-from devops_auto.models import DevOpsTestRun, DevOpsTestRunStatus
+from .models import DevOpsTestRun, DevOpsTestRunStatus
 
 
 def is_safe_command(cmd: str) -> bool:

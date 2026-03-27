@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Global mocks for config
 def get_hybrid_retriever():
     with patch.dict("sys.modules", {"config": MagicMock()}):
-        from rag.retriever import HybridRetriever, RetrievedChunk
+        from agent_core.rag.retriever import HybridRetriever, RetrievedChunk
         return HybridRetriever, RetrievedChunk
 
 @pytest.fixture

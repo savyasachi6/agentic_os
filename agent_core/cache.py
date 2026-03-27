@@ -25,7 +25,7 @@ import logging
 from typing import Optional, Dict, Any
 
 from db.connection import get_db_connection
-from rag.vector_store import VectorStore
+from agent_core.rag.vector_store import VectorStore
 from .config import settings
 from urllib.parse import urlparse
 

@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from agents.planner import PlannerAgentWorker
+from agent_core.agents.planner import PlannerAgentWorker
 from db.models import Node
 from agent_core.agent_types import AgentRole, NodeStatus, NodeType
 

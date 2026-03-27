@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agents.coordinator import CoordinatorAgent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 from agent_core.agent_types import Intent
-from intent.classifier import classify_intent
+from agent_core.intent.classifier import classify_intent
 
 @pytest.mark.asyncio
 async def test_capability_intent_classification():

@@ -1,6 +1,7 @@
 """
 The Retriever Node leveraging the Phase 1 Relational Graph search.
 """
+import asyncio
 import json
 import urllib.request
 import threading
@@ -9,26 +10,39 @@ import random
 import hashlib
 
 from ..state import AgentState
-from rag.vector_store import VectorStore
+from agent_core.rag.vector_store import VectorStore
 
-def _send_feedback_async(query_hash: str, action: int, depth: int, latency_ms: int, success: bool, auditor_score: float):
-    def _send():
-        url = "http://rl-router:8100/feedback"
-        payload = {
-            "query_hash": query_hash,
-            "arm_index": action,
-            "depth_used": depth,
-            "latency_ms": latency_ms,
-            "success": success,
-            "auditor_score": auditor_score
-        }
-        try:
-            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'}, method='POST')
-            with urllib.request.urlopen(req, timeout=2.0) as f:
-                pass
-        except Exception as e:
-            print(f"[RL-Router] Feedback async update failed: {e}")
-    threading.Thread(target=_send).start()
+def _send_feedback_async(
+    query_hash: str,
+    action: int,
+    depth: int,
+    latency_ms: int,
+    success: bool,
+    auditor_score: float,
+    step_count: int = 1,
+    invalid_call_count: int = 0,
+):
+    """Fire-and-forget: posts trajectory telemetry to /feedback via RLRoutingClient.
+
+    Uses a daemon thread + asyncio.run so the retriever node is never blocked.
+    step_count and invalid_call_count are forwarded so compute_differentiated_utility
+    is applied by FeedbackService instead of the legacy 4-component reward.
+    """
+    async def _async_send():
+        from agent_core.rag.retrieval.rl_client import RLRoutingClient
+        client = RLRoutingClient()
+        await client.submit_feedback(
+            query_hash=query_hash,
+            arm_index=action,
+            success=success,
+            latency_ms=latency_ms,
+            depth_used=depth,
+            auditor_score=auditor_score,
+            step_count=step_count,
+            invalid_call_count=invalid_call_count,
+        )
+
+    threading.Thread(target=lambda: asyncio.run(_async_send()), daemon=True).start()
 
 def call_rl_router(query: str) -> tuple[int, int]:
     """Returns (depth, action). 10% Epsilon-Greedy exploration."""
@@ -67,6 +81,16 @@ def retrieve_context(state: AgentState) -> dict:
         start_time = time.time()
         # RL Router Hook (Phase D)
         depth, action = call_rl_router(query)
+        query_hash = hashlib.md5(query.encode('utf-8')).hexdigest()[:16]
+
+        # RL Metadata for UI feedback
+        rl_metadata = {
+            "query_hash_rl": query_hash,
+            "arm_index": action,
+            "depth": depth,
+            "chain_id": state.get("chain_id", 0)
+        }
+
         
         # Multi-fidelity resolution
         k_mapping = {0: 2, 1: 5, 2: 10, 3: 15}
@@ -79,11 +103,19 @@ def retrieve_context(state: AgentState) -> dict:
         # Simulate Auditor
         auditor_score = 0.9 if results else 0.2
         
-        # Async Update & Feedback Loop to matrix
-        query_hash = hashlib.md5(query.encode('utf-8')).hexdigest()[:16]
-        _send_feedback_async(query_hash, action, depth, latency_ms, True, auditor_score)
+        # Async Update & Feedback Loop — include trajectory metrics from state
+        step_count = state.get("step_count", 1) or 1
+        invalid_call_count = state.get("invalid_call_count", 0) or 0
+        _send_feedback_async(
+            query_hash, action, depth, latency_ms, True, auditor_score,
+            step_count=step_count, invalid_call_count=invalid_call_count,
+        )
 
-        return {"relational_context": {"sql_rag_results": results}}
+        return {
+            "relational_context": {"sql_rag_results": results},
+            "rl_metadata": rl_metadata
+        }
+
     except Exception as e:
         print(f"[RetrieverNode] SQL-RAG failed: {e}")
         return {"relational_context": {"error": str(e)}}

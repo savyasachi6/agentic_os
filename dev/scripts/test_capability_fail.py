@@ -7,7 +7,7 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-from agents.capability_agent import CapabilityAgentWorker
+from agent_core.agents.capability_agent import CapabilityAgentWorker
 from db.models import Node
 from agent_core.agent_types import AgentRole, NodeType
 

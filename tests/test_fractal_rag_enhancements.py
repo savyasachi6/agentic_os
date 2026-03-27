@@ -4,11 +4,11 @@ import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
 
-from rag.hyde import HyDERetriever
-from rag.rerankers.cross_encoder import CrossEncoderReranker
-from rag.compression.compress import ContextualCompressor
-from rag.indexing.hierarchy_builder import HierarchyBuilder
-from rag.zoomer import DynamicZoomer
+from agent_core.rag.hyde import HyDERetriever
+from agent_core.rag.rerankers.cross_encoder import CrossEncoderReranker
+from agent_core.rag.compression.compress import ContextualCompressor
+from agent_core.rag.indexing.hierarchy_builder import HierarchyBuilder
+from agent_core.rag.zoomer import DynamicZoomer
 
 @pytest.fixture
 def mock_chunk():

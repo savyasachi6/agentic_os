@@ -5,9 +5,9 @@ import sys
 # Ensure project root is in Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from agents.coordinator import CoordinatorAgent
-from agents.capability_agent import CapabilityAgentWorker
-from llm_router.router import LLMRouter
+from agent_core.agents.core.coordinator import CoordinatorAgent
+from agent_core.agents.capability_agent import CapabilityAgentWorker
+from agent_core.llm_router.router import LLMRouter
 
 async def main():
     router = LLMRouter.get_instance()

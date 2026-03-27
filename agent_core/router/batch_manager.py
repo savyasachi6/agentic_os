@@ -1,7 +1,7 @@
 import asyncio
 import time
 from typing import List, Dict, Optional
-from llm_router.models import LLMRequest, Priority
+from agent_core.llm.models import LLMRequest, Priority
 
 class BatchManager:
     """

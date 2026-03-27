@@ -9,8 +9,8 @@ import subprocess
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Callable, Optional, Type
 
-from rag.vector_store import VectorStore
-from projects.devops_auto import ci_runner, deploy, chat_bridge, pr_manager
+from agent_core.rag.vector_store import VectorStore
+from dev.projects.devops_auto import ci_runner, deploy, chat_bridge, pr_manager
 from productivity import briefing, todo_manager, notes, task_planner
 from agent_core.config import settings
 from datetime import datetime

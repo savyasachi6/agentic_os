@@ -19,8 +19,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from agents.coordinator import CoordinatorAgent
-from rag.retrieval.rl_client import RLRoutingClient
+from agent_core.agents.core.coordinator import CoordinatorAgent
+from agent_core.rag.retrieval.rl_client import RLRoutingClient
 from rl_router.schemas.api_models import ToolCallLogInput
 from rl_router.domain.models import HallucinationCategory
 

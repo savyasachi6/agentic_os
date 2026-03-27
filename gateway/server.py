@@ -21,10 +21,10 @@ if PROJECT_ROOT not in sys.path:
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, HTTPException
 from pydantic import BaseModel
-from agents.coordinator import CoordinatorAgent
-from rag.vector_store import VectorStore
-from rag.indexer import SkillIndexer
-from llm_router.router import LLMRouter
+from agent_core.agents.core.coordinator import CoordinatorAgent
+from agent_core.rag.vector_store import VectorStore
+from agent_core.rag.indexer import SkillIndexer
+from agent_core.llm.router import LLMRouter
 from rl_router.server import create_app as create_rl_app
 from agent_core.config import settings
 from agent_core.utils.auth import KeycloakManager
@@ -96,6 +96,12 @@ async def embed(req: EmbedRequest):
     )
 
 
+@app.get("/health")
+async def health_check():
+    """Health check for Docker and status monitoring."""
+    return {"status": "ok", "version": "1.1.0-stabilized"}
+
+
 # ---------------------------------------------------------------------------
 # Skills reindex
 # ---------------------------------------------------------------------------
@@ -142,6 +148,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     session_id: str
     response: str
+    meta: Optional[dict] = None
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.verify_token)):
@@ -162,8 +169,9 @@ async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.
     agent.state["user_roles"] = user_roles
     
     response = await agent.run_turn(req.message)
+    meta = agent.last_run_metrics.get("rl_metadata")
 
-    return ChatResponse(session_id=session_id, response=response)
+    return ChatResponse(session_id=session_id, response=response, meta=meta)
 
 
 @app.get("/chat/sessions")
@@ -192,10 +200,57 @@ class FeedbackProxyRequest(BaseModel):
     user_feedback: int  # +1 or -1
     depth: int = 0
 
+class HumanFeedbackRequest(BaseModel):
+    chain_id: int
+    node_id: Optional[int] = None
+    arm: int
+    feedback: int
+    query_hash_rl: str
+    depth: int = 0
+    # Optional metrics that the UI might send back from metadata
+    step_count: Optional[int] = None
+    invalid_call_count: Optional[int] = None
+
+@app.post("/api/feedback/human")
+async def handle_human_feedback(req: HumanFeedbackRequest):
+    """Specific RLHF endpoint for human thumbs-up/down feedback."""
+    step_count = req.step_count
+    invalid_calls = req.invalid_call_count
+    
+    # Try to lookup metrics from active sessions if not provided
+    if step_count is None or invalid_calls is None:
+        for agent in _sessions.values():
+            if agent.chain_id == req.chain_id:
+                metrics = agent.last_run_metrics
+                step_count = step_count or metrics.get("step_count", 1)
+                invalid_calls = invalid_calls or metrics.get("invalid_call_count", 0)
+                break
+        
+        # Fallback to defaults (TODO: Fetch from TreeStore for non-active sessions)
+        step_count = step_count if step_count is not None else 1
+        invalid_calls = invalid_calls if invalid_calls is not None else 0
+
+    from agent_core.rag.retrieval.rl_client import RLRoutingClient
+    rl_client = RLRoutingClient()
+    
+    result = await rl_client.submit_feedback(
+        query_hash=req.query_hash_rl,
+        arm_index=req.arm,
+        success=True,
+        step_count=step_count,
+        invalid_call_count=invalid_calls,
+        user_feedback=float(req.feedback),
+        depth_used=req.depth
+    )
+    
+    print(f"[RLHF] role=RLHF chain_id={req.chain_id} arm={req.arm} feedback={req.feedback}")
+    return result
+
+
 @app.post("/rl/chat/feedback")
 async def chat_feedback(req: FeedbackProxyRequest):
     """Bridge UI feedback to the RL Router."""
-    from rag.retrieval.rl_client import RLRoutingClient
+    from agent_core.rag.retrieval.rl_client import RLRoutingClient
     rl_client = RLRoutingClient()
     
     # We simplified it here: the UI transmits the RL metadata it received during streaming.
@@ -278,6 +333,12 @@ async def chat_ws(ws: WebSocket):
             try:
                 # Run the ReAct turn asynchronously
                 response = await agent.run_turn(user_msg, status_callback=ws_callback)
+                
+                # Send RL Metadata if available (for UI feedback buttons)
+                rl_meta = agent.last_run_metrics.get("rl_metadata")
+                if rl_meta:
+                    await ws.send_json({"type": "rl_metadata", "content": json.dumps(rl_meta)})
+
                 await ws.send_json({"type": "final", "content": response})
             finally:
                 keepalive_task.cancel()

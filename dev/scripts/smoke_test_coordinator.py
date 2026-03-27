@@ -8,13 +8,13 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
-from agents.coordinator import CoordinatorAgent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 from agent_core.agent_types import AgentRole, NodeStatus
 
 async def simulate_worker():
     """Simple background task to mark PENDING tasks as DONE so the coordinator can finish."""
     from db.queries.commands import TreeStore
-    from agents.a2a_bus import A2ABus
+    from agent_core.agents.a2a_bus import A2ABus
     
     ts = TreeStore()
     bus = A2ABus()

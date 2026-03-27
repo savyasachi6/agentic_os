@@ -9,7 +9,7 @@ import asyncio
 from typing import List, Dict, Any
 from langgraph.graph import StateGraph, END
 from agent_core.graph.state import AgentState
-from llm.client import LLMClient
+from agent_core.llm.client import LLMClient
 
 # ── Fan-Out: Run all sub-agents concurrently ──────────────────────
 async def parallel_retrieve(state: AgentState) -> dict:
@@ -109,7 +109,7 @@ def build_parallel_chain() -> StateGraph:
 # ── Sub-agent implementations ─────────────────────────────────────
 async def _rag_lookup(query: str) -> str:
     """Semantic context retrieval via HybridRetriever."""
-    from rag.retriever import HybridRetriever
+    from agent_core.rag.retriever import HybridRetriever
     try:
         retriever = HybridRetriever()
         results = await retriever.retrieve_async(query, top_k=3)

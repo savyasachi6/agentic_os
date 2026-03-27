@@ -5,7 +5,7 @@ import uuid
 import logging
 from typing import List, Optional
 from .models import TaskPlan, PlanStep, PlanStepStatus
-from llm.client import generate_structured_output
+from agent_core.llm.client import generate_structured_output
 
 logger = logging.getLogger(__name__)
 

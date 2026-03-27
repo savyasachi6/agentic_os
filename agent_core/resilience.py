@@ -102,6 +102,7 @@ def async_retry(
     base_delay: float = 1.0,
     cap_delay: float = 30.0,
     label: str | None = None,
+    retryable_exceptions: Tuple[Type[Exception], ...] = RETRYABLE_EXCEPTIONS,
 ):
     """Decorator version of retry_async for async methods/functions."""
     def decorator(fn):
@@ -114,6 +115,7 @@ def async_retry(
                 base_delay=base_delay,
                 cap_delay=cap_delay,
                 label=lbl,
+                retryable_exceptions=retryable_exceptions,
                 **kwargs,
             )
         return wrapper

@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock
-from agents.rag_agent import ResearchAgentWorker
+from agent_core.agents.rag_agent import ResearchAgentWorker
 from db.models import Node
 from agent_core.agent_types import AgentRole, NodeStatus, NodeType
 

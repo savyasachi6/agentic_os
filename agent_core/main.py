@@ -49,8 +49,8 @@ def cmd_run(args):
     import asyncio
     
     # Imports specific to core runner
-    from agents.coordinator import CoordinatorAgent
-    from llm_router.router import LLMRouter
+    from agent_core.agents.core.coordinator import CoordinatorAgent
+    from agent_core.llm.router import LLMRouter
     from db.connection import init_db_pool
     from agent_core.config import settings
     
@@ -119,9 +119,9 @@ def cmd_serve(args):
 
 async def cmd_index(args):
     """Re-index all skills into pgvector."""
-    from rag.indexer import SkillIndexer
+    from agent_core.rag.indexer import SkillIndexer
     from db.connection import init_db_pool
-    from llm_router.router import LLMRouter
+    from agent_core.llm.router import LLMRouter
 
     init_db_pool()
     
@@ -143,7 +143,7 @@ def cmd_worker(args):
     """Start a background worker agent from the CLI."""
     import asyncio
     from db.connection import init_db_pool
-    from llm_router.router import LLMRouter
+    from agent_core.llm.router import LLMRouter
 
     init_db_pool()
 
@@ -157,16 +157,16 @@ def cmd_worker(args):
 
         try:
             if args.agent == "sql":
-                from agents.capability_agent import CapabilityAgentWorker
+                from agent_core.agents.capability_agent import CapabilityAgentWorker
                 worker = CapabilityAgentWorker(model_name=args.model)
             elif args.agent == "research":
-                from agents.rag_agent import ResearchAgentWorker
+                from agent_core.agents.rag_agent import ResearchAgentWorker
                 worker = ResearchAgentWorker(model_name=args.model)
             elif args.agent == "code":
-                from agents.code_agent import CodeAgentWorker
+                from agent_core.agents.code_agent import CodeAgentWorker
                 worker = CodeAgentWorker(model_name=args.model)
             elif args.agent == "email":
-                from agents.email_agent import EmailAgent
+                from agent_core.agents.email_agent import EmailAgent
                 worker = EmailAgent()
             else:
                 print(f"Unknown agent type: {args.agent}")
@@ -192,6 +192,19 @@ def cmd_rl_router(args):
         port=args.port or 8100,
         reload=args.reload,
     )
+
+
+def cmd_ui(args):
+    """Start the Streamlit UI."""
+    import subprocess
+    import sys
+    print("[UI] Starting Streamlit dashboard...")
+    # Streamlit needs to be run as a module: python -m streamlit run ui/app.py
+    subprocess.run([sys.executable, "-m", "streamlit", "run", "ui/app.py"])
+
+def cmd_system(args):
+    """Alias for 'cli' - starts the full Agentic OS system."""
+    cmd_run(args)
 
 
 def main():
@@ -231,6 +244,15 @@ def main():
     rl_parser.add_argument("--port", type=int, default=8100, help="Port")
     rl_parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
     rl_parser.set_defaults(func=cmd_rl_router)
+
+    # ui
+    ui_parser = subparsers.add_parser("ui", help="Start the Streamlit UI")
+    ui_parser.set_defaults(func=cmd_ui)
+
+    # system
+    sys_parser = subparsers.add_parser("system", help="Start full Agentic OS (Alias for 'cli')")
+    sys_parser.add_argument("--model", default=None, help="Override LLM model name")
+    sys_parser.set_defaults(func=cmd_system)
 
     args = parser.parse_args()
 

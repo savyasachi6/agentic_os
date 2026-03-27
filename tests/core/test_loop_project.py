@@ -3,7 +3,7 @@ pytest.skip("Feature or Module 'agent_sandbox.manager' missing from source.", al
 import pytest
 import os
 from unittest.mock import patch, MagicMock
-from agents.coordinator import CoordinatorAgent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 
 @pytest.mark.asyncio
 @patch("lane_queue.store.CommandStore")

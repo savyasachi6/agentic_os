@@ -71,12 +71,21 @@ class FeedbackService:
             user_feedback=request.user_feedback,
         )
 
-        # If tool_calls are provided, compute the differentiated RelyToolBench utility
-        final_utility = None
-        reliable_pass = False
-        update_scalar = reward_vec.scalar
+        # Defaults — overridden below if trajectory metrics are present.
+        final_utility: float | None = None
+        reliable_pass: bool = False
+        update_scalar: float = reward_vec.scalar
 
-        if domain_tool_calls:
+        # If tool_calls are provided OR trajectory metrics show multi-step work,
+        # compute the differentiated Benefit-Cost Utility and use it as the bandit update.
+        # Previously this was gated on `domain_tool_calls` only — meaning step_count and
+        # invalid_call_count were silently ignored for all normal retriever feedback.
+        use_trajectory_reward = (
+            bool(domain_tool_calls)
+            or request.step_count > 1
+            or request.invalid_call_count > 0
+        )
+        if use_trajectory_reward:
             final_utility = self._reward.compute_differentiated_utility(
                 success=request.success,
                 latency_ms=request.latency_ms,

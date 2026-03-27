@@ -18,5 +18,5 @@ def load_prompt(*parts: str) -> str:
         # Fallback for debugging: log the attempted path
         raise FileNotFoundError(f"Prompt not found at {path}")
         
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8", errors="replace") as f:
         return f.read()

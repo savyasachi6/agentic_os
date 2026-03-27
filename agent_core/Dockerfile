@@ -19,4 +19,4 @@ COPY . .
 EXPOSE 8000
 
 # Start indexer in the background, then launch the server immediately
-CMD ["sh", "-c", "python main.py index & python main.py server --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python agent_core/main.py index & python agent_core/main.py serve --host 0.0.0.0 --port 8000"]

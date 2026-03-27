@@ -2,6 +2,14 @@
 
 Welcome to the **Agentic OS** ecosystem. This project provides a production-grade, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
 
+## Monitoring & Health
+
+Agentic OS includes a Redis-based heartbeat system to ensure specialists are online.
+
+- **Check Status**: `python dev/scripts/manage_workers.py status`
+- **Docker Health**: Individual services in `docker-compose.yml` automatically use this check.
+- **Fail-Fast**: The Coordinator will immediately reject tasks for offline roles, preventing 60s timeouts.
+
 ## 🏛️ Architecture Overview
 
 Agentic OS is structured as a "System of Systems," decoupling core reasoning from memory and capability management.
@@ -35,7 +43,8 @@ graph TD
 ### Main Components
 
 - **[Core & Coordinator](agent_core/)**: The primary entry point and reasoning engine. Handles intent classification and agent routing.
-- **[Autonomous Agents](agents/)**: specialized modular agents (RAG, Executor, Planner, Auditor, etc.) each with a strict domain and risk profile.
+- **[Agent Core](agents/core/)**: The primary orchestrator (CoordinatorAgent), base worker, and message bus (A2ABus).
+- **[Agent Specialists](agents/specialists/)**: Specialized modular agents (RAG, Code, Planner, Capability, etc.) with heartbeat-based health monitoring.
 - **[Agent Memory](agent_memory/)**: The semantic storage layer. Managed `pgvector` RAG, semantic caching, and tree-store persistence.
 - **[Database Layer](db/)**: Clean SQL-based command and query interfaces for all system state.
 - **[System Prompts](prompts/)**: Standardized system instructions for all active agents.
@@ -57,7 +66,7 @@ graph TD
 
 Organized for clarity and runtime stability:
 
-- **Core Packages**: `agent_core`, `agents`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `lane_queue`, `tools`, `ui`, `productivity`, `sandbox`, `voice`
+- **Core Packages**: `agent_core`, `agents/core`, `agents/specialists`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `tools`, `ui`, `productivity`, `sandbox`, `voice`
 - **assets/**: Specialist assets (`prompts/`, `skills/`, `training/`)
 - **infra/**: DevOps and infrastructure (`docker/`, `devops_auto/`, `.env` templates)
 - **dev/**: Development and scripts (`scripts/`, `projects/`, `experiments/`, `tests/`)
@@ -67,17 +76,21 @@ For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md).
 ## Getting Started
 
 1. **Environment Setup**:
+
    ```bash
+
    cp .env.example .env
    # Configure LLM_MODEL, OLLAMA_URL, and POSTGRES_URL
    ```
 
 2. **Start Infrastructure**:
+   
    ```bash
    docker-compose up -d
    ```
 
 3. **Run the OS (Backend)**:
+   
    ```bash
    git clone https://github.com/agentic-os/agentic-os.git
    cd agentic-os
@@ -85,6 +98,7 @@ For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md).
    ```
 
 4. **Run the UI (Optional)**:
+   
    ```bash
    python ui/app.py
    ```

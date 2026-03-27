@@ -46,7 +46,7 @@ async def verify():
 
     # 4. Coordinator Integration
     try:
-        from agents.coordinator import CoordinatorAgent
+        from agent_core.agents.core.coordinator import CoordinatorAgent
         agent = CoordinatorAgent(session_id="verify-session")
         print("[OK] CoordinatorAgent Initialized.")
     except Exception as e:

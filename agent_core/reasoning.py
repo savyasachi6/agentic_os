@@ -78,11 +78,32 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
                 payload = inner
             break
 
+    # 4. Phase 11 Fallback: Regex for 'Final Answer' or 'answer='
+    # If the LLM just gave a direct answer without formal ReAct tokens
+    fb_match = re.search(r"(?:Final Answer:|answer=)\s*[:\"']*(.*?)(?:[\"']|$)", response_text, re.IGNORECASE | re.DOTALL)
+    if fb_match:
+        return "respond", fb_match.group(1).strip()
+
     return action_type, payload
 
 def parse_thought(response_text: str) -> str:
-    """Extracts the reasoning thought from the response."""
-    match = re.search(r"Thought:\s*(.*?)(?=\nAction:|$)", response_text, re.DOTALL)
+    """
+    Extracts the reasoning thought from the response.
+    Harden: Only capture as a 'thought' if an 'Action:' block follows it, 
+    otherwise it's likely the final answer itself.
+    """
+    match = re.search(r"Thought:\s*(.*?)(?=\nAction:)", response_text, re.DOTALL)
     if match:
         return match.group(1).strip()
-    return response_text.strip()
+    return ""
+
+def strip_reasoning_markers(text: str) -> str:
+    """
+    Strips 'Thought:' and 'Action:' prefixes/blocks from a final response 
+    to provide a clean output to the user.
+    """
+    # Remove everything after and including the first Action: (if it's a final response, we don't want the action block)
+    text = re.sub(r"\n?Action:\s*.*", "", text, flags=re.DOTALL).strip()
+    # Remove Thought: prefix but keep the content if it's the only thing left
+    text = re.sub(r"^Thought:\s*", "", text, flags=re.IGNORECASE).strip()
+    return text

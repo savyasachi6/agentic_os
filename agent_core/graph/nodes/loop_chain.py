@@ -10,7 +10,7 @@ import json
 from typing import List, Dict, Any, Literal
 from langgraph.graph import StateGraph, END
 from agent_core.graph.state import AgentState
-from llm.client import LLMClient
+from agent_core.llm.client import LLMClient
 from langchain_core.messages import AIMessage, HumanMessage
 
 logger = logging.getLogger("agentos.loop_agent")

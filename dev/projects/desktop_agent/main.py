@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from projects.desktop_agent.organizer import FileOrganizer
 from lane_queue.store import CommandStore
 from lane_queue.models import RiskLevel
-from llm_router import LLMRouter
+from agent_core.llm_router import LLMRouter
 
 load_dotenv()
 

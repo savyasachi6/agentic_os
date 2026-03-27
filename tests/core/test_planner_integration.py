@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agents.coordinator import CoordinatorAgent
+from agent_core.agents.core.coordinator import CoordinatorAgent
 from agent_core.agent_types import Intent, NodeStatus
 from langchain_core.messages import AIMessage
 

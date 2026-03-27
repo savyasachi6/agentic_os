@@ -5,7 +5,7 @@ import urllib.request
 import urllib.error
 from typing import Optional
 
-from devops_auto.models import DeploymentConfig, DeploymentState
+from .models import DeploymentConfig, DeploymentState
 
 
 def deploy_to_staging(config: DeploymentConfig) -> DeploymentState:

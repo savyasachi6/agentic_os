@@ -11,7 +11,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 # --------------------
 
-from rag.retrieval.rl_client import RLRoutingClient
+from agent_core.rag.retrieval.rl_client import RLRoutingClient
 from rl_router.schemas.api_models import ToolCallLogInput
 from rl_router.domain.models import HallucinationCategory
 

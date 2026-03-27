@@ -14,13 +14,13 @@ from typing import List
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(_ROOT)
 
-from agents.worker import AgentWorker
-from agents.rag_agent import ResearchAgentWorker
-from agents.code_agent import CodeAgentWorker
-from agents.capability_agent import CapabilityAgentWorker
-from agents.email_agent import EmailAgent
-from agents.productivity import ProductivityAgent
-from agents.planner import PlannerAgentWorker
+from agent_core.agents.core.worker import AgentWorker
+from agent_core.agents.specialists.rag_agent import ResearchAgentWorker
+from agent_core.agents.specialists.code_agent import CodeAgentWorker
+from agent_core.agents.specialists.capability_agent import CapabilityAgentWorker
+from agent_core.agents.specialists.email_agent import EmailAgent
+from agent_core.agents.specialists.productivity import ProductivityAgent
+from agent_core.agents.specialists.planner import PlannerAgentWorker
 from db.queries.commands import TreeStore
 from db.connection import init_db_pool
 from agent_core.agent_types import AgentRole
@@ -32,7 +32,7 @@ def main():
     
     workers: List[AgentWorker] = []
     
-    from agents.executor import ExecutorAgentWorker
+    from agent_core.agents.specialists.executor import ExecutorAgentWorker
     
     # Instantiate agents and workers mapped to AgentRole enums
     spec_agents = {
