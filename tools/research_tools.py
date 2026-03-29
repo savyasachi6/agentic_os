@@ -140,39 +140,40 @@ class WebScrapeAction(BaseAction):
         return "web_scrape requires run_async"
 
     async def run_async(self, **kwargs) -> ActionResult:
-        url = kwargs.get("url", self.url)
-        browser_url = settings.browser_ws_url or "ws://browserless:9222"
+        url = kwargs.get("url", self.query)  # Note: query is inherited from BaseAction if used loosely
+        if not url or url == "self": # Guard against common mis-passes
+            url = kwargs.get("url") or self.url
+            
+        browser_url = settings.browser_ws_url or "ws://lightpanda:9222"
+        from markdownify import markdownify
         
-        # Phase 4: Use a real headless browser via Playwright CDP if available
+        # Strategy 1: Real headless browser via Playwright
         try:
-            from playwright.async_api import async_playwright
-            async with async_playwright() as p:
-                logger.info(f"Connecting to browserless at {browser_url}")
-                browser = await p.chromium.connect_over_cdp(browser_url)
-                context = await browser.new_context()
-                page = await context.new_page()
+            import playwright.async_api as pw
+            async with pw.async_playwright() as p:
+                logger.info(f"[web_scrape] Connecting to browser at {browser_url}")
+                # Use connect() for generic WS instead of connect_over_cdp if CDP is flaky
+                browser = await p.chromium.connect(browser_url)
+                page = await browser.new_page()
                 
                 await page.goto(url, wait_until="networkidle", timeout=30000)
                 content = await page.content()
-                
-                from markdownify import markdownify
-                text = markdownify(content).strip()
-                
                 await browser.close()
                 
+                text = markdownify(content).strip()
                 if len(text) > 15000:
                     text = text[:15000] + "\n\n... [Content Truncated]"
                 
                 return ActionResult(success=True, data={"output": text})
         except Exception as e:
-            logger.warning(f"Browserless scrap failed for {url}: {e}. Falling back to httpx.")
+            logger.warning(f"[web_scrape] Browser scrape failed for {url}: {e}. Trying httpx fallback.")
             
-            # Simple scraping fallback via httpx if browserless fails or JS is not needed
+            # Strategy 2: Simple HTTP extraction for static sites
             try:
-                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; AgenticOS/2.7; +https://github.com/savyasachi6/agentic_os)"}
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
                     response = await client.get(url)
                     response.raise_for_status()
-                    from markdownify import markdownify
                     text = markdownify(response.text).strip()
                     
                     if len(text) > 10000:
@@ -180,7 +181,7 @@ class WebScrapeAction(BaseAction):
                     
                     return ActionResult(success=True, data={"output": text})
             except Exception as e2:
-                logger.error(f"Scrape fallback failed: {e2}")
+                logger.error(f"[web_scrape] All scrape strategies failed: {e2}")
                 return ActionResult(success=False, error_trace=f"Failed to scrape URL: {str(e2)}")
 
 # Safe Registration (Phase 62): Instantiate objects once to access their descriptions and async runners safely

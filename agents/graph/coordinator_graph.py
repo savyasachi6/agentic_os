@@ -131,7 +131,12 @@ async def route_node(state: AgentState) -> AgentState:
     if intent_str == Intent.LLM_DIRECT.value:
         llm = state.get("llm") or LLMClient()
         msgs = [
-            {"role": "system", "content": "You are a helpful assistant. Provide a direct, plain-text response. DO NOT use Thought:/Action:/Observation: formatting or internal reasoning tags."},
+            {"role": "system", "content": (
+                "You are a helpful, knowledgeable assistant. "
+                "Answer the user's question clearly and directly. "
+                "Do NOT use any tools. Do NOT output Thought:/Action:/Observation: lines. "
+                "Just answer conversationally."
+            )},
             {"role": "user",   "content": last_human},
         ]
         response = await llm.generate_async(msgs)

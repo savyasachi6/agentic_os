@@ -41,3 +41,4 @@ tmp_*.py
 check_db.py
 debug_*.py
 migrate_*.py
+path

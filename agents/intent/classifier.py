@@ -99,8 +99,9 @@ INDEXED_TOPICS = [
     "hybrid search", "semantic cache", "speculative",
     "security principle", "security standard", "security policy",
     "skills", "available skills", "explain skills", "features",
-    "how do you think", "mcp", "model context protocol", "server",
-    "package", "setup",
+    "how do you think", "mcp", "mcp server", "model context protocol",
+    "server", "package", "packages", "dependencies", "requirements",
+    "setup", "docker", "docker compose", "container",
 ]
 # Removed bare "capabilities" and "best practice" — both conflict with
 # CAPABILITY_KEYWORDS and CODE_KEYWORDS respectively.
@@ -108,6 +109,10 @@ INDEXED_TOPICS = [
 LLM_DIRECT_TASKS = [
     "outline", "plan", "explain", "describe", "summarize",
     "architecture", "patterns", "design", "guide", "tutorial",
+    "what is", "what are", "how does", "how do", "tell me about",
+    "what packages", "what dependencies", "what libraries",
+    "what modules", "how to install", "how to configure",
+    "difference between", "compare", "pros and cons",
 ]
 OS_TASKS = ["run", "execute", "pip", "install", "launch", "delete", "remove"]
 
