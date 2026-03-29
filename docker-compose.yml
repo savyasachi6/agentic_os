@@ -255,6 +255,7 @@ services:
       backend-net:
         aliases:
           - rl-router
+      frontend-net:
 
   agent-ui:
     # The Streamlit visualization dashboard. 

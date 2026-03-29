@@ -137,6 +137,7 @@ class RLRoutingClient:
         speculative: bool = False,
         latency_ms: int = 0,
         success: bool = True,
+        hallucination_flag: bool = False,
     ) -> None:
         if not query_hash:
             return  # no hash means this was a fallback call — nothing to train on
@@ -148,6 +149,7 @@ class RLRoutingClient:
             "latency_ms":           int(latency_ms),
             "success":              success,
             "auditor_score":        reward,
+            "hallucination_flag":   hallucination_flag,
         }
         try:
             # FIX: always use _get_client() so we never POST on a closed socket

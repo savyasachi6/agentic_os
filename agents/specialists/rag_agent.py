@@ -60,12 +60,21 @@ class ResearchAgentWorker(AgentWorker):
         ]
 
         try:
-            # Phase 3: Use real embeddings for RL routing decision
+            # Phase 3: Use real embeddings for RL routing decision (Hardened with Retry)
             query_vec = [0.0] * 1024
-            try:
-                query_vec, _ = await self.retriever.embedder.generate_embedding_async(query_goal)
-            except Exception as e:
-                logger.warning(f"Failed to generate embedding for RL: {e}")
+            for attempt in range(3):
+                try:
+                    # Timeout wrapped to prevent blocking the entire agent loop
+                    query_vec, _ = await asyncio.wait_for(
+                        self.retriever.embedder.generate_embedding_async(query_goal),
+                        timeout=5.0
+                    )
+                    break
+                except asyncio.TimeoutError:
+                    logger.warning(f"Embedding timeout attempt {attempt+1}/3")
+                except Exception as e:
+                    logger.warning(f"Embedding failed attempt {attempt+1}/3: {e}")
+                    break
 
             rl_action = await self.rl_client.get_retrieval_action(
                 query_goal, 
@@ -174,6 +183,7 @@ class ResearchAgentWorker(AgentWorker):
                             speculative=bool(rl_meta.get("speculative")),
                             latency_ms=(time.time() - start_time) * 1000,
                             success=True,
+                            hallucination_flag=self._detect_hallucination(final_message),
                         )
 
                     await self.tree_store.update_node_status_async(
@@ -205,6 +215,7 @@ class ResearchAgentWorker(AgentWorker):
                             speculative=bool(rl_meta.get("speculative")),
                             latency_ms=(time.time() - start_time) * 1000,
                             success=True,
+                            hallucination_flag=self._detect_hallucination(final_res),
                         )
 
                     await self.tree_store.update_node_status_async(
@@ -295,6 +306,7 @@ class ResearchAgentWorker(AgentWorker):
                     speculative=bool(rl_meta.get("speculative")),
                     latency_ms=(time.time() - start_time) * 1000,
                     success=False,
+                    hallucination_flag=True,  # Failure to find answer is treated as a logic gap
                 )
 
             await self.tree_store.update_node_status_async(
@@ -338,6 +350,17 @@ class ResearchAgentWorker(AgentWorker):
         
         # Reward decays linearly: depth=1 -> 1.0, depth=max_depth -> 0.5
         return max(0.5, 1.0 - 0.5 * (depth / max_depth))
+
+    def _detect_hallucination(self, answer: str) -> bool:
+        """Heuristic: answer contains speculative markers without grounding."""
+        speculative_markers = [
+            "i think", "i believe", "probably", "might be", "could be",
+            "i'm not sure", "i'm not certain", "as far as i know"
+        ]
+        ans_lower = answer.lower()
+        has_speculation = any(m in ans_lower for m in speculative_markers)
+        has_grounding = any(m in ans_lower for m in ["according to", "the document", "retrieved", "found in"])
+        return has_speculation and not has_grounding
 
     @staticmethod
     def _cleanup_final_payload(payload: str) -> str:

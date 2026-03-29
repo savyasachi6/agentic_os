@@ -55,7 +55,33 @@ class WebSearchAction(BaseAction):
             except Exception as e:
                 logger.warning(f"Brave Search failed, falling back to DuckDuckGo: {e}")
 
-        # ── Strategy 2: DuckDuckGo via lightpanda CDP ────────────────────────────
+        # ── Strategy 2: DuckDuckGo JSON API (Instant Answers) ────────────────────
+        try:
+            ddg_api_url = "https://api.duckduckgo.com/"
+            params = {"q": query, "format": "json", "no_html": 1, "skip_disambig": 1}
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(ddg_api_url, params=params)
+                r.raise_for_status()
+                data = r.json()
+                
+                results = []
+                # Instant Answer (Abstract)
+                if data.get("AbstractText"):
+                    results.append(f"- **{data.get('Heading', 'Abstract')}**\n  URL: {data.get('AbstractURL')}\n  {data.get('AbstractText')}")
+                
+                # Related Topics
+                for item in data.get("RelatedTopics", []):
+                    if len(results) >= count: break
+                    if "Text" in item and "FirstURL" in item:
+                        results.append(f"- **{item['Text'][:80]}...**\n  URL: {item['FirstURL']}\n  {item['Text']}")
+                
+                if results:
+                    logger.info(f"[web_search] Found {len(results)} results via DDG API")
+                    return ActionResult(success=True, data={"output": "\n\n".join(results)})
+        except Exception as e:
+            logger.warning(f"[web_search] DDG API failed, trying lightpanda: {e}")
+
+        # ── Strategy 3: DuckDuckGo via lightpanda CDP ────────────────────────────
         browser_url = settings.browser_ws_url
         ddg_url     = f"https://html.duckduckgo.com/html/?q={query}"
 
@@ -71,16 +97,23 @@ class WebSearchAction(BaseAction):
                 # Extract result links and snippets from DDG HTML response
                 results_raw = await page.evaluate("""() => {
                     const items = [];
-                    document.querySelectorAll('.result').forEach(el => {
-                        const titleEl   = el.querySelector('.result__title a');
-                        const snippetEl = el.querySelector('.result__snippet');
-                        const urlEl     = el.querySelector('.result__url');
-                        if (titleEl) items.push({
-                            title:   titleEl.innerText.trim(),
-                            url:     titleEl.href || (urlEl ? urlEl.innerText.trim() : ''),
-                            snippet: snippetEl ? snippetEl.innerText.trim() : ''
-                        });
-                    });
+                    // Try different selectors for DDG Lite/HTML
+                    const selectors = ['.result', '.links_main', '.result__body'];
+                    for (const sel of selectors) {
+                        const els = document.querySelectorAll(sel);
+                        if (els.length > 0) {
+                            els.forEach(el => {
+                                const titleEl   = el.querySelector('.result__title a') || el.querySelector('a.result__a');
+                                const snippetEl = el.querySelector('.result__snippet') || el.querySelector('.result__snippet');
+                                if (titleEl) items.push({
+                                    title:   titleEl.innerText.trim(),
+                                    url:     titleEl.href,
+                                    snippet: snippetEl ? snippetEl.innerText.trim() : ''
+                                });
+                            });
+                            break;
+                        }
+                    }
                     return items.slice(0, 8);
                 }""")
                 await browser.close()
@@ -97,7 +130,7 @@ class WebSearchAction(BaseAction):
         except Exception as e:
             logger.warning(f"[web_search] lightpanda CDP search failed: {e}. Trying httpx DDG.")
 
-        # ── Strategy 3: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
+        # ── Strategy 4: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
         try:
             headers = {"User-Agent": "Mozilla/5.0 (compatible; AgenticOS/2.7; +https://github.com/savyasachi6/agentic_os)"}
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers) as client:
@@ -106,18 +139,18 @@ class WebSearchAction(BaseAction):
                 from markdownify import markdownify
                 text = markdownify(resp.text).strip()
                 # Extract only the result blocks to keep it clean
-                if "result__title" in resp.text:
+                if "result__title" in resp.text or "result__a" in resp.text:
                     from bs4 import BeautifulSoup
                     soup    = BeautifulSoup(resp.text, "html.parser")
                     results = []
-                    for r in soup.select(".result")[:count]:
-                        title_el   = r.select_one(".result__title a")
+                    # Try multiple potential result selectors
+                    for r in (soup.select(".result") or soup.select(".links_main"))[:count]:
+                        title_el   = r.select_one(".result__title a") or r.select_one(".result__a")
                         snippet_el = r.select_one(".result__snippet")
-                        url_el     = r.select_one(".result__url")
                         if title_el:
                             results.append(
                                 f"- **{title_el.get_text().strip()}**\n"
-                                f"  URL: {url_el.get_text().strip() if url_el else ''}\n"
+                                f"  URL: {title_el.get('href', '')}\n"
                                 f"  {snippet_el.get_text().strip() if snippet_el else ''}"
                             )
                     if results:

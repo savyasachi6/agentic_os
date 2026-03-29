@@ -7,6 +7,7 @@ as FastAPI dependencies, keeping routers thin.
 
 from __future__ import annotations
 
+from typing import Optional, Any, Dict, List
 import os
 from functools import lru_cache
 
