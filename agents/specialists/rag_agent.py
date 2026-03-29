@@ -116,19 +116,19 @@ class ResearchAgentWorker(AgentWorker):
 
                         if chunk_type == "thought":
                             current_turn_thoughts += content
-                            await self.bus.publish(
-                                self.role.value,
-                                {"type": "thought", "content": content, "session_id": session_id},
-                            )
+                            # Phase 15: Suppress raw thoughts to prevent UI leakage
                         elif chunk_type == "token":
                             response_text += content
-                            await self.bus.publish(
-                                self.role.value,
-                                {"type": "token", "content": content, "session_id": session_id},
-                            )
+                            # Phase 15: Suppress raw tokens to keep UI clean
                         elif chunk_type == "error":
                             logger.error(f"Streaming error on turn {i+1}: {content}")
                             break
+
+                    # Provide a quick status update to show progress without raw tokens
+                    await self.bus.publish(
+                        self.role.value,
+                        {"type": "status", "content": f"Thinking (Turn {i+1})...", "session_id": session_id},
+                    )
 
                     if response_text.strip() or current_turn_thoughts.strip():
                         break
@@ -163,12 +163,13 @@ class ResearchAgentWorker(AgentWorker):
 
                 if not action_data:
                     final_message = strip_all_reasoning(full_raw_text)
-                    # Phase 3: Submit feedback to RL bandit
+                    # Phase 15: Heuristic reward and corrected arm_index
                     if rl_meta.get("query_hash_rl"):
+                        reward = self._compute_reward(final_message, i + 1, max_iterations)
                         await self.rl_client.submit_feedback(
                             query_hash=rl_meta["query_hash_rl"],
-                            reward=1.0,
-                            arm_index=rl_meta.get("action", 2),
+                            reward=reward,
+                            arm_index=rl_meta.get("arm_index", 2),
                             depth=i + 1,
                             speculative=bool(rl_meta.get("speculative")),
                             latency_ms=(time.time() - start_time) * 1000,
@@ -193,12 +194,13 @@ class ResearchAgentWorker(AgentWorker):
                     if isinstance(final_res, str):
                         final_res = self._cleanup_final_payload(final_res)
 
-                    # Phase 3: Submit feedback to RL bandit
+                    # Phase 15: Heuristic reward and corrected arm_index
                     if rl_meta.get("query_hash_rl"):
+                        reward = self._compute_reward(final_res, i + 1, max_iterations)
                         await self.rl_client.submit_feedback(
                             query_hash=rl_meta["query_hash_rl"],
-                            reward=1.0,
-                            arm_index=rl_meta.get("action", 2),
+                            reward=reward,
+                            arm_index=rl_meta.get("arm_index", 2),
                             depth=i + 1,
                             speculative=bool(rl_meta.get("speculative")),
                             latency_ms=(time.time() - start_time) * 1000,
@@ -283,12 +285,12 @@ class ResearchAgentWorker(AgentWorker):
                 )
                 messages.append({"role": "user", "content": obs})
 
-            # Phase 3: Submit failure feedback to RL bandit
+            # Phase 15: Submit failure feedback with corrected arm_index
             if rl_meta.get("query_hash_rl"):
                 await self.rl_client.submit_feedback(
                     query_hash=rl_meta["query_hash_rl"],
                     reward=0.0,
-                    arm_index=rl_meta.get("action", 2),
+                    arm_index=rl_meta.get("arm_index", 2),
                     depth=max_iterations,
                     speculative=bool(rl_meta.get("speculative")),
                     latency_ms=(time.time() - start_time) * 1000,
@@ -316,6 +318,26 @@ class ResearchAgentWorker(AgentWorker):
                     "traceback": traceback.format_exc(),
                 },
             )
+
+    def _compute_reward(self, answer: str, depth: int, max_depth: int) -> float:
+        """
+        Phase 15: Simple heuristic reward
+        - 0.0 if the answer is a known fallback/failure string
+        - Linearly decays with depth to reward shallower successful retrievals
+        """
+        if not answer:
+            return 0.0
+        fallback_phrases = [
+            "i couldn't find", "no relevant", "no results",
+            "i don't know", "i am unable", "cannot find",
+            "not clear", "needs more context"
+        ]
+        ans_lower = answer.lower()
+        if any(p in ans_lower for p in fallback_phrases):
+            return 0.2  # partial credit — it ran, but result was weak
+        
+        # Reward decays linearly: depth=1 -> 1.0, depth=max_depth -> 0.5
+        return max(0.5, 1.0 - 0.5 * (depth / max_depth))
 
     @staticmethod
     def _cleanup_final_payload(payload: str) -> str:

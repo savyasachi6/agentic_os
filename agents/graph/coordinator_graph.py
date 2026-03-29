@@ -28,29 +28,33 @@ from core.llm.client import LLMClient
 
 logger = logging.getLogger("agentos.coordinator_graph")
 
-import re
+import re as _re
+
+_INTERNAL_LINE_RE = _re.compile(
+    r"^\s*(Thought:|Action:|Observation:|Action Input:|\[TOOL_CALL_DETECTED\])",
+    _re.IGNORECASE,
+)
+_THINK_BLOCK_RE = _re.compile(
+    r"(<thinking>.*?</thinking>|<\|thinking\|>.*?<\|/thinking\|>)",
+    _re.DOTALL | _re.IGNORECASE,
+)
 
 def _strip_react_internals(text: str) -> str:
-    """Remove Thought:/Action: lines from LLM output before showing to the user.
-
-    The coordinator uses a ReAct format internally (Thought/Action/Observation).
-    If a raw LLM response leaks to the user, this strips the boilerplate so only
-    the useful answer text is shown.
+    """
+    Strip ALL internal reasoning tokens before showing to the user:
+    - <thinking>...</thinking> blocks (multi-line)
+    - Lines starting with Thought: / Action: / Observation: / Action Input:
+    - [TOOL_CALL_DETECTED] lines
+    Never returns empty string.
     """
     if not text:
         return text
-    lines = text.splitlines()
-    cleaned = []
-    skip_action = False
-    for line in lines:
-        stripped = line.strip()
-        # Suppress Thought: and Action: lines
-        if stripped.startswith("Thought:") or stripped.startswith("Action:"):
-            skip_action = False  # reset; only skip the exact line
-            continue
-        cleaned.append(line)
-    result = "\n".join(cleaned).strip()
-    return result or text  # never return empty if the whole thing was Thought/Action
+    # Remove think-blocks first (multi-line)
+    text = _THINK_BLOCK_RE.sub("", text)
+    # Remove reasoning lines
+    lines = [l for l in text.splitlines() if not _INTERNAL_LINE_RE.match(l)]
+    result = "\n".join(lines).strip()
+    return result or text  # safety: never return empty
 
 # ─────────────────────────────────────────────
 # Node functions
@@ -93,87 +97,86 @@ async def route_node(state: AgentState) -> AgentState:
         "",
     )
 
-    # Fast-path shortcuts (Phase 4.1: Conversational Resilience)
+    # ── Fast-path: intents that never need an LLM round-trip ──────────────────
+
     if intent_str == Intent.GREETING.value:
-        # Check if it's a follow-up ("more details", "wtf")
-        followups = ["more details", "tell me more", "wtf", "what is this", "help", "what", "really"]
+        followups = ["more details", "tell me more", "wtf", "what is this", "really", "ok", "okay"]
         if any(f in last_human.lower() for f in followups):
-            return {**state, "next_node": "respond", "direct_response": "I'm here to help, but I need a clearer goal! Are you looking for project links, a specific skill research, or do you want me to write some code? Try 'what can you do' for an overview."}
-        return {**state, "next_node": "respond", "direct_response": "Hello! I'm the Agentic OS Coordinator. How can I help you today?"}
+            return {**state, "next_node": "respond",
+                    "direct_response": "Happy to help! Try 'what can you do' for an overview, or ask me something specific."}
+        return {**state, "next_node": "respond",
+                "direct_response": "Hello! I'm the Agentic OS Coordinator. How can I help you today?"}
 
-    if intent_str == Intent.CAPABILITY_QUERY.value:
-        return {**state, "next_node": "execute", "action_name": "capability", "action_goal": last_human}
+    # All specialist dispatches — no LLM needed, just pick the right agent
+    _INTENT_TO_AGENT = {
+        Intent.CAPABILITY_QUERY.value: "capability",
+        Intent.WEB_SEARCH.value:       "research",
+        Intent.RAG_LOOKUP.value:       "research",
+        Intent.CONTENT.value:          "research",   # research has web_search + hybrid_search
+        Intent.CODE_GEN.value:         "code",
+        Intent.MATH.value:             "tool_caller",
+        Intent.EXECUTION.value:        "code",       # execution tasks → code agent
+        Intent.FILESYSTEM.value:       "code",       # filesystem tasks → code agent
+    }
 
-    if intent_str == Intent.WEB_SEARCH.value:
-        return {**state, "next_node": "execute", "action_name": "research", "action_goal": last_human}
-
-    if intent_str == Intent.RAG_LOOKUP.value:
-        return {**state, "next_node": "execute", "action_name": "research", "action_goal": last_human}
-
-    if intent_str == Intent.MATH.value:
-        return {**state, "next_node": "execute", "action_name": "tool_caller", "action_goal": last_human}
-
-    if intent_str == Intent.CONTENT.value:
-        # Phase 14: Route content to research agent (RAG + web_search)
-        return {**state, "next_node": "execute", "action_name": "research", "action_goal": last_human}
-
-    if intent_str == Intent.CODE_GEN.value:
-        # Phase 14: Always route code questions to code agent, not just first turn
-        return {**state, "next_node": "execute", "action_name": "code", "action_goal": last_human}
-
-    # Complex tasks — let LLM decide action via ReAct
-    llm = state.get("llm") or LLMClient()
-    system_prompt_raw = state.get("system_prompt", "You are the Coordinator. Route requests to specialists.")
-
-    # Substitute template variables robustly (Phase 3.7)
-    system_prompt = system_prompt_raw.replace("{original_message}", last_human)
-    
-    # Construct messages for LLM (Phase 52: Sliding window to avoid 16k context bloat)
-    # Only show the system prompt and the latest few messages to the router.
-    msgs_for_llm = [{"role": "system", "content": system_prompt}]
-    
-    # Take only the last 5 messages for the routing decision context
-    window = messages[-5:] if len(messages) > 5 else messages
-    for m in window:
-        role = "user" if isinstance(m, HumanMessage) else "assistant"
-        msgs_for_llm.append({"role": role, "content": m.content})
-
-    status_cb = state.get("status_callback")
-    if hasattr(llm, "generate_streaming") and status_cb:
-        await status_cb("status", "Brainstorming routing plan...")
-        response = ""
-        # 1. Stream tokens and thoughts back to the UI real-time
-        async for chunk in llm.generate_streaming(msgs_for_llm):
-            t_type = chunk.get("type", "token")
-            t_cont = chunk.get("content", "")
-            if t_cont:
-                response += t_cont
-                try:
-                    await status_cb(t_type, t_cont)
-                except Exception:
-                    pass
-    else:
-        # 2. Fallback to blocking invocation
-        response = await llm.generate_async(msgs_for_llm)
-
-    
-    # Defensive hardening: Ensure response is never None to avoid Pydantic/LangChain crashes
-    if response is None:
-        logger.error("LLM returned None in route_node. Falling back to error message.")
-        response = "I encountered an internal error connecting to the LLM backend. Please try again or check provider logs."
-    
-    new_messages = list(messages) + [AIMessage(content=response)]
-    
-    action_data = parse_react_action(response)
-    if not action_data:
-        # No action parsed — treat the whole response as a direct answer,
-        # but strip internal Thought: / Action: lines before showing to user.
-        clean = strip_all_reasoning(response)
+    if intent_str in _INTENT_TO_AGENT:
         return {
             **state,
-            "messages": new_messages,
-            "next_node": "respond",
-            "direct_response": clean,
+            "next_node":   "execute",
+            "action_name": _INTENT_TO_AGENT[intent_str],
+            "action_goal": last_human,
+        }
+
+    # LLM_DIRECT — answer directly without a specialist, no ReAct loop
+    if intent_str == Intent.LLM_DIRECT.value:
+        llm = state.get("llm") or LLMClient()
+        msgs = [
+            {"role": "system", "content": "You are a helpful assistant. Answer clearly and concisely."},
+            {"role": "user",   "content": last_human},
+        ]
+        response = await llm.generate_async(msgs)
+        response = response or "I could not generate a response. Please rephrase."
+        return {
+            **state,
+            "messages":       list(messages) + [AIMessage(content=response)],
+            "next_node":      "respond",
+            "direct_response": _strip_react_internals(response),
+        }
+
+    # COMPLEX_TASK / UNKNOWN — LLM ReAct loop (Phase 15: No raw streaming to UI)
+    llm = state.get("llm") or LLMClient()
+    system_prompt = state.get(
+        "system_prompt", "You are the Coordinator. Route requests to specialists."
+    ).replace("{original_message}", last_human)
+
+    msgs_for_llm = [{"role": "system", "content": system_prompt}]
+    window = messages[-5:] if len(messages) > 5 else messages
+    for m in window:
+        msgs_for_llm.append({
+            "role": "user" if isinstance(m, HumanMessage) else "assistant",
+            "content": m.content,
+        })
+
+    status_cb = state.get("status_callback")
+    if status_cb:
+        await status_cb("status", "Analyzing your request...")
+
+    # Phase 15: Use non-streaming generate_async here so raw Thought/Action 
+    # tokens are NEVER published to the client bus.
+    response = await llm.generate_async(msgs_for_llm)
+
+    if not response:
+        response = "I encountered an internal error. Please try again."
+
+    new_messages = list(messages) + [AIMessage(content=response)]
+    action_data = parse_react_action(response)
+
+    if not action_data:
+        return {
+            **state,
+            "messages":        new_messages,
+            "next_node":       "respond",
+            "direct_response": _strip_react_internals(response),
         }
 
     action_name, action_goal = action_data
@@ -182,15 +185,15 @@ async def route_node(state: AgentState) -> AgentState:
     if agent_type == "respond":
         return {
             **state,
-            "messages": new_messages,
-            "next_node": "respond",
-            "direct_response": strip_all_reasoning(action_goal),
+            "messages":        new_messages,
+            "next_node":       "respond",
+            "direct_response": _strip_react_internals(action_goal),
         }
 
     return {
         **state,
-        "messages": new_messages,
-        "next_node": "execute",
+        "messages":    new_messages,
+        "next_node":   "execute",
         "action_name": agent_type,
         "action_goal": action_goal,
     }
@@ -348,8 +351,14 @@ def decide_after_route(state: AgentState) -> str:
 
 
 def decide_after_execute(state: AgentState) -> str:
+    """
+    Circuit breaker: stop if too many retries OR too many errors,
+    not just retry_count (which only increments on guard failures).
+    """
     retry = state.get("retry_count", 0)
-    if retry >= 5:
+    invalid = state.get("invalid_call_count", 0)
+    # Stop if explicit retries exceeded OR accumulated errors are high
+    if retry >= 5 or invalid >= 3:
         return "respond"
     return state.get("next_node", "route")
 
