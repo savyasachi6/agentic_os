@@ -164,11 +164,15 @@ async def submit_human_feedback(payload: dict):
 async def get_chat_history(session_id: str):
     try:
         vs = VectorStore()
-        history = vs.get_session_history(session_id)
-        for entry in history:
-            if "created_at" in entry and hasattr(entry["created_at"], "isoformat"):
-                entry["created_at"] = entry["created_at"].isoformat()
-        return {"status": "success", "session_id": session_id, "history": history}
+        # Phase 7: Use the async shim that wraps db.queries.thoughts.get_session_history
+        history = await vs.get_session_history_async(session_id)
+
+        # history already has role/content/timestamp as strings
+        return {
+            "status": "success",
+            "session_id": session_id,
+            "history": history,
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

@@ -170,18 +170,25 @@ class HybridRetriever:
             query_vector, _ = await self.embedder.generate_embedding_async(query)
             skill_hits = search_skills_raw(query_vector, limit=top_k)
 
-            return [
-                {
-                    "content": (
-                        f"Skill: {s['skill_name']} ({s['heading']})\n"
-                        f"Description: {s['skill_description']}\n---\n{s['content']}"
-                    ),
-                    "source": "skill_registry",
-                    "score": float(s["score"]),
-                    "metadata_json": {"skill_name": s["skill_name"]},
-                }
-                for s in skill_hits
-            ]
+            results = []
+            for s in skill_hits:
+                raw_score = s.get("score")
+                if raw_score is None:
+                    # Phase 7: Skip rows with NULL score / embedding to avoid float() fail
+                    continue
+
+                results.append(
+                    {
+                        "content": (
+                            f"Skill: {s['skill_name']} ({s['heading']})\n"
+                            f"Description: {s['skill_description']}\n---\n{s['content']}"
+                        ),
+                        "source": "skill_registry",
+                        "score": float(raw_score),
+                        "metadata_json": {"skill_name": s["skill_name"]},
+                    }
+                )
+            return results
         except Exception as e:
             logger.error(f"Skill retrieval error: {e}")
             return []
