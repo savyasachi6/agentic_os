@@ -636,7 +636,7 @@ BEGIN
         sc.content
     FROM skill_tree st
     JOIN skill_chunks sc ON st.id = sc.skill_id
-    WHERE sc.chunk_type = 'instructions'
+    WHERE sc.chunk_type IN ('instructions', 'frontmatter')
     ORDER BY st.level DESC; -- root instructions first, leaf instructions last
 END;
 $$ LANGUAGE plpgsql;

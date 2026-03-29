@@ -7,10 +7,10 @@ Verifies node execution and graph topology using LangGraph.
 import pytest
 import asyncio
 from langchain_core.messages import HumanMessage, AIMessage
-from agent_core.graph.state import AgentState
+from agents.graph.state import AgentState
 
 # ── 1. Sequential Pattern Tests ───────────────────────────────────
-from agent_core.graph.nodes.sequential_chain import build_code_gen_chain
+from agents.graph.nodes.sequential_chain import build_code_gen_chain
 
 @pytest.mark.asyncio
 async def test_sequential_code_gen_topology():
@@ -27,7 +27,7 @@ async def test_sequential_code_gen_topology():
     assert "format_output" in chain.nodes
 
 # ── 2. Parallel Pattern Tests ─────────────────────────────────────
-from agent_core.graph.nodes.parallel_chain import build_parallel_chain
+from agents.graph.nodes.parallel_chain import build_parallel_chain
 
 @pytest.mark.asyncio
 async def test_parallel_retrieval_topology():
@@ -36,7 +36,7 @@ async def test_parallel_retrieval_topology():
     assert "merge_results" in chain.nodes
 
 # ── 3. Loop Pattern Tests ─────────────────────────────────────────
-from agent_core.graph.nodes.loop_chain import build_loop_chain
+from agents.graph.nodes.loop_chain import build_loop_chain
 
 @pytest.mark.asyncio
 async def test_loop_refinement_topology():

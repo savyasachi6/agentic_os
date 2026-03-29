@@ -1,0 +1,56 @@
+# Agentic OS - Core Container
+# Optimized for high-performance FastAPI/WebSocket gateway and orchestrator loop.
+
+FROM python:3.11.9-slim-bookworm
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Create a non-root app user
+RUN groupadd -g 1000 appuser && \
+    useradd -r -u 1000 -g appuser appuser
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    postgresql-client \
+    redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code with proper ownership
+COPY --chown=appuser:appuser core/ core/
+COPY --chown=appuser:appuser agents/ agents/
+COPY --chown=appuser:appuser rag/ rag/
+COPY --chown=appuser:appuser db/ db/
+COPY --chown=appuser:appuser gateway/ gateway/
+COPY --chown=appuser:appuser prompts/ prompts/
+COPY --chown=appuser:appuser tools/ tools/
+COPY --chown=appuser:appuser assets/ assets/
+
+# Copy entrypoint script and set permissions
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh && chown appuser:appuser entrypoint.sh
+
+# Switch to non-root user
+USER appuser
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose API and WebSocket ports
+EXPOSE 8000
+
+# Global entrypoint script to handle initialization
+ENTRYPOINT ["/bin/bash", "./entrypoint.sh"]
+
+# Default command: Serving the gateway through uvicorn
+CMD ["uvicorn", "gateway.server:app", "--host", "0.0.0.0", "--port", "8000"]

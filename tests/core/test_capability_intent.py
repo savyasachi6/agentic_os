@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.agent_types import Intent
-from agent_core.intent.classifier import classify_intent
+from agents.orchestrator import OrchestratorAgent
+from core.agent_types import Intent
+from agents.intent.classifier import classify_intent
 
 @pytest.mark.asyncio
 async def test_capability_intent_classification():
@@ -21,7 +21,7 @@ async def test_greeting_intent_classification():
 
 @pytest.mark.asyncio
 async def test_coordinator_direct_capability_call():
-    """Verify that CoordinatorAgent.run_turn calls _handle_capability for capability queries."""
+    """Verify that OrchestratorAgent.run_turn calls _handle_capability for capability queries."""
     # The new coordinator uses an agent registry. 
     # For a capability query, it calls agents["capability"].execute(message)
     
@@ -37,11 +37,11 @@ async def test_coordinator_direct_capability_call():
         "capability": mock_capability_agent
     }
     
-    with patch('agents.coordinator.TreeStore') as mock_ts:
+    with patch('agents.orchestrator.TreeStore') as mock_ts:
         ts = mock_ts.return_value
         ts.get_chain_by_session_id_async = AsyncMock(return_value=MagicMock(id=1))
         
-        agent = CoordinatorAgent(agent_registry=agents, llm_client=mock_llm)
+        agent = OrchestratorAgent(agent_registry=agents, llm_client=mock_llm)
         
         # We call run_turn
         await agent.run_turn("What can you do?")

@@ -1,9 +1,9 @@
 import pytest
-from agent_core.intent.classifier import classify_intent
-from agent_core.agent_types import Intent
-from agent_core.agents.capability_agent import CapabilityAgentWorker
+from agents.intent.classifier import classify_intent
+from core.agent_types import Intent
+from agents.capability_agent import CapabilityAgentWorker
 from db.models import Node
-from agent_core.agent_types import AgentRole, NodeStatus, NodeType
+from core.agent_types import AgentRole, NodeStatus, NodeType
 import asyncio
 
 def test_intent_links():

@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock
-from agent_core.agents.rag_agent import ResearchAgentWorker
+from agents.rag_agent import ResearchAgentWorker
 from db.models import Node
-from agent_core.agent_types import AgentRole, NodeStatus, NodeType
+from core.agent_types import AgentRole, NodeStatus, NodeType
 
 @pytest.mark.asyncio
 async def test_rag_max_turns_error():

@@ -20,9 +20,9 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel, Field
 import uvicorn
 
-from agent_core.security.jwt_auth import JWTMiddleware, TokenPayload
-from agent_core.security.rbac import get_required_scope_for_tool
-from agent_core.tools import system_tools
+from core.security.jwt_auth import JWTMiddleware, TokenPayload
+from core.security.rbac import get_required_scope_for_tool
+from tools import system_tools
 from .models import ToolCallRequest, ToolCallResponse
 
 try:

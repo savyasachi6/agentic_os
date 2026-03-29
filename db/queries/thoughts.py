@@ -66,21 +66,85 @@ def retrieve_session_context(query_vec: List[float], session_id: str, limit: int
             rows = cur.fetchall()
             return [{"summary": r[0], "turn_start": r[1], "turn_end": r[2], "score": r[3]} for r in rows]
  
-def get_all_sessions() -> List[str]:
-    """Retrieve unique session IDs from thoughts and summaries."""
+def get_all_sessions() -> List[Dict[str, Any]]:
+    """
+    Retrieve unique session IDs with their topic and timestamp.
+    Merges newer thoughts (first user message) with legacy session summaries.
+    """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT session_id FROM thoughts UNION SELECT DISTINCT session_id FROM session_summaries")
+            # Phase 3.5: Hybrid query to ensure data continuity
+            cur.execute("""
+                WITH latest_thoughts AS (
+                    SELECT DISTINCT ON (session_id) 
+                        session_id, 
+                        content as topic, 
+                        created_at 
+                    FROM thoughts 
+                    WHERE role = 'user'
+                    ORDER BY session_id, created_at ASC
+                ),
+                latest_summaries AS (
+                    SELECT DISTINCT ON (session_id)
+                        session_id,
+                        summary as topic,
+                        created_at
+                    FROM session_summaries
+                    ORDER BY session_id, created_at DESC
+                ),
+                combined AS (
+                    SELECT * FROM latest_thoughts
+                    UNION
+                    SELECT * FROM latest_summaries s 
+                    WHERE NOT EXISTS (SELECT 1 FROM latest_thoughts t WHERE t.session_id = s.session_id)
+                )
+                SELECT session_id, topic, created_at FROM combined
+                ORDER BY created_at DESC
+            """)
             rows = cur.fetchall()
-            return [r[0] for r in rows]
+            return [
+                {
+                    "session_id": r[0],
+                    "first_message": r[1],
+                    "created_at": r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2])
+                } for r in rows
+            ]
 
 def get_session_history(session_id: str) -> List[Dict[str, Any]]:
-    """Retrieve full history for a session, ordered by time."""
+    """
+    Retrieve full history for a session, ordered by time.
+    Merges modern 'thoughts' with legacy 'session_summaries' for continuity.
+    """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
+            # Phase 4.0: Hybrid UNION query
             cur.execute(
-                "SELECT role, content, created_at FROM thoughts WHERE session_id = %s ORDER BY created_at ASC",
-                (session_id,)
+                """
+                WITH modern AS (
+                    SELECT role, content, created_at FROM thoughts WHERE session_id = %s
+                ),
+                legacy AS (
+                    SELECT 
+                        'assistant' as role, 
+                        '[Legacy Summary] ' || summary as content, 
+                        created_at 
+                    FROM session_summaries 
+                    WHERE session_id = %s
+                ),
+                combined AS (
+                    SELECT * FROM modern
+                    UNION ALL
+                    SELECT * FROM legacy
+                )
+                SELECT role, content, created_at FROM combined ORDER BY created_at ASC
+                """,
+                (session_id, session_id)
             )
             rows = cur.fetchall()
-            return [{"role": r[0], "content": r[1], "timestamp": r[2].isoformat()} for r in rows]
+            return [
+                {
+                    "role": r[0], 
+                    "content": r[1], 
+                    "timestamp": r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2])
+                } for r in rows
+            ]

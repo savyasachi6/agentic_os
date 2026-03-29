@@ -23,7 +23,7 @@ sys.modules.setdefault("pgvector", MagicMock())
 sys.modules.setdefault("pgvector.psycopg2", MagicMock())
 sys.modules.setdefault("ollama", MagicMock())
 
-import agent_core.cache as cache_module
+import core.cache as cache_module
 try:
     from db.cache import FractalCache, SemanticCache
 except ImportError:

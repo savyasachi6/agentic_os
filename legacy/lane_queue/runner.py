@@ -10,8 +10,8 @@ from typing import Optional, Callable, Dict, Any
 
 import httpx
 
-from agent_core.config import settings
-from agent_core.llm.client import LLMClient
+from core.settings import settings
+from core.llm.client import LLMClient
 from agent_core.security.jwt_auth import create_token
 from agent_core.security.rbac import get_required_scope_for_tool
 from .store import CommandStore

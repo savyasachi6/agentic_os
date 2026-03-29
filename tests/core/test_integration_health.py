@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import patch, MagicMock
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.graph.state import AgentState
-from agent_core.rag.retriever import SkillRetriever
-from agent_core.rag.vector_store import VectorStore
+from agents.orchestrator import OrchestratorAgent
+from agents.graph.state import AgentState
+from rag.retriever import SkillRetriever
+from rag.vector_store import VectorStore
 
 @pytest.mark.asyncio
 async def test_system_of_systems_health():
@@ -65,7 +65,7 @@ async def test_system_of_systems_health():
         # Mock for queued reason call (if used)
         llm_instance.reason = MagicMock(return_value="Thought: I am healthy.\nAction: finish(status='integrated')")
         
-        agent = CoordinatorAgent()
+        agent = OrchestratorAgent()
         # Manually override the llm and state to match our mocks/instances
         agent.llm = llm_instance
         agent.state = state

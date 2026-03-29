@@ -10,7 +10,7 @@ sys.modules["psycopg2.pool"] = MagicMock()
 sys.modules["psycopg2.extras"] = MagicMock()
 sys.modules["db.connection"] = MagicMock()
 # Mock the entire agent_core and rag to avoid deep dependency issues
-sys.modules["agent_core.config"] = MagicMock()
+sys.modules["core.settings"] = MagicMock()
 sys.modules["agent_core.utils.auth"] = MagicMock()
 sys.modules["llm_router.router"] = MagicMock()
 # Mock the specific KeycloakManager if needed by server.py at import time

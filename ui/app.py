@@ -10,6 +10,7 @@ import os
 import sys
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 # Root calculation
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,29 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Phase 3.9: Senior UI Polish - CSS Injection for Alignment
+st.markdown("""
+<style>
+    /* Align icons in sidebar buttons */
+    section[data-testid="stSidebar"] button[kind="secondary"], 
+    section[data-testid="stSidebar"] button[kind="primary"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+    }
+    /* Ensure emoji doesn't float higher than text */
+    section[data-testid="stSidebar"] button div[data-testid="stMarkdownContainer"] p {
+        margin-bottom: 0 !important;
+        line-height: 1.2 !important;
+        display: flex;
+        align-items: center;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Configuration constants — override via env vars in Docker
 CORE_API_URL = os.environ.get("CORE_API_URL", "http://localhost:8000")
@@ -45,6 +69,22 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  # List of {"role": "...", "content": "...", "type": "..."}
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
+if "last_rl_metadata" not in st.session_state:
+    st.session_state.last_rl_metadata = {}
+
+def force_scroll_bottom():
+    """Inject JavaScript to scroll the main container to the bottom."""
+    components.html(
+        """
+        <script>
+            var body = window.parent.document.querySelector(".main");
+            if (body) {
+                body.scrollTop = body.scrollHeight;
+            }
+        </script>
+        """,
+        height=0,
+    )
 
 # ---------------------------------------------------------------------------
 # Database Utilities for Skill Explorer
@@ -97,8 +137,11 @@ def get_inheritance(normalized_name: str):
 # ---------------------------------------------------------------------------
 # API Utilities
 # ---------------------------------------------------------------------------
-def load_db_history(session_id: str):
-    """Fetch the permanent history from pgvector and populate st.session_state."""
+def load_db_history(session_id: str, force_refresh: bool = False):
+    """Fetch the permanent history from pgvector and update st.session_state."""
+    if not force_refresh and st.session_state.chat_history:
+        return True # Avoid redundant DB hits if we already have it in memory
+        
     try:
         response = requests.get(f"{CORE_API_URL}/chat/{session_id}/history", timeout=5)
         if response.status_code == 200:
@@ -121,7 +164,8 @@ def load_db_history(session_id: str):
                         st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "observation"})
                 return True
     except Exception as e:
-        st.error(f"Failed to load history: {e}")
+        st.error(f"Failed to load history for session {session_id[:8]}...: {e}")
+        print(f"Failed to load history: {e}")
     return False
 
 def load_sessions():
@@ -261,6 +305,9 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     error_msg = f"Agent Error: {content}"
                     st.session_state.chat_history.append({"role": "assistant", "content": error_msg, "type": "message"})
                     break
+                
+                # After each streaming chunk, we force scroll if needed
+                force_scroll_bottom()
 
     except Exception as e:
         error_msg = f"WebSocket Connection Error: {e}\n\n(Is the Agentic OS backend running?)"
@@ -282,38 +329,82 @@ with st.sidebar:
     st.markdown("---")
     
     if page == "💬 Terminal":
-        st.subheader("Session Management")
+        st.subheader("Conversations")
         
+        # Phase 3.5: Senior UI Polish - Premium Navigation
+        if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+            st.session_state.session_id = str(uuid.uuid4())
+            st.session_state.chat_history = []
+            st.rerun()
+
         available_sessions = load_sessions()
         
         if available_sessions:
-            session_options = {s["session_id"]: f"{str(s.get('first_message', 'No message'))[:40]}... ({str(s.get('created_at', '')).split(' ')[0]})" for s in available_sessions}
+            # Add Search Box
+            search_term = st.text_input("🔍 Search conversations", "", key="sess_search", label_visibility="collapsed")
             
-            selected_session = st.selectbox(
-                "Select Past Session", 
-                options=[""] + list(session_options.keys()),
-                format_func=lambda x: session_options.get(x, "--- Select a session ---"),
-                index=0
-            )
+            # Filter and Grouping Logic
+            filtered = [s for s in available_sessions if search_term.lower() in s.get("first_message", "").lower()]
             
-            session_input = st.text_input("Session ID (or leave blank to use dropdown)", value=selected_session or st.session_state.session_id)
-        else:
-            session_input = st.text_input("Session ID", value=st.session_state.session_id)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Load History", use_container_width=True):
-                if session_input:
-                    st.session_state.session_id = session_input
-                    if load_db_history(session_input):
-                        st.success("History hydrated!")
+            # Phase 3.6: Ensure Active Session is always present
+            current_sid = st.session_state.session_id
+            if current_sid not in [s["session_id"] for s in filtered]:
+                # Temporary entry for brand new session not yet committed/indexed
+                topic = "Current Active Chat"
+                if st.session_state.chat_history:
+                    # Try to use the first message as topic if available in memory
+                    first = [m for m in st.session_state.chat_history if m["role"] == "user"]
+                    if first: topic = first[0]["content"]
+                
+                filtered.insert(0, {"session_id": current_sid, "first_message": topic, "created_at": datetime.now().isoformat()})
+
+            from datetime import datetime
+            today = datetime.now().date()
+            
+            groups = {"Active": [], "Today": [], "Yesterday": [], "Previous Days": []}
+            for s in filtered:
+                try:
+                    sid = s["session_id"]
+                    if sid == st.session_state.session_id:
+                        groups["Active"].append(s)
+                        continue
+                        
+                    dt_str = s.get("created_at", "").replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(dt_str).date()
+                    if dt == today:
+                        groups["Today"].append(s)
+                    elif (today - dt).days == 1:
+                        groups["Yesterday"].append(s)
                     else:
-                        st.warning("No history found.")
-        with col2:
-            if st.button("New Session", use_container_width=True):
-                st.session_state.session_id = str(uuid.uuid4())
-                st.session_state.chat_history = []
-                st.rerun()
+                        groups["Previous Days"].append(s)
+                except:
+                    groups["Previous Days"].append(s)
+
+            for group_name, g_sessions in groups.items():
+                if g_sessions:
+                    st.caption(group_name)
+                    for s in g_sessions:
+                        sid = s["session_id"]
+                        # Phase 3.8: Clean label and icon logic
+                        msg = s.get("first_message", "Untitled") or "Untitled"
+                        msg = msg.replace("\n", " ").strip() # Flatten multi-line titles
+                        
+                        label = f"{msg[:32]}..." if len(msg) > 32 else msg
+                        
+                        # Use different icons based on status/group
+                        icon = "💬" if sid == st.session_state.session_id else "🕒"
+                        if group_name == "Active": icon = "✨"
+                        
+                        is_active = (sid == st.session_state.session_id)
+                        
+                        # Senior Component: Standardized button height
+                        if st.button(f"{icon} {label}", key=f"sess_{sid}", use_container_width=True, 
+                                     type="primary" if is_active else "secondary"):
+                            st.session_state.session_id = sid
+                            load_db_history(sid, force_refresh=True)
+                            st.rerun()
+        else:
+            st.info("No past conversations. Your first message will appear here.")
     
     elif page == "🧩 Skill Explorer": # Skill Explorer Sidebar
         st.subheader("Knowledge Stats")
@@ -326,7 +417,7 @@ with st.sidebar:
             with st.spinner("Indexing..."):
                 import subprocess
                 # Run the indexer from core
-                result = subprocess.run([sys.executable, os.path.join(_ROOT, "main.py"), "index"], capture_output=True, text=True)
+                result = subprocess.run([sys.executable, os.path.join(_ROOT, "gateway", "main.py"), "index"], capture_output=True, text=True)
                 if result.returncode == 0:
                     st.success("Synced!")
                     st.rerun()
@@ -349,7 +440,12 @@ with st.sidebar:
 
 # Main Interface Logic
 if page == "💬 Terminal":
-    st.header("Terminal")
+    # Phase 3.6: Self-Hydrating History Layer
+    # If history is empty but SID exists, try to recover from DB (handling page refreshes)
+    if not st.session_state.chat_history:
+        load_db_history(st.session_state.session_id)
+
+    st.header("Workspace Terminal")
     
     # Render existing chat history
     i = 0
@@ -368,11 +464,16 @@ if page == "💬 Terminal":
                     depth = metadata.get("depth", 0)
                     cid = metadata.get("chain_id", 0)
                     
-                    c1, c2, c3 = st.columns([0.05, 0.05, 0.9])
+                    c1, c2, c3, c4 = st.columns([0.05, 0.05, 0.2, 0.7])
                     if c1.button("👍", key=f"up_{qh}"):
                         submit_feedback(qh, arm, depth, 1, chain_id=cid, metrics=metadata)
                     if c2.button("👎", key=f"down_{qh}"):
                         submit_feedback(qh, arm, depth, -1, chain_id=cid, metrics=metadata)
+                    
+                    # Show the strategy info
+                    arm_names = {0: "Collapsed", 1: "Collapsed (Spec)", 2: "Standard", 3: "Standard (Spec)", 4: "Multi-hop", 5: "Multi-hop (Spec)", 6: "Fractal", 7: "Fractal (Spec)"}
+                    strategy_label = arm_names.get(arm, f"Arm {arm}")
+                    c3.caption(f"Strategy: **{strategy_label}**")
             i += 1
                         
         elif msg["type"] == "thought":
@@ -400,6 +501,7 @@ if page == "💬 Terminal":
         st.session_state.chat_history.append({"role": "user", "content": prompt, "type": "message"})
         with st.chat_message("user"):
             st.markdown(prompt)
+            force_scroll_bottom()
             
         st.session_state.is_processing = True
         with st.chat_message("assistant"):

@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock
-from agent_core.llm_router.backends.ollama_api import OllamaBackend
+from core.llm.backends.ollama_api import OllamaBackend
 
 @pytest.mark.asyncio
 async def test_ollama_backend_generate_batch():

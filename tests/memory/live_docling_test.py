@@ -8,8 +8,8 @@ import sys
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from agent_core.rag.docling_parser import DoclingParser
-from agent_core.rag.docling_chunker import DoclingChunker
+from rag.docling_parser import DoclingParser
+from rag.docling_chunker import DoclingChunker
 
 def run_live_test():
     sample_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "sample_doc.md"))

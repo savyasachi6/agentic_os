@@ -1,34 +1,30 @@
-"""
-FastAPI server for the Agent OS.
-
-Endpoints:
-  GET  /health          — readiness check
-  WS   /chat            — streaming ReAct chat with interrupt support
-  POST /embed           — embed arbitrary text
-  POST /skills/reindex  — trigger skill re-indexing
-"""
-
-import json
-import asyncio
+# server.py
 import os
 import sys
+
+from core.settings import settings
+import json
+import asyncio
 from typing import Optional
 
-# Ensure project root is in sys.path
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if PROJECT_ROOT not in sys.path:
-    sys.path.append(PROJECT_ROOT)
-
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Request, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.rag.vector_store import VectorStore
-from agent_core.rag.indexer import SkillIndexer
-from agent_core.llm.router import LLMRouter
-from rl_router.server import create_app as create_rl_app
-from agent_core.config import settings
-from agent_core.utils.auth import KeycloakManager
+from dotenv import load_dotenv
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+load_dotenv(os.path.join(root_dir, ".env"))
+
+from agents.orchestrator import OrchestratorAgent
+from db.connection import init_db_pool
+from rag.vector_store import VectorStore
+from rag.indexer import SkillIndexer
+from core.llm.router import LLMRouter
+from db.queries.thoughts import log_thought
 
 app = FastAPI(
     title="Agent OS",
@@ -36,44 +32,46 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Mount the RL Router sub-app
-app.mount("/rl", create_rl_app())
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Store active sessions: session_id → CoordinatorAgent
-_sessions: dict[str, CoordinatorAgent] = {}
+_sessions: dict[str, OrchestratorAgent] = {}
+_worker_tasks: list[asyncio.Task] = []
 
 
-# ---------------------------------------------------------------------------
-# Lifecycle
-# ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
-    # Note: DB Migration/Init is handled by entry points or externally
-    # Start the centralized LLM Router
+    init_db_pool()
     router = LLMRouter.get_instance()
     router.start()
-    print("[server] Agent OS ready (LLM Router started). Specialist workers should be running via scripts/worker_manager.py")
+    print("[server] Agent OS ready (LLM Router started).")
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    # Stop the LLM Router
+    for task in _worker_tasks:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    _worker_tasks.clear()
+
     router = LLMRouter.get_instance()
     router.stop()
     print("[server] Agent OS shutting down.")
 
 
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "agent-os"}
 
 
-# ---------------------------------------------------------------------------
-# Embed
-# ---------------------------------------------------------------------------
 class EmbedRequest(BaseModel):
     text: str
     model: Optional[str] = None
@@ -87,8 +85,8 @@ class EmbedResponse(BaseModel):
 
 @app.post("/embed", response_model=EmbedResponse)
 async def embed(req: EmbedRequest):
-    vs = VectorStore(embed_model=req.model)
-    vec, _ = await vs.generate_embedding_async(req.text)
+    vs = VectorStore(req.model)
+    vec, _ = vs.generate_embedding(req.text)
     return EmbedResponse(
         embedding=vec,
         model=vs.embed_model,
@@ -96,15 +94,6 @@ async def embed(req: EmbedRequest):
     )
 
 
-@app.get("/health")
-async def health_check():
-    """Health check for Docker and status monitoring."""
-    return {"status": "ok", "version": "1.1.0-stabilized"}
-
-
-# ---------------------------------------------------------------------------
-# Skills reindex
-# ---------------------------------------------------------------------------
 class ReindexResponse(BaseModel):
     message: str
     skills_dir: str
@@ -113,174 +102,67 @@ class ReindexResponse(BaseModel):
 @app.post("/skills/reindex", response_model=ReindexResponse)
 async def reindex_skills():
     indexer = SkillIndexer()
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, indexer.index_all)
+    indexer.index_all()
     return ReindexResponse(
         message="Re-indexing complete.",
         skills_dir=indexer.skills_dir,
     )
 
 
-# ---------------------------------------------------------------------------
-# Router Stats Proxy
-# ---------------------------------------------------------------------------
-@app.get("/router/stats")
-async def get_router_stats():
-    """Proxy to the internally mounted RL Router's debug stats."""
+@app.get("/rl/bandit/stats")
+async def get_rl_stats():
+    import httpx
+
     try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            # Point to the new hardened stats endpoint
-            resp = await client.get(f"http://localhost:8000/rl/bandit/stats", timeout=5)
+        async with httpx.AsyncClient(timeout=settings.rl_router_timeout) as client:
+            resp = await client.get(f"{settings.rl_router_url}/bandit/stats")
+            resp.raise_for_status()
             return resp.json()
     except Exception as e:
-        return {"error": f"Failed to reach RL Router: {e}"}
+        return {"status": "offline", "error": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# Chat
-# ---------------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    model: Optional[str] = None
+@app.post("/api/feedback/human")
+async def submit_human_feedback(payload: dict):
+    import httpx
 
-class ChatResponse(BaseModel):
-    session_id: str
-    response: str
-    meta: Optional[dict] = None
-
-@app.post("/chat", response_model=ChatResponse)
-async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.verify_token)):
-    """Simple POST endpoint for one-shot chat with Keycloak RBAC."""
-    session_id = req.session_id
-    user_id = auth_data.get("user_id")
-    user_roles = auth_data.get("roles", [])
-    
-    if session_id and session_id in _sessions:
-        agent = _sessions[session_id]
-    else:
-        agent = CoordinatorAgent(session_id=session_id)
-        session_id = agent.session_id
-        _sessions[session_id] = agent
-    
-    # Inject auth context into AgentState
-    agent.state["user_id"] = user_id
-    agent.state["user_roles"] = user_roles
-    
-    response = await agent.run_turn(req.message)
-    meta = agent.last_run_metrics.get("rl_metadata")
-
-    return ChatResponse(session_id=session_id, response=response, meta=meta)
-
-
-@app.get("/chat/sessions")
-async def get_all_sessions():
-    """Retrieve all available chat sessions."""
-    vs = VectorStore()
-    sessions = await vs.get_all_sessions_async()
-    return {"status": "success", "sessions": sessions}
+    try:
+        async with httpx.AsyncClient(timeout=settings.rl_router_timeout) as client:
+            resp = await client.post(
+                f"{settings.rl_router_url}/feedback",
+                json=payload,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/chat/{session_id}/history")
 async def get_chat_history(session_id: str):
-    """Retrieve permanent chat history from pgvector."""
-    vs = VectorStore()
-    history = await vs.get_session_history_async(session_id)
-    return {"status": "success", "session_id": session_id, "history": history}
+    try:
+        vs = VectorStore()
+        history = vs.get_session_history(session_id)
+        for entry in history:
+            if "created_at" in entry and hasattr(entry["created_at"], "isoformat"):
+                entry["created_at"] = entry["created_at"].isoformat()
+        return {"status": "success", "session_id": session_id, "history": history}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# Feedback
-# ---------------------------------------------------------------------------
-class FeedbackProxyRequest(BaseModel):
-    session_id: str
-    query_hash_rl: str
-    arm_index: int
-    user_feedback: int  # +1 or -1
-    depth: int = 0
-
-class HumanFeedbackRequest(BaseModel):
-    chain_id: int
-    node_id: Optional[int] = None
-    arm: int
-    feedback: int
-    query_hash_rl: str
-    depth: int = 0
-    # Optional metrics that the UI might send back from metadata
-    step_count: Optional[int] = None
-    invalid_call_count: Optional[int] = None
-
-@app.post("/api/feedback/human")
-async def handle_human_feedback(req: HumanFeedbackRequest):
-    """Specific RLHF endpoint for human thumbs-up/down feedback."""
-    step_count = req.step_count
-    invalid_calls = req.invalid_call_count
-    
-    # Try to lookup metrics from active sessions if not provided
-    if step_count is None or invalid_calls is None:
-        for agent in _sessions.values():
-            if agent.chain_id == req.chain_id:
-                metrics = agent.last_run_metrics
-                step_count = step_count or metrics.get("step_count", 1)
-                invalid_calls = invalid_calls or metrics.get("invalid_call_count", 0)
-                break
-        
-        # Fallback to defaults (TODO: Fetch from TreeStore for non-active sessions)
-        step_count = step_count if step_count is not None else 1
-        invalid_calls = invalid_calls if invalid_calls is not None else 0
-
-    from agent_core.rag.retrieval.rl_client import RLRoutingClient
-    rl_client = RLRoutingClient()
-    
-    result = await rl_client.submit_feedback(
-        query_hash=req.query_hash_rl,
-        arm_index=req.arm,
-        success=True,
-        step_count=step_count,
-        invalid_call_count=invalid_calls,
-        user_feedback=float(req.feedback),
-        depth_used=req.depth
-    )
-    
-    print(f"[RLHF] role=RLHF chain_id={req.chain_id} arm={req.arm} feedback={req.feedback}")
-    return result
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    try:
+        vs = VectorStore()
+        sessions = await vs.get_all_sessions_async()
+        return {"status": "success", "sessions": sessions}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
-@app.post("/rl/chat/feedback")
-async def chat_feedback(req: FeedbackProxyRequest):
-    """Bridge UI feedback to the RL Router."""
-    from agent_core.rag.retrieval.rl_client import RLRoutingClient
-    rl_client = RLRoutingClient()
-    
-    # We simplified it here: the UI transmits the RL metadata it received during streaming.
-    result = await rl_client.submit_feedback(
-        query_hash=req.query_hash_rl,
-        arm_index=req.arm_index,
-        success=True, # User feedback implies they saw the answer
-        latency_ms=0, # Latency not applicable for delayed user feedback
-        user_feedback=req.user_feedback,
-        depth_used=req.depth
-    )
-    return result
-
-
-# ---------------------------------------------------------------------------
-# WebSocket chat
-# ---------------------------------------------------------------------------
 @app.websocket("/ws")
 async def chat_ws(ws: WebSocket):
-    """
-    Streaming ReAct chat over WebSocket.
-
-    Client sends JSON: {"message": "...", "session_id": "..." (optional)}
-    Server sends JSON frames:
-      {"type": "token", "content": "..."}       — streaming tokens
-      {"type": "thought", "content": "..."}     — internal reasoning step
-      {"type": "observation", "content": "..."}  — tool result
-      {"type": "final", "content": "..."}       — complete response
-      {"type": "error", "content": "..."}        — error
-    """
     await ws.accept()
     session_id = None
     agent = None
@@ -289,63 +171,86 @@ async def chat_ws(ws: WebSocket):
         while True:
             raw = await ws.receive_text()
             data = json.loads(raw)
-            user_msg = data.get("message", "")
+
+            user_msg = data.get("message", "").strip()
             requested_session = data.get("session_id")
 
             if not user_msg:
                 await ws.send_json({"type": "error", "content": "Empty message."})
                 continue
 
-            # Resolve or create session
             if requested_session and requested_session in _sessions:
                 agent = _sessions[requested_session]
                 session_id = requested_session
             elif requested_session:
-                agent = CoordinatorAgent(session_id=requested_session)
+                agent = OrchestratorAgent(session_id=requested_session)
                 _sessions[requested_session] = agent
                 session_id = requested_session
             elif agent is None:
-                agent = CoordinatorAgent()
-                session_id = agent.session_id
+                agent = OrchestratorAgent()
+                session_id = agent.state.session_id
                 _sessions[session_id] = agent
 
             await ws.send_json({"type": "session", "session_id": session_id})
-
-            # Define a callback for streaming (if supported by the agent)
-            async def ws_callback(event_type: str, content: str):
+            
+            # Phase 3.5: Log user message as background task to ensure zero latency
+            async def _bg_log_thought(sid: str, role: str, msg: str):
                 try:
-                    await ws.send_json({"type": event_type, "content": content})
-                except Exception:
-                    pass
+                    vs = VectorStore()
+                    vec, _ = vs.generate_embedding(msg)
+                    log_thought(sid, role, msg, vec)
+                except Exception as e:
+                    print(f"[gateway] Background log failure ({role}): {e}")
 
-            # Background task to send keepalives (pings) while the agent is running
-            # This prevents the websocket from closing during long LLM generations
-            async def keepalive():
-                while True:
-                    await asyncio.sleep(20)
-                    try:
-                        await ws.send_json({"type": "ping", "content": "keepalive"})
-                    except:
-                        break
+            asyncio.create_task(_bg_log_thought(session_id, "user", user_msg))
 
-            keepalive_task = asyncio.create_task(keepalive())
+            from core.message_bus import A2ABus
+            bus = A2ABus()
+
+            async def bus_listener(sid: str):
+                topics = ["researcher", "schema_specialist", "specialist", "tools"]
+                allowed = {
+                    "token",
+                    "thought",
+                    "observation",
+                    "rl_metadata",
+                    "status",
+                    "warning",
+                    "error",
+                }
+                try:
+                    async for msg in bus.listen_multiple(topics):
+                        if msg.get("session_id") not in (None, sid):
+                            continue
+                        if msg.get("type") in allowed:
+                            await ws.send_json(msg)
+                except Exception as e:
+                    print(f"[gateway] Bus listener error: {e}")
+
+            listener_task = asyncio.create_task(bus_listener(session_id))
 
             try:
-                # Run the ReAct turn asynchronously
-                response = await agent.run_turn(user_msg, status_callback=ws_callback)
+                async def ws_callback(event_type: str, content: str):
+                    await ws.send_json({"type": event_type, "content": content})
+
+                response = await agent.run_turn_async(
+                    user_msg,
+                    status_callback=ws_callback,
+                )
                 
-                # Send RL Metadata if available (for UI feedback buttons)
-                rl_meta = agent.last_run_metrics.get("rl_metadata")
-                if rl_meta:
-                    await ws.send_json({"type": "rl_metadata", "content": json.dumps(rl_meta)})
+                # Phase 3.5: Log assistant message in background
+                asyncio.create_task(_bg_log_thought(session_id, "assistant", response))
 
                 await ws.send_json({"type": "final", "content": response})
             finally:
-                keepalive_task.cancel()
+                listener_task.cancel()
+                try:
+                    await listener_task
+                except asyncio.CancelledError:
+                    pass
 
     except WebSocketDisconnect:
-        # Standard behavior for Streamlit UI (closes after each turn)
-        pass
+        print(f"[server] WebSocket disconnected (session: {session_id})")
     except Exception as e:
         try:
             await ws.send_json({"type": "error", "content": str(e)})

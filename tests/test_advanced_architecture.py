@@ -11,9 +11,9 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import HumanMessage, AIMessage
 
-from agent_core.agents.core.coordinator import CoordinatorAgent, BridgeAgent
-from agent_core.agents.a2a_bus import A2ABus
-from agent_core.agent_types import AgentRole, Intent
+from agents.orchestrator import OrchestratorAgent, BridgeAgent
+from agents.a2a_bus import A2ABus
+from core.agent_types import AgentRole, Intent
 
 @pytest.mark.asyncio
 async def test_a2a_bus_transmission():
@@ -46,7 +46,7 @@ async def test_coordinator_graph_execution_mocked():
     mock_llm = MagicMock()
     mock_llm.generate_async = AsyncMock(return_value="Thought: I should use the research agent. Action: research(\"test query\")")
     
-    coordinator = CoordinatorAgent(llm_client=mock_llm)
+    coordinator = OrchestratorAgent(llm_client=mock_llm)
     mock_llm.generate_async.side_effect = [
         "Thought: I should use the research agent. Action: research(\"test query\")",
         "Final Response: Reasearch shows the project is on track."
@@ -59,8 +59,8 @@ async def test_coordinator_graph_execution_mocked():
     
     # We also need to mock the classify_intent call in both places where it is imported
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("agents.coordinator.classify_intent", lambda x: Intent.RAG_LOOKUP)
-        mp.setattr("agent_core.graph.coordinator_graph.classify_intent", lambda x: Intent.RAG_LOOKUP)
+        mp.setattr("agents.orchestrator.classify_intent", lambda x: Intent.RAG_LOOKUP)
+        mp.setattr("agents.graph.coordinator_graph.classify_intent", lambda x: Intent.RAG_LOOKUP)
         
         response = await coordinator.run_turn("Tell me about the project.")
         

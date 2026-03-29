@@ -13,8 +13,8 @@ from datetime import datetime
 
 from db.connection import get_db_connection
 from db.models import Chain, Node
-from agent_core.agent_types import AgentRole, NodeType, NodeStatus
-from agent_core.rag.vector_store import VectorStore
+from core.agent_types import AgentRole, NodeType, NodeStatus
+from rag.vector_store import VectorStore
 
 logger = logging.getLogger("agentos.db.queries")
 
@@ -80,14 +80,14 @@ class TreeStore:
                 cur.execute(
                     """
                     INSERT INTO nodes (
-                        chain_id, parent_id, agent_role, type, status, 
+                        chain_id, session_id, parent_id, agent_role, type, status, 
                         priority, planned_order, content, payload, result, embedding, deadline_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id, created_at, updated_at;
                     """,
                     (
-                        node.chain_id, node.parent_id, node.agent_role.value, node.type.value, node.status.value,
+                        node.chain_id, node.session_id, node.parent_id, node.agent_role.value, node.type.value, node.status.value,
                         node.priority, node.planned_order, node.content, 
                         json.dumps(node.payload) if node.payload else '{}',
                         json.dumps(node.result) if node.result else None,
@@ -174,7 +174,7 @@ class TreeStore:
                 conn.commit()
                 
                 return Node(
-                    id=row["id"], chain_id=row["chain_id"], parent_id=row["parent_id"],
+                    id=row["id"], chain_id=row["chain_id"], session_id=row["session_id"], parent_id=row["parent_id"],
                     agent_role=AgentRole(row["agent_role"]), type=NodeType(row["type"]),
                     status=NodeStatus(row["status"]), priority=row["priority"],
                     planned_order=row["planned_order"], content=row["content"],
@@ -196,7 +196,7 @@ class TreeStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, chain_id, parent_id, agent_role, type, status, priority, 
+                    SELECT id, chain_id, session_id, parent_id, agent_role, type, status, priority, 
                            planned_order, content, payload, result, embedding, deadline_at, created_at, updated_at
                     FROM nodes
                     WHERE id = %s;
@@ -208,12 +208,12 @@ class TreeStore:
                     return None
                     
                 return Node(
-                    id=row[0], chain_id=row[1], parent_id=row[2], agent_role=AgentRole(row[3]),
-                    type=NodeType(row[4]), status=NodeStatus(row[5]), priority=row[6],
-                    planned_order=row[7], content=row[8], 
-                    payload=row[9] if isinstance(row[9], dict) else json.loads(row[9] or '{}'),
-                    result=row[10] if isinstance(row[10], dict) else (json.loads(row[10]) if row[10] else None),
-                    embedding=row[11], deadline_at=row[12], created_at=row[13], updated_at=row[14]
+                    id=row[0], chain_id=row[1], session_id=row[2], parent_id=row[3], agent_role=AgentRole(row[4]),
+                    type=NodeType(row[5]), status=NodeStatus(row[6]), priority=row[7],
+                    planned_order=row[8], content=row[9], 
+                    payload=row[10] if isinstance(row[10], dict) else json.loads(row[10] or '{}'),
+                    result=row[11] if isinstance(row[11], dict) else (json.loads(row[11]) if row[11] else None),
+                    embedding=row[12], deadline_at=row[13], created_at=row[14], updated_at=row[15]
                 )
 
     async def get_node_by_id_async(self, node_id: int) -> Optional[Node]:

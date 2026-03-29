@@ -1,29 +1,31 @@
-FROM python:3.11-slim
+FROM python:3.11.9-slim-bookworm
 
+RUN groupadd -g 1004 uiuser && useradd -u 1004 -g uiuser -m uiuser
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gcc curl postgresql-client && rm -rf /var/lib/apt/lists/*
 
-# Install root project dependencies first
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Install UI-specific dependencies
 COPY ui/requirements.txt ui-requirements.txt
-RUN pip install --no-cache-dir -r ui-requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r ui-requirements.txt
 
-# Copy all application code (monorepo structure)
-COPY . .
+COPY --chown=uiuser:uiuser ui/ ui/
+COPY --chown=uiuser:uiuser core/ core/
+COPY --chown=uiuser:uiuser db/ db/
+COPY --chown=uiuser:uiuser rag/ rag/
+COPY --chown=uiuser:uiuser entrypoint.sh .
+RUN chmod +x entrypoint.sh && chown uiuser:uiuser entrypoint.sh
 
-# Ensure all project packages are importable
+RUN mkdir -p /home/uiuser/.streamlit && chown -R uiuser:uiuser /home/uiuser/.streamlit
+# Copy hardened Streamlit Config
+COPY --chown=uiuser:uiuser ui/config.toml /home/uiuser/.streamlit/config.toml
+
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
-# Expose Streamlit port
+USER uiuser
 EXPOSE 8501
 
-# Run Streamlit — we run from /app so sys.path resolution works correctly
+HEALTHCHECK --interval=10s --timeout=5s CMD curl -f http://localhost:8501 || exit 1
+ENTRYPOINT ["/bin/bash", "./entrypoint.sh"]
 CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

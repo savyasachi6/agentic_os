@@ -15,8 +15,8 @@ from psycopg2.pool import SimpleConnectionPool
 from pgvector.psycopg2 import register_vector
 import redis.asyncio as redis
 
-from agent_core.config import settings
-from agent_core.logging_config import setup_logging
+from core.settings import settings
+from core.logging_config import setup_logging
 
 logger = logging.getLogger("agentos.db")
 
@@ -59,6 +59,27 @@ def init_db_pool(
             password=password,
         )
         logger.info("DB pool initialized -> %s:%s/%s", host, port, dbname)
+    except psycopg2.OperationalError as e:
+        # Fallback for local development when 'postgres' host is not in /etc/hosts
+        if ("could not translate host name" in str(e) or "could not connect to server" in str(e)) and host != "localhost":
+            logger.warning("DNS/Connection failure for %s. Retrying with localhost...", host)
+            try:
+                _pool = SimpleConnectionPool(
+                    min_conn,
+                    max_conn,
+                    host="localhost",
+                    port=port,
+                    dbname=dbname,
+                    user=user,
+                    password=password,
+                )
+                logger.info("DB pool initialized in FALLBACK mode (localhost)")
+            except Exception as e2:
+                logger.error("Failed to initialize DB pool (even on localhost): %s", e2)
+                raise
+        else:
+            logger.error("Failed to initialize DB pool: %s", e)
+            raise
     except Exception as e:
         logger.error("Failed to initialize DB pool: %s", e)
         raise
@@ -79,6 +100,7 @@ async def get_redis() -> redis.Redis:
         _redis = redis.Redis(
             host=u.hostname or "localhost",
             port=u.port or 6379,
+            password=u.password,
             db=int(u.path.lstrip("/") or "0"),
             decode_responses=True
         )
