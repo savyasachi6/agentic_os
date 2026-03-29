@@ -16,7 +16,9 @@ MATH_PATTERNS = [
     r"\b\d+[a-z]\b",       # 2x, 5y
     r"[\+\-\*\/\^=]{2,}",  # ++, ==
     r"\bsqrt\b", r"\bsin\b", r"\bcos\b", r"\btan\b", r"\blog\b",
-    r"\bpi\b", r"\b\d+\s*[\+\-\*\/\^]\s*\d+\b" # 2 + 2, 5*5
+    r"\bpi\b", r"\b\d+\s*[\+\-\*\/\^]\s*\d+\b", # 2 + 2, 5*5
+    r"\bcalculate\b", r"\bconversion\b", r"\bconvert\b", r"\bscientific\b",
+    r"\bmath\b", r"\bequation\b", r"\bformula\b"
 ]
 CAPABILITY_KEYWORDS = [
     "what can you do", "what are you", "capabilities", "help me",
@@ -45,6 +47,7 @@ WEB_ONLY_KEYWORDS = [
 
 EXECUTION_KEYWORDS = ["run ", "execute ", "train ", "launch ", "start ", "deploy "]
 CODE_KEYWORDS = ["write code", "create script", "generate code", "implement ", "how can i create", "python script", " script", "python"]
+CONTENT_KEYWORDS = ["write a blog", "write an article", "create content", "content creation", "draft ", "write a story", "blog post", "article ", "social media post"]
 
 FILESYSTEM_PATTERNS = [
     r"[a-zA-Z]:\\", r"/mnt/[a-z]/", r"/home/\w+/",
@@ -80,6 +83,9 @@ def classify_intent(message: str) -> Intent:
 
     if any(kw in msg for kw in CODE_KEYWORDS):
         return Intent.CODE_GEN
+
+    if any(kw in msg for kw in CONTENT_KEYWORDS):
+        return Intent.CONTENT
         
     if any(kw in msg for kw in WEB_ONLY_KEYWORDS):
         return Intent.WEB_SEARCH

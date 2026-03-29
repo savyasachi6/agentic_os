@@ -234,14 +234,24 @@ class OrchestratorAgent(BaseAgent):
             if msg_type == "token":
                 # Check for start of internal reasoning tags
                 # Handles <thinking>, <|thinking|>, <action>, etc.
-                if any(tag in content for tag in ["<thinking", "<|thinking", "<action", "<|action"]):
+                # Check for start of internal reasoning tags or prefixes
+                # Handles <thinking>, <|thinking|>, <action>, etc., + Thought: / Action:
+                if any(tag in content for tag in ["<thinking", "<|thinking", "<action", "<|action", "Thought:", "Action:"]):
                     stripping_active[0] = True
                 
                 if stripping_active[0]:
-                    # Check for end of internal reasoning tags
+                    # Check for end of internal reasoning tags or newline after a prefix
+                    # prefixes are line-based usually, but we'll stick to tag-based or simple toggle
                     if any(tag in content for tag in ["/thinking>", "ing|>", "/action>", "ion|>"]):
                         stripping_active[0] = False
-                    return # Suppress this chunk
+                    
+                    # If it's a prefix, we only skip the prefix itself usually, 
+                    # but since tokens can be interleaved, we'll let the gateway handle the heavy regex 
+                    # and this callback handle the XML tags.
+                    # Actually, the gateway strip logic is safer for plain text prefixes.
+                    # We'll keep this one focused on XML-like tags to avoid over-stripping.
+                    if any(tag in content for tag in ["<thinking", "<|thinking", "<action", "<|action"]):
+                        return # Suppress this chunk
             
             # Phase 53: Also suppress 'thought' type if user requested clean output
             if msg_type == "thought":

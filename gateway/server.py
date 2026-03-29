@@ -49,6 +49,15 @@ async def startup():
     init_db_pool()
     router = LLMRouter.get_instance()
     router.start()
+    
+    # Phase 4: Discover external MCP tools
+    from tools.mcp.mcp_registry import mcp_registry
+    try:
+        await mcp_registry.initialize()
+        print(f"[server] MCP tools registered.")
+    except Exception as e:
+        print(f"[server] MCP initialization failed: {e}")
+
     print("[server] Agent OS ready (LLM Router started).")
 
 
@@ -120,6 +129,19 @@ async def get_rl_stats():
             return resp.json()
     except Exception as e:
         return {"status": "offline", "error": str(e)}
+
+
+@app.post("/rl/bandit/train")
+async def train_rl_bandit():
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.rl_router_timeout * 5) as client:
+            resp = await client.post(f"{settings.rl_router_url}/bandit/replay")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.post("/api/feedback/human")
@@ -223,6 +245,13 @@ async def chat_ws(ws: WebSocket):
                         if msg.get("session_id") not in (None, sid):
                             continue
                         if msg.get("type") in allowed:
+                            # Phase 1: Strip internal ReAct prefixes to clean up the UI stream
+                            if msg.get("type") in ("token", "thought") and isinstance(msg.get("content"), str):
+                                import re
+                                content = msg["content"]
+                                # Strip both Thought: and Action: prefixes
+                                content = re.sub(r"^(Thought|Action):\s*", "", content, flags=re.IGNORECASE)
+                                msg["content"] = content
                             await ws.send_json(msg)
                 except Exception as e:
                     print(f"[gateway] Bus listener error: {e}")

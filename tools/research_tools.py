@@ -75,21 +75,45 @@ class WebScrapeAction(BaseAction):
         url = kwargs.get("url", self.url)
         browser_url = settings.browser_ws_url or "ws://browserless:9222"
         
-        # Simple scraping fallback via httpx if browserless is not needed for JS
+        # Phase 4: Use a real headless browser via Playwright CDP if available
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                from markdownify import markdownify
-                text = markdownify(response.text).strip()
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                logger.info(f"Connecting to browserless at {browser_url}")
+                browser = await p.chromium.connect_over_cdp(browser_url)
+                context = await browser.new_context()
+                page = await context.new_page()
                 
-                if len(text) > 10000:
-                    text = text[:10000] + "\n\n... [Content Truncated]"
+                await page.goto(url, wait_until="networkidle", timeout=30000)
+                content = await page.content()
+                
+                from markdownify import markdownify
+                text = markdownify(content).strip()
+                
+                await browser.close()
+                
+                if len(text) > 15000:
+                    text = text[:15000] + "\n\n... [Content Truncated]"
                 
                 return ActionResult(success=True, data={"output": text})
         except Exception as e:
-            logger.warning(f"Direct scrape failed for {url}. Reason: {e}")
-            return ActionResult(success=False, error_trace=f"Failed to scrape URL: {str(e)}")
+            logger.warning(f"Browserless scrap failed for {url}: {e}. Falling back to httpx.")
+            
+            # Simple scraping fallback via httpx if browserless fails or JS is not needed
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    from markdownify import markdownify
+                    text = markdownify(response.text).strip()
+                    
+                    if len(text) > 10000:
+                        text = text[:10000] + "\n\n... [Content Truncated]"
+                    
+                    return ActionResult(success=True, data={"output": text})
+            except Exception as e2:
+                logger.error(f"Scrape fallback failed: {e2}")
+                return ActionResult(success=False, error_trace=f"Failed to scrape URL: {str(e2)}")
 
 # Safe Registration (Phase 62): Instantiate objects once to access their descriptions and async runners safely
 _search_tool = WebSearchAction()

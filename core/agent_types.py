@@ -24,6 +24,7 @@ class Intent(Enum):
     STATUS_QUERY     = "status_query"
     GREETING         = "greeting"
     MATH             = "math"
+    CONTENT          = "content"
 
 class RiskLevel(str, Enum):
     LOW    = "low"

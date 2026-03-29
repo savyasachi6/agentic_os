@@ -42,6 +42,7 @@ class EpisodeRepository:
         arm_index: int,
         final_utility_score: Optional[float] = None,
         reliable_pass_flag: bool = False,
+        context_vector: Optional[list[float]] = None,
     ) -> str:
         episode_id = uuid4().hex[:16]
         sql = """
@@ -50,13 +51,13 @@ class EpisodeRepository:
                 latency_ms, success, hallucination_flag, hallucination_score,
                 auditor_score, faithfulness_score, coverage_score,
                 cost_tokens, reward_scalar, reward_vector, arm_index,
-                final_utility_score, reliable_pass_flag
+                final_utility_score, reliable_pass_flag, context_vector
             ) VALUES (
                 %s, %s, %s, %s, %s,
                 %s, %s, %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s,
-                %s, %s
+                %s, %s, %s
             )
         """
         reward_dict = {
@@ -76,6 +77,7 @@ class EpisodeRepository:
                         coverage_score, cost_tokens, reward.scalar,
                         json.dumps(reward_dict), arm_index,
                         final_utility_score, reliable_pass_flag,
+                        context_vector
                     ))
             conn.close()
         except Exception:

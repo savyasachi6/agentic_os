@@ -129,7 +129,7 @@ class Settings(BaseSettings):
     embed_dim: int = 1024
     
     # Distributed RL Routing
-    rl_router_url: str = Field(default="http://rl-router:8100")
+    rl_router_url: str = Field(default="http://localhost:8100")
     rl_router_timeout: float = Field(default=5.0)
 
     # Multi-hop Context Protocol

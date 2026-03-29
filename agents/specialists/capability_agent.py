@@ -28,14 +28,27 @@ from core.tool_registry import registry
 
 logger = logging.getLogger("agentos.agents.capability")
 
+def _sanitize_sql(sql: str) -> str:
+    """Strip markdown code blocks and trailing whitespace from the SQL query."""
+    if not sql:
+        return ""
+    # Remove markdown blocks (```sql ... ``` or ``` ...)
+    sql = re.sub(r"```(sql)?", "", sql, flags=re.IGNORECASE)
+    sql = re.sub(r"```", "", sql)
+    return sql.strip().rstrip(';')
+
 def _extract_sql_fallback(text: str) -> Optional[str]:
-    """Fallback: extract a bare SQL statement from free-form LLM output."""
+    """
+    Fallback: extract a bare SELECT statement from free-form LLM output.
+    Harden: only match if it contains SELECT...FROM... structure to avoid fragments like "sc.id".
+    """
+    # Look for a pattern that resembles a complete SELECT query
     match = re.search(
-        r'(SELECT\b.+?;|SELECT\b.+?(?=\n\n|$)|INSERT\b.+?;|UPDATE\b.+?;|DELETE\b.+?;)',
+        r'(SELECT\b.+?\bFROM\b.+?)(?=\n\n|\n[A-Z][a-z]+:|$|;)',
         text, re.IGNORECASE | re.DOTALL
     )
     if match:
-        return match.group(1).strip().rstrip(';')
+        return _sanitize_sql(match.group(1))
     return None
 
 from agents.worker import AgentWorker
@@ -64,8 +77,16 @@ class CapabilityAgentWorker(AgentWorker):
             self.system_prompt = "You are the CapabilityAgent (SQL). Discover tools and schema."
 
     def _execute_query(self, query: str) -> Dict[str, Any]:
-        """Raw driver code to run the query safely."""
+        """Raw driver code to run the query safely. Only allows SELECT."""
         try:
+            query = _sanitize_sql(query)
+            if not query:
+                return {"success": False, "error": "Empty SQL query."}
+            
+            # Phase 6: Strictly allow only SELECT for the Capability Discovery agent
+            if not query.upper().startswith("SELECT"):
+                return {"success": False, "error": f"Permission denied: Non-SELECT query or fragment: '{query[:30]}...'"}
+
             with get_db_connection() as conn:
                 try:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:

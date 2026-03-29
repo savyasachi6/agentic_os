@@ -131,6 +131,7 @@ class FeedbackService:
             arm_index=request.arm_index,
             final_utility_score=final_utility,
             reliable_pass_flag=reliable_pass,
+            context_vector=context.tolist() if isinstance(context, np.ndarray) else context,
         )
 
         # 5. Persist Tool Executions

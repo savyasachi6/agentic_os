@@ -33,7 +33,16 @@ class WorkspaceManager:
     def sanitize_path(cls, path: str) -> str:
         """Prevents directory traversal and symlink attacks"""
         try:
-            target_path = pathlib.Path(cls.BASE_DIR, path).resolve(strict=False)
+            # Phase 5: Strip container-absolute prefixes if they leak through
+            clean_path = path
+            if clean_path.startswith("/app/"):
+                clean_path = clean_path[5:]
+            elif clean_path.startswith("./"):
+                clean_path = clean_path[2:]
+            elif clean_path == "/app":
+                clean_path = "."
+                
+            target_path = pathlib.Path(cls.BASE_DIR, clean_path).resolve(strict=False)
             if not target_path.is_relative_to(cls.BASE_DIR):
                 raise PermissionError(f"Agent attempted to access forbidden path: {path}")
             return str(target_path)

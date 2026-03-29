@@ -214,6 +214,23 @@ def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: in
     except Exception as e:
         st.error(f"Failed to submit feedback: {e}")
 
+def train_rl_bandit():
+    """Trigger the RL Router to re-train the bandit from historical episodes."""
+    try:
+        response = requests.post(f"{CORE_API_URL}/rl/bandit/train", timeout=60)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success":
+                st.toast(f"RL Training Complete! Trained on {data.get('trained_on', 0)} episodes. 🧠✨")
+                return True
+            else:
+                st.error(f"Training failed: {data.get('message', 'Unknown error')}")
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+    except Exception as e:
+        st.error(f"Failed to trigger RL training: {e}")
+    return False
+
 # ---------------------------------------------------------------------------
 # WebSocket Communication
 # ---------------------------------------------------------------------------
@@ -604,5 +621,16 @@ elif page == "🎯 RL Strategy":
             df_eps = pd.DataFrame(stats["episodes"])
             # Format JSON reward vector for readability
             st.dataframe(df_eps[["created_at", "query_hash", "depth_used", "speculative_used", "success", "reward_scalar", "final_utility_score"]], use_container_width=True)
+        
+        # 5. Training Control
+        st.divider()
+        st.subheader("🛠️ Strategy Maintenance")
+        c1, c2 = st.columns([0.3, 0.7])
+        if c1.button("🚀 Train RL from logged episodes", use_container_width=True):
+            with st.spinner("Replaying episodes into bandit..."):
+                if train_rl_bandit():
+                    st.success("Bandit weights updated and saved to DB.")
+                    st.rerun()
+        c2.caption("Replays up to 1000 recent episodes into the LinUCB bandit to stabilize weights and refine retrieval decision boundaries.")
     else:
         st.info("RL Router not detected or no stats available. Start the `rl_router` service.")

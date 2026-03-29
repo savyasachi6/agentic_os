@@ -37,11 +37,13 @@ class RLRoutingClient:
         query: str,
         session_id: str,
         corpus_id: str = "agentic_os_core",
+        query_embedding: Optional[list[float]] = None,
+        intent_logits: Optional[list[float]] = None,
     ) -> Dict[str, Any]:
         payload = {
             "query_text": query,
-            "query_embedding": [0.0] * 1024,
-            "intent_logits": [0.25, 0.25, 0.25, 0.25],
+            "query_embedding": query_embedding or ([0.0] * 1024),
+            "intent_logits": intent_logits or [0.25, 0.25, 0.25, 0.25],
             "difficulty_estimate": 0.5,
             "session_hallucination_rate": 0.0,
             "previous_depth_hallucinated": False,
@@ -81,12 +83,29 @@ class RLRoutingClient:
                 "raw": {"fallback": True, "error": str(e)},
             }
 
-    async def submit_feedback(self, query_hash: str, reward: float) -> None:
+    async def submit_feedback(
+        self,
+        query_hash: str,
+        reward: float,
+        arm_index: int = 2,
+        depth: int = 1,
+        speculative: bool = False,
+        latency_ms: int = 0,
+        success: bool = True,
+    ) -> None:
+        payload = {
+            "query_hash": query_hash,
+            "arm_index": arm_index,
+            "depth_used": depth,
+            "speculative_used": speculative,
+            "latency_ms": int(latency_ms),
+            "success": success,
+            "auditor_score": reward,  # Mapping scalar reward to auditor_score for utility calculation
+        }
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                await client.post(
-                    f"{self.base_url}/feedback/system",
-                    json={"query_hash_rl": query_hash, "reward": reward},
-                )
+            await self.client.post(
+                f"{self.base_url}/feedback",
+                json=payload,
+            )
         except Exception as e:
-            logger.error(f"Failed to submit systematic feedback: {e}")
+            logger.error(f"Failed to submit feedback to RL Router: {e}")

@@ -113,6 +113,9 @@ async def route_node(state: AgentState) -> AgentState:
     if intent_str == Intent.MATH.value:
         return {**state, "next_node": "execute", "action_name": "tool_caller", "action_goal": last_human}
 
+    if intent_str == Intent.CONTENT.value:
+        return {**state, "next_node": "execute", "action_name": "executor", "action_goal": last_human}
+
     if intent_str == Intent.CODE_GEN.value:
         # Code gen usually needs context, but first call can be direct
         if len(messages) <= 2:

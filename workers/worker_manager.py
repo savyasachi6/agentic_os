@@ -33,6 +33,18 @@ def main():
     from core.tool_registry import registry
     import tools.math_tools
     import tools.research_tools
+    
+    # Phase 4: Discover external MCP tools
+    from tools.mcp.mcp_registry import mcp_registry
+    import asyncio
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(mcp_registry.initialize())
+        # Keep loop for later if needed, but normally workers start their own
+    except Exception as e:
+        print(f"[WorkerManager] MCP initialization error: {e}")
+
     print(f"[WorkerManager] {len(registry.tools)} dynamically loaded tools registered.")
     
     init_db_pool()

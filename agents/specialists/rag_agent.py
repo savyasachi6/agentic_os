@@ -60,7 +60,18 @@ class ResearchAgentWorker(AgentWorker):
         ]
 
         try:
-            rl_action = await self.rl_client.get_retrieval_action(query_goal, session_id)
+            # Phase 3: Use real embeddings for RL routing decision
+            query_vec = [0.0] * 1024
+            try:
+                query_vec, _ = await self.retriever.embedder.generate_embedding_async(query_goal)
+            except Exception as e:
+                logger.warning(f"Failed to generate embedding for RL: {e}")
+
+            rl_action = await self.rl_client.get_retrieval_action(
+                query_goal, 
+                session_id,
+                query_embedding=query_vec
+            )
             current_top_k = rl_action["top_k"]
             rl_meta = {
                 "query_hash_rl": rl_action.get("query_hash_rl"),
@@ -152,6 +163,18 @@ class ResearchAgentWorker(AgentWorker):
 
                 if not action_data:
                     final_message = strip_all_reasoning(full_raw_text)
+                    # Phase 3: Submit feedback to RL bandit
+                    if rl_meta.get("query_hash_rl"):
+                        await self.rl_client.submit_feedback(
+                            query_hash=rl_meta["query_hash_rl"],
+                            reward=1.0,
+                            arm_index=rl_meta.get("action", 2),
+                            depth=i + 1,
+                            speculative=bool(rl_meta.get("speculative")),
+                            latency_ms=(time.time() - start_time) * 1000,
+                            success=True,
+                        )
+
                     await self.tree_store.update_node_status_async(
                         task.id,
                         NodeStatus.DONE,
@@ -169,6 +192,18 @@ class ResearchAgentWorker(AgentWorker):
                     final_res = action_payload
                     if isinstance(final_res, str):
                         final_res = self._cleanup_final_payload(final_res)
+
+                    # Phase 3: Submit feedback to RL bandit
+                    if rl_meta.get("query_hash_rl"):
+                        await self.rl_client.submit_feedback(
+                            query_hash=rl_meta["query_hash_rl"],
+                            reward=1.0,
+                            arm_index=rl_meta.get("action", 2),
+                            depth=i + 1,
+                            speculative=bool(rl_meta.get("speculative")),
+                            latency_ms=(time.time() - start_time) * 1000,
+                            success=True,
+                        )
 
                     await self.tree_store.update_node_status_async(
                         task.id,
@@ -247,6 +282,18 @@ class ResearchAgentWorker(AgentWorker):
                     },
                 )
                 messages.append({"role": "user", "content": obs})
+
+            # Phase 3: Submit failure feedback to RL bandit
+            if rl_meta.get("query_hash_rl"):
+                await self.rl_client.submit_feedback(
+                    query_hash=rl_meta["query_hash_rl"],
+                    reward=0.0,
+                    arm_index=rl_meta.get("action", 2),
+                    depth=max_iterations,
+                    speculative=bool(rl_meta.get("speculative")),
+                    latency_ms=(time.time() - start_time) * 1000,
+                    success=False,
+                )
 
             await self.tree_store.update_node_status_async(
                 task.id,
