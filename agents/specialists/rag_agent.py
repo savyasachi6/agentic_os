@@ -237,7 +237,7 @@ class ResearchAgentWorker(AgentWorker):
                             session_id=session_id,
                         )
                         if context_block:
-                            obs = f"Observation:\n{context_block}"
+                            obs = f"Observation (retrieved context — synthesize this into a direct answer, do NOT bullet-point the chunks):\n{context_block}"
                         else:
                             # Dynamic Phase: Provide a hint to the AI to be more conversational if no data is found
                             obs = (
@@ -257,7 +257,7 @@ class ResearchAgentWorker(AgentWorker):
                             obs = (
                                 f"Observation: Web search returned no results for '{query}'."
                                 if "no results" in out.lower()
-                                else f"Observation:\n{out}"
+                                else f"Observation (retrieved context — synthesize this into a direct answer, do NOT bullet-point the chunks):\n{out}"
                             )
                         elif getattr(res, "success", True) is False:
                             obs = (
@@ -274,7 +274,7 @@ class ResearchAgentWorker(AgentWorker):
                     try:
                         res = await registry.invoke("web_scrape", url=url)
                         if hasattr(res, "data") and "output" in res.data:
-                            obs = f"Observation:\n{res.data['output']}"
+                            obs = f"Observation (scraped page content — synthesize this into a direct answer, do NOT bullet-point the chunks):\n{res.data['output']}"
                         else:
                             obs = f"Observation: {str(res)}"
                     except Exception as e:
@@ -375,6 +375,9 @@ class ResearchAgentWorker(AgentWorker):
             "task=",
             "query=",
             "command=",
+            "answer=",
+            "result=",
+            "response=",
         ]
         for prefix in prefixes:
             if text.lower().startswith(prefix):

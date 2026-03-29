@@ -81,56 +81,7 @@ class WebSearchAction(BaseAction):
         except Exception as e:
             logger.warning(f"[web_search] DDG API failed, trying lightpanda: {e}")
 
-        # ── Strategy 3: DuckDuckGo via lightpanda CDP ────────────────────────────
-        browser_url = settings.browser_ws_url
-        ddg_url     = f"https://html.duckduckgo.com/html/?q={query}"
-
-        try:
-            from playwright.async_api import async_playwright
-            async with async_playwright() as p:
-                logger.info(f"[web_search] Connecting to lightpanda at {browser_url}")
-                browser = await p.chromium.connect_over_cdp(browser_url)
-                context = await browser.new_context()
-                page    = await context.new_page()
-                await page.goto(ddg_url, wait_until="domcontentloaded", timeout=20000)
-
-                # Extract result links and snippets from DDG HTML response
-                results_raw = await page.evaluate("""() => {
-                    const items = [];
-                    // Try different selectors for DDG Lite/HTML
-                    const selectors = ['.result', '.links_main', '.result__body'];
-                    for (const sel of selectors) {
-                        const els = document.querySelectorAll(sel);
-                        if (els.length > 0) {
-                            els.forEach(el => {
-                                const titleEl   = el.querySelector('.result__title a') || el.querySelector('a.result__a');
-                                const snippetEl = el.querySelector('.result__snippet') || el.querySelector('.result__snippet');
-                                if (titleEl) items.push({
-                                    title:   titleEl.innerText.trim(),
-                                    url:     titleEl.href,
-                                    snippet: snippetEl ? snippetEl.innerText.trim() : ''
-                                });
-                            });
-                            break;
-                        }
-                    }
-                    return items.slice(0, 8);
-                }""")
-                await browser.close()
-
-                if not results_raw:
-                    raise ValueError("No DDG results parsed from lightpanda page")
-
-                lines = [
-                    f"- **{r['title']}**\n  URL: {r['url']}\n  {r['snippet']}"
-                    for r in results_raw[:count]
-                ]
-                return ActionResult(success=True, data={"output": "\n\n".join(lines)})
-
-        except Exception as e:
-            logger.warning(f"[web_search] lightpanda CDP search failed: {e}. Trying httpx DDG.")
-
-        # ── Strategy 4: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
+        # ── Strategy 3: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
         try:
             headers = {"User-Agent": "Mozilla/5.0 (compatible; AgenticOS/2.7; +https://github.com/savyasachi6/agentic_os)"}
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers) as client:

@@ -95,15 +95,15 @@ class RLRoutingClient:
                 "raw":           data,
             }
 
-        except (httpx.ReadTimeout, httpx.ConnectTimeout) as e:
-            # Recreate client — stale socket or server was slow
+        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
+            # Recreate client — stale socket, service restarted, or connection refused
             try:
                 await self.client.aclose()
             except Exception:
                 pass
-            self.client = self._make_client()   # FIX: actually recreate, not just close
+            self.client = self._make_client()
             logger.warning(
-                "RL Router timeout (%s). Falling back to default depth. Client recreated.", repr(e)
+                "RL Router connection/read failure (%s). Falling back to default depth. Client recreated.", repr(e)
             )
             return self._default_fallback(str(e))
 
