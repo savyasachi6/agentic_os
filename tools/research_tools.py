@@ -17,49 +17,117 @@ logger = logging.getLogger("agentos.tools.research")
 
 class WebSearchAction(BaseAction):
     name: str = "web_search"
-    description: str = "Search the live web for real-time news, headlines, and data using Brave Search."
+    description: str = (
+        "Search the live web for real-time news, headlines, and data. "
+        "Uses DuckDuckGo (no API key required). Falls back to httpx if browser is unavailable."
+    )
     parameters: str = "query: str, count: int (default: 5)"
-    
+
     query: str = Field(default="", description="The search query string.")
     count: int = Field(default=5, description="Number of results to retrieve.")
 
     def run(self) -> str:
-        # Note: This is a synchronous call wrapped for the registry.
-        # RAGAgentWorker should call .run_action to handle async tools.
         return "web_search requires run_async"
 
     async def run_async(self, **kwargs) -> ActionResult:
-        query = kwargs.get("query", self.query)
-        count = kwargs.get("count", self.count)
-        
-        api_key = settings.brave_search_api_key
-        if not api_key:
-            return ActionResult(success=False, error_trace="Brave Search API key is missing. Set BRAVE_SEARCH_API_KEY.")
+        query   = kwargs.get("query", self.query)
+        count   = kwargs.get("count", self.count)
 
-        # Strip action tags if passed by mistake
         if isinstance(query, str):
             query = query.replace("<action>", "").replace("</action>", "").strip()
 
-        url = f"https://api.search.brave.com/res/v1/web/search?q={query}&count={count}"
-        headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
-        
+        # ── Strategy 1: Brave Search API (if key is configured) ─────────────────
+        api_key = settings.brave_search_api_key
+        if api_key:
+            try:
+                url     = f"https://api.search.brave.com/res/v1/web/search?q={query}&count={count}"
+                headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(url, headers=headers)
+                    resp.raise_for_status()
+                    data    = resp.json()
+                    results = [
+                        f"- **{r['title']}**\n  URL: {r['url']}\n  {r.get('description','')}"
+                        for r in data.get("web", {}).get("results", [])
+                    ]
+                    if results:
+                        return ActionResult(success=True, data={"output": "\n\n".join(results[:count])})
+            except Exception as e:
+                logger.warning(f"Brave Search failed, falling back to DuckDuckGo: {e}")
+
+        # ── Strategy 2: DuckDuckGo via lightpanda CDP ────────────────────────────
+        browser_url = settings.browser_ws_url
+        ddg_url     = f"https://html.duckduckgo.com/html/?q={query}"
+
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                
-                results = []
-                for result in data.get("web", {}).get("results", []):
-                    results.append(f"- **{result['title']}**\n  URL: {result['url']}\n  Snippet: {result['description']}")
-                
-                if not results:
-                    return ActionResult(success=True, data={"output": f"No results found for query: {query}"})
-                
-                return ActionResult(success=True, data={"output": "\n\n".join(results)})
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                logger.info(f"[web_search] Connecting to lightpanda at {browser_url}")
+                browser = await p.chromium.connect_over_cdp(browser_url)
+                context = await browser.new_context()
+                page    = await context.new_page()
+                await page.goto(ddg_url, wait_until="domcontentloaded", timeout=20000)
+
+                # Extract result links and snippets from DDG HTML response
+                results_raw = await page.evaluate("""() => {
+                    const items = [];
+                    document.querySelectorAll('.result').forEach(el => {
+                        const titleEl   = el.querySelector('.result__title a');
+                        const snippetEl = el.querySelector('.result__snippet');
+                        const urlEl     = el.querySelector('.result__url');
+                        if (titleEl) items.push({
+                            title:   titleEl.innerText.trim(),
+                            url:     titleEl.href || (urlEl ? urlEl.innerText.trim() : ''),
+                            snippet: snippetEl ? snippetEl.innerText.trim() : ''
+                        });
+                    });
+                    return items.slice(0, 8);
+                }""")
+                await browser.close()
+
+                if not results_raw:
+                    raise ValueError("No DDG results parsed from lightpanda page")
+
+                lines = [
+                    f"- **{r['title']}**\n  URL: {r['url']}\n  {r['snippet']}"
+                    for r in results_raw[:count]
+                ]
+                return ActionResult(success=True, data={"output": "\n\n".join(lines)})
+
         except Exception as e:
-            logger.error(f"Brave Search failed: {e}")
-            return ActionResult(success=False, error_trace=str(e))
+            logger.warning(f"[web_search] lightpanda CDP search failed: {e}. Trying httpx DDG.")
+
+        # ── Strategy 3: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; AgenticOS/2.7; +https://github.com/savyasachi6/agentic_os)"}
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=headers) as client:
+                resp = await client.get(ddg_url)
+                resp.raise_for_status()
+                from markdownify import markdownify
+                text = markdownify(resp.text).strip()
+                # Extract only the result blocks to keep it clean
+                if "result__title" in resp.text:
+                    from bs4 import BeautifulSoup
+                    soup    = BeautifulSoup(resp.text, "html.parser")
+                    results = []
+                    for r in soup.select(".result")[:count]:
+                        title_el   = r.select_one(".result__title a")
+                        snippet_el = r.select_one(".result__snippet")
+                        url_el     = r.select_one(".result__url")
+                        if title_el:
+                            results.append(
+                                f"- **{title_el.get_text().strip()}**\n"
+                                f"  URL: {url_el.get_text().strip() if url_el else ''}\n"
+                                f"  {snippet_el.get_text().strip() if snippet_el else ''}"
+                            )
+                    if results:
+                        return ActionResult(success=True, data={"output": "\n\n".join(results)})
+                # Last resort — raw markdown of page
+                return ActionResult(success=True, data={"output": text[:8000]})
+        except Exception as e3:
+            logger.error(f"[web_search] All search strategies failed: {e3}")
+            return ActionResult(success=False, error_trace=f"All search strategies failed: {e3}")
+
 
 class WebScrapeAction(BaseAction):
     name: str = "web_scrape"

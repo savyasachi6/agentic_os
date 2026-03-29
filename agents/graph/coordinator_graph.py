@@ -35,7 +35,7 @@ _INTERNAL_LINE_RE = _re.compile(
     _re.IGNORECASE,
 )
 _THINK_BLOCK_RE = _re.compile(
-    r"(<thinking>.*?</thinking>|<\|thinking\|>.*?<\|/thinking\|>)",
+    r"(<thinking>.*?</thinking>|<[|]thinking[|]>.*?<[|]/thinking[|]>)",
     _re.DOTALL | _re.IGNORECASE,
 )
 
@@ -131,7 +131,7 @@ async def route_node(state: AgentState) -> AgentState:
     if intent_str == Intent.LLM_DIRECT.value:
         llm = state.get("llm") or LLMClient()
         msgs = [
-            {"role": "system", "content": "You are a helpful assistant. Answer clearly and concisely."},
+            {"role": "system", "content": "You are a helpful assistant. Provide a direct, plain-text response. DO NOT use Thought:/Action:/Observation: formatting or internal reasoning tags."},
             {"role": "user",   "content": last_human},
         ]
         response = await llm.generate_async(msgs)

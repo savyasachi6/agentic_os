@@ -165,7 +165,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       REDIS_HOST: redis
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
-      BROWSERLESS_CDP_URL: ws://lightpanda:9222
+      BROWSER_WS_URL: ws://lightpanda:9222
       TOOLS_API_URL: http://tools-api:9101
       RL_ROUTER_URL: http://rl-router:8100
       LLM_MODEL: qwen3-vl:8b
@@ -319,6 +319,7 @@ services:
       OLLAMA_HOST: http://host.docker.internal:11434
       LLM_MODEL: qwen3-vl:8b
       USE_MOCK_LLM: ${USE_MOCK_LLM:-false}
+      BROWSER_WS_URL: ws://lightpanda:9222
       PYTHONUNBUFFERED: "1"
     secrets:
       - postgres_password
@@ -352,6 +353,7 @@ services:
     networks:
       - backend-net
       - frontend-net
+      - browser-net
 
   keycloak:
     # Heavyweight Identity and Access Management (IAM) provider. Bootstraps via Postgres schema.

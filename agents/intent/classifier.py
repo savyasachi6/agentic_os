@@ -54,6 +54,13 @@ CODE_KEYWORDS = [
     "refactor", "debug this", "fix this bug", "optimize this",
     "code review", "linting", "unit test", "write tests",
 ]
+# ----- Explanations: checked BEFORE code so "explain code" → LLM_DIRECT not specialist -----
+EXPLAIN_KEYWORDS = [
+    "explain", "how does", "what is", "describe", "summarize",
+    "tell me about", "guide", "tutorial", "patterns in",
+    "architecture of", "how to use", "overview",
+]
+
 # Note: bare "python" removed — too broad; math queries like "sin(x) in python" must hit MATH first
 
 # ----- Capability: human-facing queries about what the system CAN do -----
@@ -92,7 +99,8 @@ INDEXED_TOPICS = [
     "hybrid search", "semantic cache", "speculative",
     "security principle", "security standard", "security policy",
     "skills", "available skills", "explain skills", "features",
-    "how do you think",
+    "how do you think", "mcp", "model context protocol", "server",
+    "package", "setup",
 ]
 # Removed bare "capabilities" and "best practice" — both conflict with
 # CAPABILITY_KEYWORDS and CODE_KEYWORDS respectively.
@@ -128,7 +136,11 @@ def classify_intent(message: str) -> Intent:
     if any(kw in msg for kw in CONTENT_KEYWORDS):
         return Intent.CONTENT
 
-    # 4. CODE_GEN — before CAPABILITY so "github best practice" → CODE not CAP
+    # 4. EXPLANATION — before CODE so "explain code" → LLM_DIRECT not code worker
+    if any(kw in msg for kw in EXPLAIN_KEYWORDS):
+        return Intent.LLM_DIRECT
+
+    # 5. CODE_GEN — before CAPABILITY so "github best practice" → CODE not CAP
     if any(kw in msg for kw in CODE_KEYWORDS):
         return Intent.CODE_GEN
 

@@ -130,28 +130,37 @@ class Settings(BaseSettings):
     
     # Distributed RL Routing
     rl_router_url: str = Field(default="http://rl-router:8100")
-    rl_router_timeout: float = Field(default=5.0)
+    rl_router_timeout: float = Field(default=15.0)
 
     # Multi-hop Context Protocol
     mcp_servers: Dict[str, Dict[str, Any]] = {
-        "filesystem": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-filesystem ."},
-        "memory": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-memory"},
-        "postgres": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-postgres"},
-        "github": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-github"},
-        "fetch": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-fetch"},
-        "brave": {
-            "transport": "stdio", 
-            "command": "npx @modelcontextprotocol/server-brave-search",
-            "env": {"BRAVE_API_KEY": os.environ.get("BRAVE_API_KEY", "")},
-            "description": "Web search via Brave",
-            "fallback_for": ["news", "today", "latest", "current", "weather"]
+        "filesystem": {"transport": "stdio", "command": "npx -y @modelcontextprotocol/server-filesystem ."},
+        "memory": {"transport": "stdio", "command": "npx -y @modelcontextprotocol/server-memory"},
+        "postgres": {
+            "transport": "stdio",
+            "command": "npx -y @modelcontextprotocol/server-postgres",
+            "env": {
+                "DATABASE_URL": os.environ.get(
+                    "DATABASE_URL",
+                    "postgresql://agent:agent_os_pw@postgres:5432/agent_os"
+                )
+            }
         },
-        "puppeteer": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-puppeteer"},
+        "github": {
+            "transport": "stdio", 
+            "command": "npx -y @modelcontextprotocol/server-github",
+            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": os.environ.get("GITHUB_TOKEN", "")}
+        },
+        "puppeteer": {"transport": "stdio", "command": "npx -y @modelcontextprotocol/server-puppeteer"},
     }
     
     # Tool-specific configuration (Phase 2.7.1)
-    brave_search_api_key: Optional[str] = Field(default=None)
-    browser_ws_url: str = Field(default="ws://lightpanda:9222")
+    brave_search_api_key: Optional[str] = Field(
+        default_factory=lambda: (
+            os.environ.get("BRAVE_SEARCH_API_KEY") or os.environ.get("BRAVE_API_KEY") or None
+        )
+    )
+    browser_ws_url: str = Field(default="ws://lightpanda:9222", alias="BROWSER_WS_URL")
     
     # Exposing flat properties for backwards compatibility
     @property
@@ -227,6 +236,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_nested_delimiter = "__"
         extra = "ignore"
+        populate_by_name = True
 
 @lru_cache()
 def get_settings() -> Settings:

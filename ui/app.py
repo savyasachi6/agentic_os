@@ -517,9 +517,16 @@ if page == "💬 Terminal":
                 combined_thought += "\n\n" + st.session_state.chat_history[i]["content"]
                 i += 1
                 
-            with st.chat_message("assistant", avatar="🧠"):
-                with st.expander("Agent Thought", expanded=False):
-                    st.markdown(combined_thought)
+            # Visual divider before thought block so it's clearly separate from response
+            st.markdown(
+                """<div style='border-left: 3px solid #444; padding-left: 10px; 
+                margin: 6px 0 6px 42px; opacity: 0.75; font-size:0.85em;'>
+                🧠 <strong>Agent Reasoning</strong></div>""",
+                unsafe_allow_html=True
+            )
+            with st.expander("View reasoning steps", expanded=False):
+                st.code(combined_thought, language="")   # code block preserves newlines cleanly
+
                     
         elif msg["type"] == "observation":
             with st.chat_message("assistant", avatar="🛠️"):

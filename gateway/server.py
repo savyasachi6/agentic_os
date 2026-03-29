@@ -5,6 +5,7 @@ import sys
 from core.settings import settings
 import json
 import asyncio
+import re
 from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -249,30 +250,51 @@ async def chat_ws(ws: WebSocket):
             from core.message_bus import A2ABus
             bus = A2ABus()
 
+            def _clean_react_block(content: str) -> str:
+                """
+                Strips ReAct scratchpad markers (Thought:/Action:/Observation:) from 
+                a content block while preserving the actual human-readable text.
+                Handles multi-line blocks, not just first-line prefixes.
+                """
+                # Remove lines that are purely structural markers
+                lines = content.splitlines()
+                cleaned = []
+                for line in lines:
+                    stripped = re.sub(r"^(Thought|Action|Observation):?\s*", "", line, flags=re.IGNORECASE)
+                    if stripped.strip():          # drop empty lines left by marker-only rows
+                        cleaned.append(stripped)
+                return "\n".join(cleaned).strip()
+
             async def bus_listener(sid: str):
                 topics = ["researcher", "schema_specialist", "specialist", "tools"]
-                allowed = {
-                    "token",
-                    "thought",
-                    "observation",
-                    "rl_metadata",
-                    "status",
-                    "warning",
-                    "error",
-                }
                 try:
                     async for msg in bus.listen_multiple(topics):
                         if msg.get("session_id") not in (None, sid):
                             continue
-                        if msg.get("type") in allowed:
-                            # Phase 1: Strip internal ReAct prefixes to clean up the UI stream
-                            if msg.get("type") in ("token", "thought") and isinstance(msg.get("content"), str):
-                                import re
-                                content = msg["content"]
-                                # Strip both Thought: and Action: prefixes
-                                content = re.sub(r"^(Thought|Action):\s*", "", content, flags=re.IGNORECASE)
+                        
+                        msg_type = msg.get("type")
+                        content  = msg.get("content", "")
+
+                        if msg_type == "token":
+                            # Split token stream: if it contains "Thought:" lines, route to thought
+                            # so the UI expander gets it, not the response bubble
+                            if isinstance(content, str) and re.search(
+                                r"^(Thought|Action|Observation):?\s", content, re.MULTILINE | re.IGNORECASE
+                            ):
+                                msg["type"]    = "thought"
+                                msg["content"] = _clean_react_block(content)
+                            else:
                                 msg["content"] = content
                             await ws.send_json(msg)
+
+                        elif msg_type == "thought":
+                            if isinstance(content, str):
+                                msg["content"] = _clean_react_block(content)
+                            await ws.send_json(msg)
+
+                        elif msg_type in ("observation", "rl_metadata", "status", "warning", "error"):
+                            await ws.send_json(msg)
+                            
                 except Exception as e:
                     print(f"[gateway] Bus listener error: {e}")
 
