@@ -48,16 +48,19 @@ async def replay_bandit(
 
 @router.get("/bandit/stats")
 async def get_bandit_stats(
-    bandit: LinUCBBandit = Depends(get_bandit)
+    bandit: LinUCBBandit = Depends(get_bandit),
+    episode_repo: EpisodeRepository = Depends(get_episode_repo),
 ) -> Dict[str, Any]:
     """Return real-time metrics for the RL agent."""
     arm_stats = bandit.get_all_arm_stats()
+    episodes = episode_repo.get_recent_episodes(limit=50)
     
     return {
         "n_arms": bandit.n_arms,
         "d": bandit.d,
         "alpha": bandit.alpha,
         "arm_stats": arm_stats,
+        "episodes": episodes,
         "registry": {
             "size": context_registry.size,
             "feedback_rate": context_registry.feedback_rate,
@@ -66,3 +69,17 @@ async def get_bandit_stats(
             "maxsize_config": context_registry._maxsize
         }
     }
+
+
+@router.delete("/episodes/{session_id}")
+async def delete_episodes_for_session(
+    session_id: str,
+    repo: EpisodeRepository = Depends(get_episode_repo),
+):
+    """Hard-delete all RL episodes associated with a chat session."""
+    try:
+        repo.delete_episodes_for_session(session_id)
+        return {"status": "success", "session_id": session_id}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=str(e))

@@ -24,7 +24,7 @@ from db.connection import init_db_pool
 from rag.vector_store import VectorStore
 from rag.indexer import SkillIndexer
 from core.llm.router import LLMRouter
-from db.queries.thoughts import log_thought
+from db.queries.thoughts import log_thought, delete_session_data
 
 app = FastAPI(
     title="Agent OS",
@@ -173,6 +173,19 @@ async def get_chat_history(session_id: str):
             "session_id": session_id,
             "history": history,
         }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/chat/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Hard-delete all data for a chat session."""
+    try:
+        delete_session_data(session_id)
+        # Also drop from in-memory orchestrator cache if it exists
+        if session_id in _sessions:
+            _sessions.pop(session_id, None)
+        return {"status": "success", "session_id": session_id}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

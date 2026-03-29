@@ -110,6 +110,19 @@ def get_all_sessions() -> List[Dict[str, Any]]:
                 } for r in rows
             ]
 
+def delete_session_data(session_id: str) -> None:
+    """
+    Hard-delete all data for a chat session.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Remove per-turn thoughts
+            cur.execute("DELETE FROM thoughts WHERE session_id = %s", (session_id,))
+            # Remove any compacted summaries
+            cur.execute("DELETE FROM session_summaries WHERE session_id = %s", (session_id,))
+        conn.commit()
+
+
 def get_session_history(session_id: str) -> List[Dict[str, Any]]:
     """
     Retrieve full history for a session, ordered by time.

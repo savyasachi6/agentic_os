@@ -67,4 +67,5 @@ class RoutingService:
             use_speculative=action.speculative,
             is_exploration=is_exploration,
             arm_scores=arm_details,
+            query_hash_rl=query_hash,
         )

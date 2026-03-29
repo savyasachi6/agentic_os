@@ -354,6 +354,21 @@ with st.sidebar:
             st.session_state.chat_history = []
             st.rerun()
 
+        # Phase 7: Session Deletion Capability
+        if st.button("🗑 Delete Conversation", use_container_width=True, type="secondary"):
+            sid = st.session_state.session_id
+            try:
+                resp = requests.delete(f"{CORE_API_URL}/chat/{sid}", timeout=5)
+                if resp.status_code == 200 and resp.json().get("status") == "success":
+                    st.success("Conversation deleted.")
+                    st.session_state.session_id = str(uuid.uuid4())
+                    st.session_state.chat_history = []
+                    st.rerun()
+                else:
+                    st.error(f"Delete failed: {resp.text}")
+            except Exception as e:
+                st.error(f"Delete error: {e}")
+
         available_sessions = load_sessions()
         
         if available_sessions:

@@ -84,6 +84,20 @@ class EpisodeRepository:
             logger.exception("Failed to log retrieval episode %s", episode_id)
         return episode_id
 
+    def delete_episodes_for_session(self, session_id: str) -> None:
+        """
+        Hard-delete all RL episodes associated with a chat session.
+        """
+        sql = "DELETE FROM retrieval_episodes WHERE session_id = %s"
+        try:
+            conn = get_connection()
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (session_id,))
+            conn.close()
+        except Exception:
+            logger.exception("Failed to delete episodes for session %s", session_id)
+
     def get_recent_episodes(
         self,
         query_hash: Optional[str] = None,
