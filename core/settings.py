@@ -129,12 +129,12 @@ class Settings(BaseSettings):
     embed_dim: int = 1024
     
     # Distributed RL Routing
-    rl_router_url: str = Field(default="http://localhost:8100")
+    rl_router_url: str = Field(default="http://rl-router:8100")
     rl_router_timeout: float = Field(default=5.0)
 
     # Multi-hop Context Protocol
     mcp_servers: Dict[str, Dict[str, Any]] = {
-        "filesystem": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-filesystem C:\\Users\\savya"},
+        "filesystem": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-filesystem ."},
         "memory": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-memory"},
         "postgres": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-postgres"},
         "github": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-github"},
@@ -142,7 +142,7 @@ class Settings(BaseSettings):
         "brave": {
             "transport": "stdio", 
             "command": "npx @modelcontextprotocol/server-brave-search",
-            "env": {"BRAVE_API_KEY": ""},
+            "env": {"BRAVE_API_KEY": os.environ.get("BRAVE_API_KEY", "")},
             "description": "Web search via Brave",
             "fallback_for": ["news", "today", "latest", "current", "weather"]
         },
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
     
     # Tool-specific configuration (Phase 2.7.1)
     brave_search_api_key: Optional[str] = Field(default=None)
-    browser_ws_url: str = Field(default="ws://browserless:9222")
+    browser_ws_url: str = Field(default="ws://lightpanda:9222")
     
     # Exposing flat properties for backwards compatibility
     @property

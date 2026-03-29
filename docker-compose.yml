@@ -95,17 +95,16 @@ services:
     networks:
       - backend-net
 
-  browserless:
-    # Minimalist headless Chrome integration optimized for RAG scraping and browser tooling.
-    # Using browserless/chrome to bypass strict GHCR registry authentication requirements.
-    image: browserless/chrome:latest
+  lightpanda:
+    # Open-source, high-performance browser engine for agentic scraping.
+    image: lightpanda/browser:nightly
     ports:
-      - "9222:3000" # Browserless native Websocket port mapped externally to 9222
+      - "9222:9222"
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 512M
+          cpus: '0.8'
+          memory: 1G
     cap_drop:
       - ALL
     security_opt:
@@ -166,7 +165,7 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       REDIS_HOST: redis
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
-      BROWSERLESS_CDP_URL: ws://browserless:9222
+      BROWSERLESS_CDP_URL: ws://lightpanda:9222
       TOOLS_API_URL: http://tools-api:9101
       RL_ROUTER_URL: http://rl-router:8100
       LLM_MODEL: qwen3-vl:8b
@@ -225,6 +224,7 @@ services:
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      RL_ROUTER_PORT: 8100
       PYTHONUNBUFFERED: "1"
     secrets:
       - postgres_password
@@ -232,8 +232,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "curl -f --max-time 5 http://localhost:8100/health || exit 1" ]
+      test: [ "CMD-SHELL", "curl -f --silent http://localhost:8100/health || exit 1" ]
       interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 45s
     deploy:
       resources:
         limits:
@@ -249,7 +252,9 @@ services:
         max-size: "50m"
         max-file: "5"
     networks:
-      - backend-net
+      backend-net:
+        aliases:
+          - rl-router
 
   agent-ui:
     # The Streamlit visualization dashboard. 
@@ -264,7 +269,9 @@ services:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       CORE_API_URL: http://agent-core:8000
-      CORE_WS_URL: ws://agent-core:8000/ws
+      CORE_WS_URL: ws://localhost:8000/ws
+      RL_ROUTER_URL: http://rl-router:8100
+      OLLAMA_HOST: http://host.docker.internal:11434
       PYTHONUNBUFFERED: "1"
     secrets:
       - postgres_password
@@ -292,6 +299,7 @@ services:
     networks:
       - frontend-net
       - auth-net
+      - backend-net
 
   workers:
     # Asynchronous specialist processors (e.g., Executors, Researchers) polling the Redis A2A bus.
@@ -307,8 +315,9 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       REDIS_HOST: redis
       REDIS_PASSWORD_FILE: /run/secrets/redis_password
-      LLM_MODEL: qwen3-vl:8b
+      RL_ROUTER_URL: http://rl-router:8100
       OLLAMA_HOST: http://host.docker.internal:11434
+      LLM_MODEL: qwen3-vl:8b
       USE_MOCK_LLM: ${USE_MOCK_LLM:-false}
       PYTHONUNBUFFERED: "1"
     secrets:

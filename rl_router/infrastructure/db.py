@@ -20,4 +20,5 @@ def get_connection():  # type: ignore[no-untyped-def]
         dbname=db_settings.name,
         user=db_settings.user,
         password=db_settings.password,
+        connect_timeout=5,
     )

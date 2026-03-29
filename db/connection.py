@@ -10,6 +10,7 @@ import os
 from contextlib import contextmanager
 from typing import Optional, Generator
 
+import time
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 from pgvector.psycopg2 import register_vector
@@ -60,26 +61,9 @@ def init_db_pool(
         )
         logger.info("DB pool initialized -> %s:%s/%s", host, port, dbname)
     except psycopg2.OperationalError as e:
-        # Fallback for local development when 'postgres' host is not in /etc/hosts
-        if ("could not translate host name" in str(e) or "could not connect to server" in str(e)) and host != "localhost":
-            logger.warning("DNS/Connection failure for %s. Retrying with localhost...", host)
-            try:
-                _pool = SimpleConnectionPool(
-                    min_conn,
-                    max_conn,
-                    host="localhost",
-                    port=port,
-                    dbname=dbname,
-                    user=user,
-                    password=password,
-                )
-                logger.info("DB pool initialized in FALLBACK mode (localhost)")
-            except Exception as e2:
-                logger.error("Failed to initialize DB pool (even on localhost): %s", e2)
-                raise
-        else:
-            logger.error("Failed to initialize DB pool: %s", e)
-            raise
+        # Avoid useless localhost fallback in Docker where 'postgres' host is explicitly set
+        logger.error("Failed to initialize DB pool for host %s: %s", host, e)
+        raise
     except Exception as e:
         logger.error("Failed to initialize DB pool: %s", e)
         raise
@@ -107,14 +91,15 @@ async def get_redis() -> redis.Redis:
     return _redis
 
 def reset_pool():
-    """Tear down and rebuild the pool after a fatal connection error."""
+    """Tear down and rebuild the pool — with backoff to survive DB restarts."""
     global _pool
-    logger.warning("Resetting DB pool due to connection error…")
+    logger.warning("Resetting DB pool due to connection error… waiting 2s for Postgres stabilization")
+    time.sleep(2)
     try:
         if _pool is not None:
             _pool.closeall()
     except Exception as e:
-        logger.error("Failed to close pool: %s", e)
+        logger.error("Failed to close stale pool: %s", e)
     _pool = None
     init_db_pool()
 
@@ -124,38 +109,50 @@ def get_db_connection() -> Generator[psycopg2.extensions.connection, None, None]
     Yields a pgvector-registered connection from the pool.
     Automatically detects stale/broken connections and retries once with a fresh pool.
     """
+    max_retries = 2
+    retry_count = 0
     pool = get_pool()
     conn = None
-    try:
+    
+    while retry_count <= max_retries:
         try:
             conn = pool.getconn()
             # 'pre-ping': issue a cheap query to verify the connection is alive
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
             
-            try:
-                register_vector(conn)
-            except psycopg2.ProgrammingError as e:
-                if "vector type not found" in str(e):
-                    logger.warning("Vector type not found. Extension might be missing.")
-                else:
-                    raise
+            # If we reach here, the connection is alive
+            break
             
-            yield conn
         except _TRANSIENT_DB_ERRORS as exc:
-            logger.warning("Stale connection detected, refreshing pool…")
+            retry_count += 1
             if conn:
                 pool.putconn(conn, close=True)
                 conn = None
+                
+            if retry_count > max_retries:
+                logger.error("Fatal: DB unreachable after %s retries", max_retries)
+                raise exc
+                
+            logger.warning("Stale connection detected (Attempt %s/%s), refreshing pool…", retry_count, max_retries)
             reset_pool()
-            # Retry once
             pool = get_pool()
-            conn = pool.getconn()
+
+    if not conn:
+        raise psycopg2.OperationalError("Failed to obtain a valid connection from the pool.")
+
+    try:
+        try:
             register_vector(conn)
-            yield conn
+        except psycopg2.ProgrammingError as e:
+            if "vector type not found" in str(e):
+                logger.warning("Vector type not found. Extension might be missing.")
+            else:
+                raise
+        
+        yield conn
     finally:
-        if conn:
-            pool.putconn(conn)
+        pool.putconn(conn)
 
 def init_schema(schema_sql_path: str):
     """Run schema SQL to ensure tables exist."""

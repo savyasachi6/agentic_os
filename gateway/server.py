@@ -50,13 +50,14 @@ async def startup():
     router = LLMRouter.get_instance()
     router.start()
     
-    # Phase 4: Discover external MCP tools
+    # Phase 12: Non-blocking MCP tool discovery
     from tools.mcp.mcp_registry import mcp_registry
     try:
-        await mcp_registry.initialize()
-        print(f"[server] MCP tools registered.")
+        # Spawn as background task to ensure the server starts instantly
+        asyncio.create_task(mcp_registry.initialize())
+        print(f"[server] Background MCP Discovery started.")
     except Exception as e:
-        print(f"[server] MCP initialization failed: {e}")
+        print(f"[server] Failed to spawn MCP initialization: {e}")
 
     print("[server] Agent OS ready (LLM Router started).")
 
@@ -122,13 +123,15 @@ async def reindex_skills():
 async def get_rl_stats():
     import httpx
 
+    print(f"[gateway] Proxying RL stats request to {settings.rl_router_url}/bandit/stats...")
     try:
-        async with httpx.AsyncClient(timeout=settings.rl_router_timeout) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(f"{settings.rl_router_url}/bandit/stats")
             resp.raise_for_status()
             return resp.json()
     except Exception as e:
-        return {"status": "offline", "error": str(e)}
+        print(f"[gateway] RL router stats fetch failed (timeout=15s): {e}")
+        return {"status": "offline", "error": str(e), "url": settings.rl_router_url}
 
 
 @app.post("/rl/bandit/train")

@@ -8,6 +8,7 @@ import sys
 import os
 import time
 import signal
+import asyncio
 from typing import List
 
 # Root calculation: The script is now in /app/workers/ - root is one level up
@@ -26,27 +27,24 @@ from db.queries.commands import TreeStore
 from db.connection import init_db_pool
 from core.agent_types import AgentRole
 
-def main():
+async def main_async():
     print("--- Agentic OS Worker Manager ---")
+    print("[WorkerManager] Setting up asynchronous lifecycle...")
     
     # Ensure all dynamic tools are registered BEFORE agents are instantiated
     from core.tool_registry import registry
     import tools.math_tools
     import tools.research_tools
     
-    # Phase 4: Discover external MCP tools
+    # Phase 8: Non-blocking MCP initialization
     from tools.mcp.mcp_registry import mcp_registry
-    import asyncio
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(mcp_registry.initialize())
-        # Keep loop for later if needed, but normally workers start their own
+        # We shield this task to ensure partial failures in one tool don't kill the manager
+        print("[WorkerManager] Spawning background MCP initialization...")
+        asyncio.create_task(mcp_registry.initialize())
     except Exception as e:
-        print(f"[WorkerManager] MCP initialization error: {e}")
+        print(f"[WorkerManager] Failed to spawn MCP initialization: {e}")
 
-    print(f"[WorkerManager] {len(registry.tools)} dynamically loaded tools registered.")
-    
     init_db_pool()
     store = TreeStore()
     
@@ -54,13 +52,11 @@ def main():
     from agents.specialists.tool_caller_agent import ToolCallerAgentWorker
 
     # Define Pure Agents vs Standalone Workers
-    # Pure Agents need to be wrapped in AgentWorker
     pure_agents = {
         AgentRole.EMAIL: EmailAgent(),
         AgentRole.PRODUCTIVITY: ProductivityAgent(),
     }
     
-    # Standalone Workers are already subclasses of AgentWorker
     standalone_workers = [
         ResearchAgentWorker(store=store),
         CodeAgentWorker(store=store), 
@@ -83,19 +79,30 @@ def main():
         workers.append(w)
         w.start()
 
+    print(f"[WorkerManager] {len(registry.tools)} tools registered.")
     print(f"[WorkerManager] Monitoring {len(workers)} workers. Press Ctrl+C to stop.")
+
+    # Lifecycle Event to keep the main process alive until signal
+    stop_event = asyncio.Event()
 
     def shutdown_handler(signum, frame):
         print("\n[WorkerManager] Shutting down...")
         for w in workers:
             w.stop()
-        sys.exit(0)
+        stop_event.set()
 
     signal.signal(signal.SIGINT, shutdown_handler)
     signal.signal(signal.SIGTERM, shutdown_handler)
 
-    while True:
-        time.sleep(1)
+    # Wait until shutdown signal
+    await stop_event.wait()
+    print("[WorkerManager] Shutdown complete.")
+
+def main():
+    try:
+        asyncio.run(main_async())
+    except KeyboardInterrupt:
+        pass
 
 if __name__ == "__main__":
     main()

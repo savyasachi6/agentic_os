@@ -43,7 +43,17 @@ async def periodic_save_weights(interval_seconds: int = 300):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic is handled by lazy get_bandit() calls in routers
+    # Startup logic — initialize bandit in the background to avoid blocking /health
+    async def bootstrap_task():
+        try:
+            from starlette.concurrency import run_in_threadpool
+            bandit = await run_in_threadpool(get_bandit)
+            logger.info(f"[lifespan] Bandit initialized in background with {int(bandit._pull_counts.sum())} pulls.")
+        except Exception as e:
+            logger.error(f"[lifespan] Background bandit initialization failed: {e}")
+
+    # Fire and forget the bootstrap
+    asyncio.create_task(bootstrap_task())
     
     # Start periodic save task
     save_task = asyncio.create_task(periodic_save_weights())
@@ -53,11 +63,11 @@ async def lifespan(app: FastAPI):
     # Shutdown logic
     save_task.cancel()
     try:
-        # Final save
+        from starlette.concurrency import run_in_threadpool
         bandit = get_bandit()
         repo = get_bandit_repo()
         weights = bandit.save_to_bytes()
-        if repo.save_weights(BANDIT_ID, weights):
+        if await run_in_threadpool(repo.save_weights, BANDIT_ID, weights):
             print(f"[bandit] Final weights for {BANDIT_ID} saved to Database on shutdown")
     except Exception as e:
         print(f"[bandit] Failed final save on shutdown: {e}")
@@ -65,33 +75,26 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     """Build and return the configured FastAPI application."""
-
     app = FastAPI(
         title="Agentic RL Router",
         version="0.1.0",
         description="Multi-objective contextual bandit for dynamic RAG depth routing",
         lifespan=lifespan,
     )
-
     app.include_router(routing.router)
     app.include_router(feedback.router)
     app.include_router(refine.router)
     app.include_router(health.router)
     app.include_router(debug.router)
-
     return app
 
-
-# Default app instance for `uvicorn rl_router.main:app`
 app = create_app()
-
 
 if __name__ == "__main__":
     import uvicorn
-
     uvicorn.run(
         "rl_router.server:app",
         host="0.0.0.0",
         port=8100,
-        reload=True,
+        reload=False, # Production hardening: disable reload to stop container restart loops
     )

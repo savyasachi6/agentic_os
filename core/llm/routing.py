@@ -17,6 +17,14 @@ class RLRoutingClient:
         self.base_url = (base_url or settings.rl_router_url).rstrip("/")
         self.timeout = timeout or settings.rl_router_timeout
         self.client = httpx.AsyncClient(timeout=self.timeout)
+        logger.info(f"RLRoutingClient initialized (URL: {self.base_url}, Timeout: {self.timeout}s)")
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Helper to ensure a fresh, non-stale client is used if needed."""
+        # Check if client is closed or we just want to ensure freshness
+        if self.client.is_closed:
+            self.client = httpx.AsyncClient(timeout=self.timeout)
+        return self.client
 
     @staticmethod
     def _arm_to_top_k(action: int | None, depth: int | None) -> int:
@@ -52,7 +60,8 @@ class RLRoutingClient:
         }
 
         try:
-            resp = await self.client.post(f"{self.base_url}/route", json=payload)
+            client = await self._get_client()
+            resp = await client.post(f"{self.base_url}/route", json=payload)
             resp.raise_for_status()
             data = resp.json()
 
@@ -73,14 +82,16 @@ class RLRoutingClient:
                 "raw": data,
             }
         except Exception as e:
-            logger.warning(f"RL Router routing failed: {e}. Falling back to default depth.")
+            # FORCE RECREATION of client on next try to solve DNS/Stale-Socket issues
+            await self.client.aclose()
+            logger.warning(f"RL Router routing failed: {repr(e)}. Falling back to default depth. Client Reset.")
             return {
-                "action": 2,
-                "depth": 1,
-                "top_k": 5,
+                "action": 0, # Default to arm 0 (Collapsed Tree, Spec Off)
+                "depth": 0,
+                "top_k": 5, # Fallback to 5 chunks for RAG resilience
                 "speculative": False,
                 "query_hash_rl": None,
-                "raw": {"fallback": True, "error": str(e)},
+                "raw": {"fallback": True, "error": str(e), "type": str(type(e))},
             }
 
     async def submit_feedback(

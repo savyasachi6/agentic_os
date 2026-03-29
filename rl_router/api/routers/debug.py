@@ -52,8 +52,9 @@ async def get_bandit_stats(
     episode_repo: EpisodeRepository = Depends(get_episode_repo),
 ) -> Dict[str, Any]:
     """Return real-time metrics for the RL agent."""
+    from starlette.concurrency import run_in_threadpool
     arm_stats = bandit.get_all_arm_stats()
-    episodes = episode_repo.get_recent_episodes(limit=50)
+    episodes = await run_in_threadpool(episode_repo.get_recent_episodes, limit=50)
     
     return {
         "n_arms": bandit.n_arms,

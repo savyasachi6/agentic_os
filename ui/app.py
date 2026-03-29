@@ -180,16 +180,17 @@ def load_sessions():
         print(f"Failed to load sessions: {e}")
     return []
 
+@st.cache_data(ttl=5) # Cache for 5s to avoid redundant hits, but Allow refresh
 def get_router_stats():
     """Fetches bandit diagnostics directly from the mounted RL Router sub-app."""
     try:
-        # Bypassing the /router/stats proxy in server.py which can cause deadlocks
-        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=10)
+        # Using a 20s timeout to allow for gateway diagnostic cold-starts
+        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=20)
         if response.status_code == 200:
             return response.json()
     except Exception as e:
-        # Silently fail or log for UI
-        print(f"Router stats fetch error: {e}")
+        # Log to browser console/stderr for debugging
+        print(f"Router stats fetch error (timeout=20s): {e}")
     return None
 
 def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int, chain_id: int = 0, metrics: dict = None):

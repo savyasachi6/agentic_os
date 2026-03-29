@@ -19,7 +19,9 @@ class Embedder:
     Uses centralized configuration from core.config.
     """
     def __init__(self, model: Optional[str] = None):
-        self.model = model or settings.embed_model
+        self.model = model or settings.llm.embed_model
+        # Increased timeout to 30s to handle host-cold-starts
+        self.client = ollama.Client(host=settings.llm.ollama_host, timeout=30.0)
         self.dim = 1024 # Match schema.sql VECTOR(1024) for mxbai-embed-large
 
     def generate_embedding_sync(self, text: str) -> Tuple[List[float], bool]:
@@ -31,11 +33,12 @@ class Embedder:
         safe_text = text[:800]
         
         try:
-            response = ollama.embeddings(model=self.model, prompt=safe_text)
+            response = self.client.embeddings(model=self.model, prompt=safe_text)
             return response["embedding"], False
         except Exception as e:
-            logger.warning("Embedding failed for text length %d: %s", len(text), e)
-            return [0.0] * self.dim, True
+            logger.error(f"FATAL: Embedding failed (Host: {settings.llm.ollama_host}, Model: {self.model}): {e}")
+            # We raise here because a zero-vector causes silent RAG failures and bad RL training data
+            raise e
 
     async def generate_embedding_async(self, text: str) -> Tuple[List[float], bool]:
         """Non-blocking embedding generation."""

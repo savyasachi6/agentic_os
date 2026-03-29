@@ -1,5 +1,5 @@
-# tools/mcp/mcp_client.py
 import asyncio
+from contextlib import AsyncExitStack
 import json
 import subprocess
 from typing import Dict, Any, List, Optional
@@ -31,7 +31,7 @@ class MCPClient:
             env=self.config_dict.get("env")
         )
         
-        self._exit_stack = asyncio.ExitStack()
+        self._exit_stack = AsyncExitStack()
         read, write = await self._exit_stack.enter_async_context(stdio_client(server_params))
         self.session = await self._exit_stack.enter_async_context(ClientSession(read, write))
         

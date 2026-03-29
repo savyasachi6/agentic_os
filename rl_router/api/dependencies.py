@@ -29,12 +29,36 @@ from rl_router.infrastructure.repositories import (
 
 
 # ---------------------------------------------------------------------------
-# Singletons — built once, shared across requests
+# Singletons — built once, shared across requests (Hardened)
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
+_BANDIT: Optional[LinUCBBandit] = None
+_ROUTING_SERVICE: Optional[RoutingService] = None
+_BANDIT_REPO: Optional[BanditRepository] = None
+_FEATURE_BUILDER: Optional[ContextFeatureBuilder] = None
+
+
+def get_bandit_repo() -> BanditRepository:
+    global _BANDIT_REPO
+    if _BANDIT_REPO is None:
+        _BANDIT_REPO = BanditRepository()
+    return _BANDIT_REPO
+
+
+def get_feature_builder() -> ContextFeatureBuilder:
+    global _FEATURE_BUILDER
+    if _FEATURE_BUILDER is None:
+        _FEATURE_BUILDER = ContextFeatureBuilder()
+    return _FEATURE_BUILDER
+
+
 def get_bandit() -> LinUCBBandit:
-    bandit = LinUCBBandit(
+    """Singleton getter for the LinUCB Bandit. Hardened with Global Singleton."""
+    global _BANDIT
+    if _BANDIT is not None:
+        return _BANDIT
+
+    _BANDIT = LinUCBBandit(
         n_arms=bandit_settings.n_arms,
         d=bandit_settings.context_dim,
         alpha=bandit_settings.alpha,
@@ -45,32 +69,40 @@ def get_bandit() -> LinUCBBandit:
         drift_min_samples=drift_settings.min_samples_before_detection,
     )
     
-    # Warmer Start — Try loading from DB first (most recent)
-    repo = get_bandit_repo()
-    db_weights = repo.load_weights("linucb_rag_depth")
-    
-    if db_weights:
-        try:
-            bandit.load_from_bytes(db_weights)
-            print("[bandit] Loaded weights from Database")
-            return bandit
-        except Exception as e:
-            print(f"[bandit] Failed to load weights from DB: {e}")
+    # 1. Try loading from Database (Fast Fallback)
+    try:
+        repo = get_bandit_repo()
+        # Non-blocking check for weights
+        db_weights = repo.load_weights("linucb_rag_depth")
+        if db_weights:
+            _BANDIT.load_from_bytes(db_weights)
+            print("[bandit] Successfully loaded weights from Database")
+            return _BANDIT
+    except Exception as e:
+        print(f"[bandit] Database weight loading skipped/failed: {e}")
 
-    # Fallback to local file (Cold Start / Migration)
+    # 2. Fallback to Local migration file
     pkg_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     weights_path = os.path.join(pkg_root, "bandit_weights.npz")
     
     if os.path.exists(weights_path):
         try:
             with open(weights_path, "rb") as f:
-                bandit.load_from_bytes(f.read())
-            print(f"[bandit] Loaded weights from {weights_path}")
-            return bandit
+                _BANDIT.load_from_bytes(f.read())
+            print(f"[bandit] Loaded weights from fallback file: {weights_path}")
+            return _BANDIT
         except Exception as e:
-            print(f"[bandit] Failed to load weights from file: {e}")
+            print(f"[bandit] Local file loading failed: {e}")
 
-    # Heuristic Warm-Starting (Cold Start Bootstrapping)
+    print("[bandit] No existing weights found. Starting with fresh coefficients.")
+    return _BANDIT
+
+
+def bootstrap_bandit(bandit: LinUCBBandit):
+    """
+    Perform Heuristic Warm-Starting (Cold Start Bootstrapping).
+    This is slow (~15s) and should be run in a background task.
+    """
     print("[bandit] Performing Heuristic Warm-Start (Cold Start)...")
     try:
         from rl_router.utils.bootstrapper import Teacher
@@ -119,11 +151,6 @@ def get_reward_calculator() -> RewardCalculator:
 
 
 @lru_cache(maxsize=1)
-def get_feature_builder() -> ContextFeatureBuilder:
-    return ContextFeatureBuilder()
-
-
-@lru_cache(maxsize=1)
 def get_refinement_policy() -> RefinementPolicy:
     return RefinementPolicy()
 
@@ -138,21 +165,18 @@ def get_tool_exec_repo() -> ToolExecutionRepository:
     return ToolExecutionRepository()
 
 
-@lru_cache(maxsize=1)
-def get_bandit_repo() -> BanditRepository:
-    return BanditRepository()
-
-
 # ---------------------------------------------------------------------------
 # Application services — composed from domain + infra objects
 # ---------------------------------------------------------------------------
 
-@lru_cache(maxsize=1)
 def get_routing_service() -> RoutingService:
-    return RoutingService(
-        bandit=get_bandit(),
-        feature_builder=get_feature_builder(),
-    )
+    global _ROUTING_SERVICE
+    if _ROUTING_SERVICE is None:
+        _ROUTING_SERVICE = RoutingService(
+            bandit=get_bandit(),
+            feature_builder=get_feature_builder(),
+        )
+    return _ROUTING_SERVICE
 
 
 @lru_cache(maxsize=1)

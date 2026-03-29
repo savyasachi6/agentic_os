@@ -22,11 +22,10 @@ MATH_PATTERNS = [
 ]
 CAPABILITY_KEYWORDS = [
     "what can you do", "what are you", "capabilities", "help me",
-    "how can you help", "what skills", "list skills", "show skills",
-    "available tools", "abilities", "what is indexed", "what are some of the skills",
-    "tell me about your skills", "list your skills", "project links", "github", "documentation",
+    "how can you help", "what skills", "list tools", "show skills",
+    "available tools", "abilities", "what is indexed",
+    "tell me about your tools", "list your tools", "project links", "github", "documentation",
     "repo", "where is the code", "links to this project", "github url", "repo url",
-    "explain skills", "some of the skills", "list of skills", "available skills",
     "who are you", "what are you", "how do you work", "what is your flow"
 ]
 CAPABILITY_SINGLE_WORDS = {
@@ -47,7 +46,7 @@ WEB_ONLY_KEYWORDS = [
 
 EXECUTION_KEYWORDS = ["run ", "execute ", "train ", "launch ", "start ", "deploy "]
 CODE_KEYWORDS = ["write code", "create script", "generate code", "implement ", "how can i create", "python script", " script", "python"]
-CONTENT_KEYWORDS = ["write a blog", "write an article", "create content", "content creation", "draft ", "write a story", "blog post", "article ", "social media post"]
+CONTENT_KEYWORDS = ["write a blog", "write an article", "create content", "content creation", "draft ", "write a story", "blog post", "article ", "social media post", "write a post"]
 
 FILESYSTEM_PATTERNS = [
     r"[a-zA-Z]:\\", r"/mnt/[a-z]/", r"/home/\w+/",
@@ -59,7 +58,8 @@ INDEXED_TOPICS = [
     "langchain", "langgraph", "crewai", "autogen", "antigravity",
     "rag", "retrieval", "embedding", "chunking", "pgvector",
     "hybrid search", "semantic cache", "speculative",
-    "security", "principle", "standard", "policy", "best practice"
+    "security", "principle", "standard", "policy", "best practice",
+    "skills", "available skills", "explain skills", "capabilities", "features", "how do you think"
 ]
 
 def classify_intent(message: str) -> Intent:

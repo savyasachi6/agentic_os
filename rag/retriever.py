@@ -20,7 +20,7 @@ class HybridRetriever:
     ):
         self.embedder = embedder_client or kwargs.get("embedder")
         self.db = db_session
-        self.distance_threshold = 0.40
+        self.distance_threshold = 0.45
 
         if not self.embedder:
             try:
@@ -66,6 +66,7 @@ class HybridRetriever:
     ) -> str:
         results = await self.retrieve(query, top_k=top_k)
         if not results:
+            logger.warning(f"HybridRetriever found 0 results for query: '{query[:50]}...'. Check database population.")
             return ""
 
         blocks = []
