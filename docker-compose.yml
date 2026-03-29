@@ -269,7 +269,7 @@ services:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       CORE_API_URL: http://agent-core:8000
-      CORE_WS_URL: ws://localhost:8000/ws
+      CORE_WS_URL: ws://agent-core:8000/ws
       RL_ROUTER_URL: http://rl-router:8100
       OLLAMA_HOST: http://host.docker.internal:11434
       PYTHONUNBUFFERED: "1"

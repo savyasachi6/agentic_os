@@ -114,12 +114,12 @@ async def route_node(state: AgentState) -> AgentState:
         return {**state, "next_node": "execute", "action_name": "tool_caller", "action_goal": last_human}
 
     if intent_str == Intent.CONTENT.value:
-        return {**state, "next_node": "execute", "action_name": "executor", "action_goal": last_human}
+        # Phase 14: Route content to research agent (RAG + web_search)
+        return {**state, "next_node": "execute", "action_name": "research", "action_goal": last_human}
 
     if intent_str == Intent.CODE_GEN.value:
-        # Code gen usually needs context, but first call can be direct
-        if len(messages) <= 2:
-            return {**state, "next_node": "execute", "action_name": "code", "action_goal": last_human}
+        # Phase 14: Always route code questions to code agent, not just first turn
+        return {**state, "next_node": "execute", "action_name": "code", "action_goal": last_human}
 
     # Complex tasks — let LLM decide action via ReAct
     llm = state.get("llm") or LLMClient()

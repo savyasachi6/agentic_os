@@ -24,8 +24,7 @@ CAPABILITY_KEYWORDS = [
     "what can you do", "what are you", "capabilities", "help me",
     "how can you help", "what skills", "list tools", "show skills",
     "available tools", "abilities", "what is indexed",
-    "tell me about your tools", "list your tools", "project links", "github", "documentation",
-    "repo", "where is the code", "links to this project", "github url", "repo url",
+    "tell me about your tools", "list your tools", "project links", "documentation",
     "who are you", "what are you", "how do you work", "what is your flow"
 ]
 CAPABILITY_SINGLE_WORDS = {
@@ -45,7 +44,12 @@ WEB_ONLY_KEYWORDS = [
 ]
 
 EXECUTION_KEYWORDS = ["run ", "execute ", "train ", "launch ", "start ", "deploy "]
-CODE_KEYWORDS = ["write code", "create script", "generate code", "implement ", "how can i create", "python script", " script", "python"]
+CODE_KEYWORDS = [
+    "write code", "create script", "generate code", "implement ", "how can i create", 
+    "python script", " script", "python",
+    ".gitignore", "dockerfile", "requirements.txt", "best practices for",
+    "this repository"
+]
 CONTENT_KEYWORDS = ["write a blog", "write an article", "create content", "content creation", "draft ", "write a story", "blog post", "article ", "social media post", "write a post"]
 
 FILESYSTEM_PATTERNS = [
@@ -72,6 +76,9 @@ def classify_intent(message: str) -> Intent:
     msg = message.strip().lower()
     logger.debug("Classifying intent for msg: '%s'", msg)
     
+    if any(kw in msg for kw in CODE_KEYWORDS):
+        return Intent.CODE_GEN
+
     if any(re.search(rf"\b{re.escape(kw)}\b", msg) for kw in CAPABILITY_KEYWORDS) or msg in CAPABILITY_SINGLE_WORDS:
         return Intent.CAPABILITY_QUERY
     
@@ -80,9 +87,6 @@ def classify_intent(message: str) -> Intent:
 
     if msg in GREETING_WORDS:
         return Intent.GREETING
-
-    if any(kw in msg for kw in CODE_KEYWORDS):
-        return Intent.CODE_GEN
 
     if any(kw in msg for kw in CONTENT_KEYWORDS):
         return Intent.CONTENT

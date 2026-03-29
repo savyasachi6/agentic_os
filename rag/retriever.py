@@ -20,7 +20,7 @@ class HybridRetriever:
     ):
         self.embedder = embedder_client or kwargs.get("embedder")
         self.db = db_session
-        self.distance_threshold = 0.45
+        self.distance_threshold = 0.60
 
         if not self.embedder:
             try:
