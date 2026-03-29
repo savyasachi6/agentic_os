@@ -246,6 +246,16 @@ async def chat_ws(ws: WebSocket):
                     print(f"[gateway] Background log failure ({role}): {e}")
 
             asyncio.create_task(_bg_log_thought(session_id, "user", user_msg))
+            
+            # Bug 4: Persist user message to vector memory for long-term RAG context
+            async def _bg_store_memory(sid: str, role: str, msg: str):
+                try:
+                    vs = VectorStore()
+                    await vs.store_memory_async(session_id=sid, role=role, content=msg)
+                except Exception as e:
+                    print(f"[gateway] Memory store failure ({role}): {e}")
+
+            asyncio.create_task(_bg_store_memory(session_id, "user", user_msg))
 
             from core.message_bus import A2ABus
             bus = A2ABus()
@@ -311,6 +321,8 @@ async def chat_ws(ws: WebSocket):
                 
                 # Phase 3.5: Log assistant message in background
                 asyncio.create_task(_bg_log_thought(session_id, "assistant", response))
+                # Bug 4: Persist assistant message to vector memory
+                asyncio.create_task(_bg_store_memory(session_id, "assistant", response))
 
                 await ws.send_json({"type": "final", "content": response})
             finally:

@@ -13,6 +13,7 @@ Nodes:
 """
 import json
 import logging
+import asyncio
 from typing import Optional, Callable, Awaitable, Any
 
 from langgraph.graph import StateGraph, END
@@ -248,7 +249,27 @@ async def execute_node(state: AgentState) -> AgentState:
 
     if bridge:
         try:
-            result = await bridge.execute({"query": action_goal}, chain_id=chain_id)
+            # Bug 3: Add 45s timeout to specialist execution to prevent UI hangs
+            result = await asyncio.wait_for(
+                bridge.execute({"query": action_goal}, chain_id=chain_id),
+                timeout=45.0
+            )
+        except asyncio.TimeoutError:
+            return {
+                **state,
+                "next_node": "respond",
+                "direct_response": (
+                    f"The {action_name} agent took too long to respond (>45s). "
+                    "Please try again or rephrase your question."
+                ),
+                "last_action_status": "error",
+                "step_count": state.get("step_count", 0) + 1,
+                "invalid_call_count": state.get("invalid_call_count", 0) + 1,
+            }
+        except Exception as e:
+            obs = f"Observation Error: {e}"
+            status = "error"
+        else:
             # Extract a clean human-readable answer from the specialist result dict.
             # Keys tried in priority order: answer, response, output, content, result.
             clean_answer = (
@@ -279,15 +300,37 @@ async def execute_node(state: AgentState) -> AgentState:
                 # Specialist returned a clean answer — go straight to respond,
                 # no need for another LLM round-trip that would re-introduce
                 # raw {original_message} placeholders.
-                # RLHF Metadata update (Phase 11)
-                new_rl_meta = dict(state.get("rl_metadata", {}))
+                
+                # Clean up the answer for the UI display
+                clean_answer = _strip_react_internals(str(clean_answer))
+                
+                # RL Routing Telemetry: Extract and preserve bandit metrics
+                new_rl_meta = dict(state.get("rl_metadata") or {})
                 if result.get("query_hash_rl"):
                     new_rl_meta.update({
                         "query_hash_rl": result.get("query_hash_rl"),
-                        "arm_index": result.get("arm_index"),
-                        "depth": result.get("depth", 0),
-                        "chain_id": chain_id
+                        "arm_index":     result.get("arm_index"),
+                        "depth":         result.get("depth"),
+                        "speculative":   result.get("speculative"),
                     })
+
+                # Bug 6: Publish rl_metadata for all specialist turns (Tools, Code, etc.) 
+                # so the UI shows feedback thumbs even for non-RAG agents.
+                if new_rl_meta.get("query_hash_rl"):
+                    try:
+                        from core.message_bus import A2ABus
+                        bus = A2ABus()
+                        import json as _json
+                        await bus.publish(
+                            action_name,
+                            {
+                                "type": "rl_metadata",
+                                "content": _json.dumps(new_rl_meta),
+                                "session_id": str(chain_id),
+                            }
+                        )
+                    except Exception:
+                        pass # Non-critical: Telemetry failure shouldn't crash the conversation
 
                 return {
                     **state,
@@ -304,9 +347,6 @@ async def execute_node(state: AgentState) -> AgentState:
             # add as Observation and let the route LLM summarise it.
             obs = f"Observation: {json.dumps(result)}"
             status = "success"
-        except Exception as e:
-            obs = f"Observation Error: {e}"
-            status = "error"
     else:
         obs = f"Observation Error: No agent registered for '{action_name}'."
         status = "error"
