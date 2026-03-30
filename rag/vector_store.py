@@ -86,5 +86,5 @@ class VectorStore:
         except Exception as e:
             import logging
             logging.getLogger("agentos.vector_store").warning(
-                f"[store_memory_async] Failed to store memory ({role}): {e}"
+                f"[store_memory_async] Failed ({role}): {e}"
             )
