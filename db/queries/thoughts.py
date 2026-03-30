@@ -161,3 +161,18 @@ def get_session_history(session_id: str) -> List[Dict[str, Any]]:
                     "timestamp": r[2].isoformat() if hasattr(r[2], "isoformat") else str(r[2])
                 } for r in rows
             ]
+
+def store_memory_async(session_id: str, role: str, content: str, embedding: List[float]):
+    """
+    Store a turn into the persistent memories (memory_chunks) table.
+    Note: Run this in a thread if calling from an async loop.
+    """
+    import json
+    metadata = json.dumps({"role": role, "session_id": session_id})
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO memory_chunks (document_id, content, metadata_json, embedding) VALUES (%s, %s, %s, %s::vector)",
+                (session_id, content, metadata, embedding)
+            )
+        conn.commit()

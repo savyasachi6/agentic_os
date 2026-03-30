@@ -25,7 +25,7 @@ from db.connection import init_db_pool
 from rag.vector_store import VectorStore
 from rag.indexer import SkillIndexer
 from core.llm.router import LLMRouter
-from db.queries.thoughts import log_thought, delete_session_data
+from db.queries.thoughts import log_thought, delete_session_data, store_memory_async
 
 app = FastAPI(
     title="Agent OS",
@@ -250,8 +250,11 @@ async def chat_ws(ws: WebSocket):
             # Bug 4: Persist user message to vector memory for long-term RAG context
             async def _bg_store_memory(sid: str, role: str, msg: str):
                 try:
-                    vs = VectorStore()
-                    await vs.store_memory_async(session_id=sid, role=role, content=msg)
+                    from rag.embedder import Embedder
+                    emb = Embedder()
+                    vec, _ = await emb.generate_embedding_async(msg)
+                    # store_memory_async is a sync DB call; run in thread
+                    await asyncio.to_thread(store_memory_async, sid, role, msg, vec)
                 except Exception as e:
                     print(f"[gateway] Memory store failure ({role}): {e}")
 
