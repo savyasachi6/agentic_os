@@ -47,6 +47,9 @@ CONTENT_KEYWORDS = [
 # ----- Code / repo: checked before CAPABILITY so "github best practices" → CODE not CAP -----
 CODE_KEYWORDS = [
     "write code", "create script", "generate code", "implement ",
+    "explain this code", "what does this code", "how does this function",
+    "fix my code", "review my code", "check my code",
+    "write a function", "create a function", "create a class",
     "python script", " script", "how can i create",
     ".gitignore", "dockerfile", "requirements.txt",
     "best practices for", "best practice for",

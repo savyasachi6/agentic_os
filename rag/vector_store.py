@@ -74,3 +74,17 @@ class VectorStore:
         import asyncio
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, get_session_history, session_id)
+
+    async def store_memory_async(self, session_id: str, role: str, content: str):
+        """Store a conversation turn in vector memory for long-term RAG context."""
+        import asyncio
+        from db.queries.thoughts import log_thought as _log_thought
+        try:
+            vec, _ = self.generate_embedding(content)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _log_thought, session_id, role, content, vec)
+        except Exception as e:
+            import logging
+            logging.getLogger("agentos.vector_store").warning(
+                f"[store_memory_async] Failed to store memory ({role}): {e}"
+            )

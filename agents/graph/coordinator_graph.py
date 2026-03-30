@@ -267,14 +267,14 @@ async def execute_node(state: AgentState) -> AgentState:
                 "invalid_call_count": state.get("invalid_call_count", 0) + 1,
             }
         except Exception as e:
-            # Generic catch-all for specialist failures
-            obs = f"Observation Error: {e}"
-            status = "error"
-            # Return immediately with an error message to prevent UI hangs
+            logger.exception(f"[execute_node] Specialist {action_name} raised: {e}")
             return {
                 **state,
                 "next_node": "respond",
-                "direct_response": f"Sorry, the {action_name} agent failed: {e}",
+                "direct_response": (
+                    f"The {action_name} agent encountered an unexpected error: {e}. "
+                    "Please try again."
+                ),
                 "last_action_status": "error",
                 "step_count": state.get("step_count", 0) + 1,
                 "invalid_call_count": state.get("invalid_call_count", 0) + 1,
