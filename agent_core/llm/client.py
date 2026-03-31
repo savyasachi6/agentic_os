@@ -108,6 +108,7 @@ class LLMClient:
     def generate(
         self,
         messages: List[Any],
+        session_id: str = "default_session",
         priority: Priority = Priority.NORMAL,
         tier: ModelTier = ModelTier.FULL,
         stop: Optional[List[str]] = None
@@ -120,9 +121,9 @@ class LLMClient:
             loop = asyncio.get_running_loop()
             import nest_asyncio
             nest_asyncio.apply()
-            return asyncio.run(self.generate_async(messages, priority=priority, tier=tier, stop=stop))
+            return asyncio.run(self.generate_async(messages, session_id=session_id, priority=priority, tier=tier, stop=stop))
         except RuntimeError:
-            return asyncio.run(self.generate_async(messages, priority=priority, tier=tier, stop=stop))
+            return asyncio.run(self.generate_async(messages, session_id=session_id, priority=priority, tier=tier, stop=stop))
 
     async def generate_streaming(
         self,
@@ -151,13 +152,13 @@ class LLMClient:
             logger.error("LLM streaming error: %s", e)
             yield f"\n[LLM Stream Error] {e}"
 
-    def summarize(self, text: str) -> str:
+    def summarize(self, text: str, session_id: str = "default_session") -> str:
         """Produce a concise summary of the given text."""
         messages = [
             {"role": "system", "content": "Concise summary in 2-3 sentences."},
             {"role": "user", "content": text},
         ]
-        return self.generate(messages, priority=Priority.SUMMARIZATION, tier=ModelTier.NANO)
+        return self.generate(messages, session_id=session_id, priority=Priority.SUMMARIZATION, tier=ModelTier.NANO)
 
 def get_llm() -> LLMClient:
     """Helper to return the default LLMClient."""

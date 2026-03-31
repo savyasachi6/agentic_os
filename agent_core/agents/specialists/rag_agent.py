@@ -56,6 +56,16 @@ class ResearchAgentWorker:
             logger.error(f"Failed to load RAG prompt: {e}")
             self.system_prompt = "You are the RAGAgent. Perform research and retrieval."
 
+    def _clean_model_url(self, raw: str) -> str:
+        """Phase 101: Clean up model-generated URLs like url="https://..." """
+        s = (raw or "").strip()
+        if s.lower().startswith("url="):
+            s = s[4:].strip()
+        # Strip symmetric quotes
+        if len(s) >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+            s = s[1:-1].strip()
+        return s
+
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action, parse_thought
         import time
@@ -150,7 +160,7 @@ class ResearchAgentWorker:
                                 {"role": "system", "content": "Summarize the key findings and progress of this research session so far. Focus on what was found and what is still needed."},
                                 {"role": "user", "content": str(history)}
                             ]
-                            summary_text = await self.llm.generate_async(summary_prompt, tier=ModelTier.FAST)
+                            summary_text = await self.llm.generate_async(summary_prompt, session_id=session_id, tier=ModelTier.FAST)
                             # 2. Embed and Store
                             emb, _ = await self.retriever.embedder.generate_embedding_async(summary_text)
                             await loop.run_in_executor(None, store_session_summary, session_id, summary_text, emb, 0, num_thoughts)
@@ -251,7 +261,7 @@ class ResearchAgentWorker:
                 log_event(logger, "info", "research_action_parsed", 
                           node_id=task.id, session_id=session_id, turn=i+1, action_type=action_type)
                 
-                if action_type in ["complete", "done", "respond", "finish"]:
+                if action_type in ["complete", "done", "respond", "finish", "respond_direct"]:
                     try:
                         final_res = json.loads(action_payload) if isinstance(action_payload, str) and action_payload.strip().startswith("{") else action_payload
                     except Exception:
@@ -346,7 +356,16 @@ class ResearchAgentWorker:
                                 response = await handle_browser_navigate(req)
                                 if response.success:
                                     res = response.result
-                                    obs = f"Observation: Success [Search: {query}]\nResults: {res['content']}"
+                                    content = res.get("content", "")
+                                    # Phase 101 Terminal Failures:
+                                    # If it's a search page and we got very little or generic blocked content
+                                    if "google.com/search" in search_url and ("unusual traffic" in content.lower() or "blocked" in content.lower()):
+                                         await self.tree_store.update_node_status_async(
+                                             task.id, NodeStatus.DONE, 
+                                             result={"message": "I attempted a live web search, but the provider is currently blocking automated access. I'll provide what I can from my existing knowledge."}
+                                         )
+                                         return
+                                    obs = f"Observation: Success [Search: {query}]\nResults: {content}"
                                 else:
                                     obs = f"Observation: web_search failed: {response.error}"
                             except Exception as e:
@@ -355,9 +374,11 @@ class ResearchAgentWorker:
                     if not PLAYWRIGHT_AVAILABLE:
                         obs = "Observation: web_fetch unavailable (playwright missing)."
                     else:
-                        url = p.get("url")
+                        url = self._clean_model_url(p.get("url"))
                         if not url:
                             obs = "Observation: Error: No URL provided for web_fetch."
+                        elif not url.startswith(("http://", "https://")):
+                            obs = f"Observation: Error: Invalid URL protocol in '{url}'."
                         else:
                             try:
                                 log_event(logger, "info", "browser_fetch_start", 

@@ -41,14 +41,21 @@ def _extract_sql_fallback(text: str) -> Optional[str]:
         return match.group(1).strip().rstrip(';')
     return None
 
-CAPABILITY_FASTPATH = (
-    "capabilities", "what can you do", "what are your capabilities",
-    "tools", "inventory", "available agents", "how are we processing", "skills"
-)
+SELF_REF_TOKENS = ("your", "you", "agentic os", "system", "message processing", "how are we processing")
+CAPABILITY_TOKENS = ("capabilities", "what can you do", "what tools do you have", "available agents")
 
 def is_capability_fastpath(query: str) -> bool:
+    """Phase 101 Hardening: Only trigger fastpath for explicit system self-references."""
     q = (query or "").lower().strip()
-    return any(k in q for k in CAPABILITY_FASTPATH)
+    # Direct match on explicit capability questions
+    if any(c in q for c in CAPABILITY_TOKENS):
+        return True
+    
+    # Conditional match: generic terms MUST be accompanied by a self-reference
+    has_self_ref = any(s in q for s in SELF_REF_TOKENS)
+    has_generic_term = any(k in q for k in ("skills", "tools", "abilities", "functions", "inventory"))
+    
+    return has_self_ref and has_generic_term
 
 class CapabilityAgentWorker:
     """
