@@ -183,6 +183,8 @@ def load_sessions():
 @st.cache_data(ttl=10) # Phase 13: Fix B5 - Increase TTL and handle offline proxy
 def get_router_stats():
     """Fetches bandit diagnostics directly from the mounted RL Router sub-app via Gateway proxy."""
+    # Reset error state at start of fetch
+    st.session_state["rl_error"] = None
     try:
         # Increase timeout for the gateway diagnostic cold-starts (22s)
         response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=22)
@@ -191,9 +193,13 @@ def get_router_stats():
             # Ensure we only return truthy data and not the 'offline' error envelope
             if "arm_stats" in data:
                 return data
+        else:
+            st.session_state["rl_error"] = f"HTTP {response.status_code}: {response.text}"
     except Exception as e:
         # Log to browser console/stderr for debugging
-        print(f"Router stats fetch error: {e}")
+        err_msg = str(e)
+        print(f"Router stats fetch error: {err_msg}")
+        st.session_state["rl_error"] = f"Connection error: {err_msg}"
     return None
 
 def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int, chain_id: int = 0, metrics: dict = None):
@@ -466,16 +472,33 @@ with st.sidebar:
 
     elif page == "🎯 RL Strategy":
         st.subheader("Bandit Telemetry")
-        stats = get_router_stats()
-        if stats and stats.get("status") != "offline" and stats.get("arm_stats"):
+        
+        # Phase 16: Enhanced Logs/Status
+        with st.status("Fetching stats...", expanded=False) as status:
+            stats = get_router_stats()
+            if stats and stats.get("arm_stats"):
+                status.update(label="✅ Stats synced", state="complete")
+            else:
+                status.update(label="⚠️ Sync failed", state="error")
+        
+        if stats and stats.get("arm_stats"):
             pulls = sum(a.get("pulls", 0) for a in stats["arm_stats"])
             st.metric("Total Decisions", pulls)
             best_arm = max(stats["arm_stats"], key=lambda x: x.get("mean_reward", 0))
             st.metric("Winning Strategy", f"Arm {best_arm['arm']}")
-        elif stats and stats.get("status") == "offline":
-            st.caption("Router offline.")
         else:
-            st.caption("No stats available.")
+            # Phase 15: Fix B5 - Handle cold-starts and add manual retry
+            st.caption("Router offline.")
+            
+            # Phase 16: Show detailed error trace in expander
+            err = st.session_state.get("rl_error")
+            if err:
+                with st.expander("🔍 Error Logs", expanded=True):
+                    st.code(err, language="text")
+            
+            if st.button("🔄 Retry Sync", key="sidebar_rl_retry", use_container_width=True):
+                get_router_stats.clear() # Clear streamlit cache
+                st.rerun()
 
     st.markdown("---")
     st.caption("Permanent memory written to `pgvector`.")

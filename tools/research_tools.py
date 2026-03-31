@@ -32,6 +32,10 @@ class WebSearchAction(BaseAction):
     async def run_async(self, **kwargs) -> ActionResult:
         query   = kwargs.get("query", self.query)
         count   = kwargs.get("count", self.count)
+        
+        # Pre-define URLs (Phase 15: Fix B2 - NameError prevention)
+        ddg_api_url = "https://api.duckduckgo.com/"
+        ddg_url = f"https://duckduckgo.com/?q={query}&ia=web"
 
         if isinstance(query, str):
             query = query.replace("<action>", "").replace("</action>", "").strip()
@@ -57,7 +61,6 @@ class WebSearchAction(BaseAction):
 
         # ── Strategy 2: DuckDuckGo JSON API (Instant Answers) ────────────────────
         try:
-            ddg_api_url = "https://api.duckduckgo.com/"
             params = {"q": query, "format": "json", "no_html": 1, "skip_disambig": 1}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 r = await client.get(ddg_api_url, params=params)
@@ -79,7 +82,7 @@ class WebSearchAction(BaseAction):
                     logger.info(f"[web_search] Found {len(results)} results via DDG API")
                     return ActionResult(success=True, data={"output": "\n\n".join(results)})
         except Exception as e:
-            logger.warning(f"[web_search] DDG API failed, trying lightpanda: {e}")
+            logger.warning(f"[web_search] DDG API failed, trying HTTPX fallback (Strategy 3): {e}")
 
         # ── Strategy 3: Fallback — httpx GET to DuckDuckGo HTML ─────────────────
         try:
@@ -124,9 +127,10 @@ class WebScrapeAction(BaseAction):
         return "web_scrape requires run_async"
 
     async def run_async(self, **kwargs) -> ActionResult:
-        url = kwargs.get("url", self.query)  # Note: query is inherited from BaseAction if used loosely
-        if not url or url == "self": # Guard against common mis-passes
-            url = kwargs.get("url") or self.url
+        # Phase 15 Fix B4: Correct URL lookup reference
+        url = kwargs.get("url") or getattr(self, "url", "")
+        if not url or url == "self": 
+            url = self.url
             
         browser_url = settings.browser_ws_url or "ws://lightpanda:9222"
         from markdownify import markdownify
@@ -135,9 +139,9 @@ class WebScrapeAction(BaseAction):
         try:
             import playwright.async_api as pw
             async with pw.async_playwright() as p:
-                logger.info(f"[web_scrape] Connecting to browser at {browser_url}")
-                # Use connect() for generic WS instead of connect_over_cdp if CDP is flaky
-                browser = await p.chromium.connect(browser_url)
+                logger.info(f"[web_scrape] Connecting via CDP to {browser_url} (Phase 15 Fix)")
+                # Use connect_over_cdp() for Lightpanda's CDP endpoint (Fix B3)
+                browser = await p.chromium.connect_over_cdp(browser_url)
                 page = await browser.new_page()
                 
                 await page.goto(url, wait_until="networkidle", timeout=30000)

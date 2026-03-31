@@ -58,9 +58,6 @@ def _strip_react_internals(text: str) -> str:
     result = "\n".join(lines).strip()
     return result or text  # safety: never return empty
 
-    result = "\n".join(lines).strip()
-    return result or text  # safety: never return empty
-
 # ─────────────────────────────────────────────
 # Node functions
 # ─────────────────────────────────────────────
