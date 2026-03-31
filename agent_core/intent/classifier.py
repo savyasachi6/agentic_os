@@ -13,9 +13,10 @@ logger = logging.getLogger("agentos.intent.classifier")
 
 # --- Keywords and Patterns ---
 CAPABILITY_KEYWORDS = [
-    "what can you do", "what are you", "capabilities", "help me",
-    "how can you help", "what skills", "list skills", "show skills",
-    "available tools", "abilities", "what is indexed", "what are some of the skills",
+    "capabilities", "what can you do", "what are your capabilities", 
+    "available tools", "inventory", "available agents", "how are we processing",
+    "help", "what are you", "how can you help", "what skills", "list skills", "show skills",
+    "abilities", "what is indexed", "what are some of the skills",
     "tell me about your skills", "list your skills", "project links", "github", "documentation",
     "repo", "where is the code", "links to this project", "github url", "repo url"
 ]

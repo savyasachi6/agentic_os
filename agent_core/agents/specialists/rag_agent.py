@@ -97,7 +97,14 @@ class ResearchAgentWorker:
                 assert task.id is not None
                 await self.tree_store.update_node_status_async(task.id, NodeStatus.PENDING, result={"progress": status_msg})
 
-                logger.info(f"{status_msg} Starting LLM generation...")
+                logger.info("Research turn start", extra={
+                    "event": "research_turn_start",
+                    "role": self.role.value,
+                    "node_id": task.id,
+                    "session_id": session_id,
+                    "turn": i + 1,
+                    "max_turns": max_iterations
+                })
                 loop = asyncio.get_running_loop()
 
                 # Log original user goal as a 'user' thought for memory retrieval
@@ -159,18 +166,15 @@ class ResearchAgentWorker:
                     # Remove the entire thinking block from the response for downstream parsing
                     response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
                     thought_text = native_thinking
-                else:
-                    thought_text = parse_thought(response_text)
-                
-                from agent_core.reasoning import clean_thought_text
+                from agent_core.reasoning import normalize_thought
                 
                 # Deduplication logic (Phase 87 Alignment)
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
                 if thought_text:
-                    # Comprehensive cleanup of internal markers (Phase 87)
-                    clean_thought = clean_thought_text(thought_text)
+                    # Comprehensive cleanup of internal markers (Phase 89)
+                    clean_thought = normalize_thought(thought_text)
                     
                     if clean_thought and clean_thought != self._last_published_thought:
                         turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
@@ -181,7 +185,9 @@ class ResearchAgentWorker:
                         })
                         self._last_published_thought = clean_thought
                     else:
-                        logger.debug("Skipping redundant thought publishing", extra={"turn": i+1, "node_id": task.id})
+                        logger.debug("Skipping redundant thought publishing", extra={
+                            "event": "thought_skipped", "turn": i + 1, "node_id": task.id
+                        })
 
                 # Explicit Last Turn Nudge (Phase 87 Alignment)
                 if i == max_iterations - 1:
@@ -234,7 +240,14 @@ class ResearchAgentWorker:
                     return
                 
                 action_type, action_payload = action_data
-                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
+                logger.info("Research action parsed", extra={
+                    "event": "research_action_parsed",
+                    "role": self.role.value,
+                    "node_id": task.id,
+                    "session_id": session_id,
+                    "turn": i + 1,
+                    "action_type": action_type
+                })
                 
                 if action_type in ["complete", "done", "respond", "finish"]:
                     try:
@@ -242,8 +255,10 @@ class ResearchAgentWorker:
                     except Exception:
                         final_res = action_payload
 
-                    duration = time.time() - start_time
-                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    logger.info("Research task completed", extra={
+                        "event": "research_task_done", "node_id": task.id, "session_id": session_id, "duration_ms": duration_ms
+                    })
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(
                         task.id, 

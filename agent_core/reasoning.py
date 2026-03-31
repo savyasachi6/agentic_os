@@ -107,25 +107,26 @@ def strip_reasoning_markers(text: str) -> str:
     # Remove Thought: prefix but keep the content if it's the only thing left
     text = re.sub(r"^Thought:\s*", "", text, flags=re.IGNORECASE).strip()
     return text
-def clean_thought_text(thought_text: Optional[str]) -> str:
+def normalize_thought(thought_text: Optional[str]) -> str:
     """
-    Phase 87: Robustly clean internal model turn markers and normalize whitespace.
+    Phase 89: Robustly clean internal model turn markers and normalize whitespace.
     Strips variants like **[Turn 1/4]**, [Turn 1 / 4], Thought: [Turn 1/4], etc.
     """
     if not thought_text:
         return ""
     
     import re as _re
+    text = thought_text
+    
     # 1. Multi-line repeated turn marker stripping (Power Regex)
-    # Handles: bolding, spacing, brackets, and case-insensitivity
-    # Also handles repeated labels that models sometimes emit
-    text = _re.sub(
-        r"(?im)(?:^\s*(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*)+",
-        "",
-        thought_text
-    ).strip()
+    # Handles: bolding, spacing, brackets, and case-insensitivity at start of string or newlines
+    text = _re.sub(r"(?im)^\s*(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*", "", text)
+    
+    # 2. Inline global turn marker stripping (Backup for models that inject mid-sentence)
+    text = _re.sub(r"(?i)(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*", "", text)
 
-    # 2. Normalize whitespace (No more than two newlines)
+    # 3. Normalize whitespace (Max two newlines, max one space)
     text = _re.sub(r"\n{3,}", "\n\n", text)
+    text = _re.sub(r"[ \t]{2,}", " ", text)
     
     return text.strip()

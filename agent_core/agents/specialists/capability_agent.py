@@ -37,6 +37,15 @@ def _extract_sql_fallback(text: str) -> Optional[str]:
         return match.group(1).strip().rstrip(';')
     return None
 
+CAPABILITY_FASTPATH = (
+    "capabilities", "what can you do", "what are your capabilities",
+    "tools", "inventory", "available agents", "how are we processing", "skills"
+)
+
+def is_capability_fastpath(query: str) -> bool:
+    q = (query or "").lower().strip()
+    return any(k in q for k in CAPABILITY_FASTPATH)
+
 class CapabilityAgentWorker:
     """
     Background worker that handles `AgentRole.SCHEMA` (Capability) tasks.
@@ -78,6 +87,28 @@ class CapabilityAgentWorker:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _build_capability_manifest(self) -> str:
+        """Phase 89: Accelerated manifest for capability queries."""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT COUNT(*) as count FROM knowledge_skills")
+                    skill_count = cur.fetchone()['count']
+                    cur.execute("SELECT count(DISTINCT category) as count FROM knowledge_skills")
+                    cat_count = cur.fetchone()['count']
+            
+            res = f"I am your Agentic OS, equipped with **{skill_count} specialized skills** across **{cat_count} categories**.\n\n"
+            res += "### 🛠️ Core Toolsets\n"
+            res += "- **Autonomous Research**: Multimodal RAG with semantic search over your local brain.\n"
+            res += "- **SQL Engine**: Direct database introspection and capability mapping.\n"
+            res += "- **Web Sandbox**: Live web search and browser manipulation via Playwright.\n"
+            res += "- **Safe Execution**: Sandboxed Python environment for technical and data tasks.\n\n"
+            res += "Use 'Sync Skills' in the UI to refresh my knowledge base."
+            return res
+        except Exception as e:
+            logger.warning(f"Manifest failure: {e}")
+            return "I am equipped for RAG, SQL Discovery, Web Search, and Code execution. I can help you search your knowledge base or interact with external tools."
+
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action
         import time
@@ -106,6 +137,19 @@ class CapabilityAgentWorker:
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
         ]
+        
+        session_id = str(task.chain_id)
+        
+        # Phase 89: Capability Fast-Path
+        if is_capability_fastpath(query_goal):
+            logger.info("Capability Fast-Path triggered", extra={
+                "event": "capability_fastpath", "node_id": task.id, "session_id": session_id
+            })
+            manifest = self._build_capability_manifest()
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "fastpath"})
+            return
+
+        sql_failures = 0
 
         try:
             max_iterations = task.payload.get("max_turns", 5)
@@ -117,42 +161,42 @@ class CapabilityAgentWorker:
                     return
 
                 # Update status for UI visibility
-                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
+                logger.info("Capability turn start", extra={
+                    "event": "capability_turn_start", 
+                    "node_id": task.id, 
+                    "session_id": session_id,
+                    "turn": i + 1,
+                    "max_turns": max_iterations
+                })
                 response_text = await self.llm.generate_async(messages)
                 
-                # Extract native model thinking tokens if present (qwen3-vl:8b / thinking models)
-                # Harden: handle unclosed tags due to truncation
+                # Extract native model thinking tokens
                 import re as _re
                 thinking_match = _re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, _re.DOTALL)
                 if thinking_match:
                     native_thinking = thinking_match.group(1).strip()
-                    # Remove the thinking block from the response for downstream parsing
                     response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
                     thought_text = native_thinking
                 else:
                     from agent_core.reasoning import parse_thought
                     thought_text = parse_thought(response_text) if response_text else ""
 
-                from agent_core.reasoning import clean_thought_text
+                from agent_core.reasoning import normalize_thought
                 
-                # Deduplication logic (Phase 87 Alignment)
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
                 if thought_text:
-                    # Comprehensive cleanup of internal markers
-                    clean_thought = clean_thought_text(thought_text)
+                    clean_thought = normalize_thought(thought_text)
                     
                     if clean_thought and clean_thought != self._last_published_thought:
                         turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
                         await self.bus.publish(self.role.value, {
                             "type": "thought",
                             "content": turn_label + clean_thought,
-                            "session_id": str(task.chain_id)
+                            "session_id": session_id
                         })
                         self._last_published_thought = clean_thought
-                    else:
-                        logger.debug("Skipping redundant thought publishing", extra={"turn": i+1, "node_id": task.id})
 
                 # Explicit Last Turn Nudge (Phase 87 Alignment)
                 if i == max_iterations - 1:
@@ -187,7 +231,14 @@ class CapabilityAgentWorker:
                         return
                 
                 action_type, action_payload = action_data
-                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
+                logger.info("Capability action parsed", extra={
+                    "event": "capability_action_parsed",
+                    "role": self.role.value,
+                    "node_id": task.id,
+                    "session_id": session_id,
+                    "turn": i + 1,
+                    "action_type": action_type
+                })
                 
                 if action_type in ["complete", "done", "respond", "finish", "complete_task", "respond_direct"]:
                     try:
@@ -195,8 +246,10 @@ class CapabilityAgentWorker:
                     except Exception:
                         final_res = action_payload
 
-                    duration = time.time() - start_time
-                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    logger.info("Capability task completed", extra={
+                        "event": "capability_task_done", "node_id": task.id, "session_id": session_id, "duration_ms": duration_ms
+                    })
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": final_res, "message": final_res})
                     return
@@ -204,6 +257,17 @@ class CapabilityAgentWorker:
                 if action_type == "sql_query":
                     loop = asyncio.get_running_loop()
                     query_result = await loop.run_in_executor(None, self._execute_query, action_payload)
+                    
+                    if not query_result.get("success"):
+                        sql_failures += 1
+                        if sql_failures >= 1:
+                            logger.warning("SQL failure guard triggered. Falling back to manifest.", extra={
+                                "event": "sql_guard_fallback", "node_id": task.id, "session_id": session_id, "error": query_result.get("error")
+                            })
+                            manifest = self._build_capability_manifest()
+                            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "sql_guard"})
+                            return
+                            
                     obs = f"Observation: {json.dumps(query_result, default=str)}"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
