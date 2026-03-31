@@ -19,8 +19,8 @@ from db.models import Node
 from agent_core.graph.state import AgentState
 from agent_core.agent_types import NodeType, AgentRole, AgentResult, NodeStatus
 # RAG logic
-from agent_core.rag.retriever import HybridRetriever
-from agent_core.agents.core.a2a_bus import A2ABus
+from rag.cognitive_retriever import CognitiveRetriever
+from core.message_bus import A2ABus
 
 # Sandbox tools temporarily disabled until moved to core/sandbox
 PLAYWRIGHT_AVAILABLE = False
@@ -37,7 +37,7 @@ class ResearchAgentWorker:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
-        self.retriever = HybridRetriever()
+        self.retriever = CognitiveRetriever()
         self.bus = A2ABus()
         self.role = AgentRole.RAG
         self.system_prompt = ""
@@ -180,13 +180,24 @@ class ResearchAgentWorker:
                 if action_type == "hybrid_search":
                     try:
                         p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
-                        chunks_text = await self.retriever.retrieve_context_async(query=p.get("query", query_goal), session_id=session_id)
+                        # CognitiveRetriever handles depth, session context, and augmented query internally
+                        chunks_text = await self.retriever.retrieve_context(
+                            query=p.get("query", query_goal),
+                            session_id=session_id,
+                            intent=task.payload.get("intent")
+                        )
                         if not chunks_text or chunks_text.strip() == "":
-                            obs = "Observation: No relevant context found in local knowledge base."
+                            obs = "Observation: No relevant context found."
                         else:
                             obs = f"Observation: Found relevant context:\n{chunks_text}"
-                    except asyncio.TimeoutError:
-                        obs = "Observation: Search timed out. Please try a narrower query."
+                        
+                        # Update RL metadata with local depth info (duck-typing for telemetry)
+                        depth_meta = self.retriever.get_depth(task.payload.get("intent"))
+                        rl_meta.update({
+                            "top_k": depth_meta["top_k"],
+                            "depth": depth_meta["depth"],
+                            "query_hash_rl": depth_meta["query_hash_rl"]
+                        })
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_fetch":

@@ -74,7 +74,6 @@ services:
       REDIS_PORT: "6379"
       LIGHTPANDA_CDP_URL: ws://lightpanda:9222
       TOOLS_API_URL: http://tools-api:9101
-      RL_ROUTER_URL: http://rl-router:8100/rl
       LLM_MODEL: qwen3-vl:8b
       EMBED_MODEL: mxbai-embed-large
       OLLAMA_HOST: http://host.docker.internal:11434
@@ -90,33 +89,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      rl-router:
-        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
-    networks:
-      - agentos-net
-
-  rl-router:
-    build:
-      context: .
-      dockerfile: rl_router/Dockerfile
-    ports:
-      - "8100:8100"
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: agent_os
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
-      PYTHONPATH: /app
-      PYTHONUNBUFFERED: "1"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:8100/health\")'" ]
-    restart: always
     networks:
       - agentos-net
 

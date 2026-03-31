@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS skill_chunks (
     chunk_type  VARCHAR(50),  -- 'frontmatter', 'instructions', 'examples', 'scripts_ref'
     heading     VARCHAR(512), -- section heading this chunk came from
     content     TEXT NOT NULL,
-    embedding   VECTOR(1536),
+    embedding   VECTOR(1024),
     token_count INTEGER
 );
 
@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS thoughts (
     session_id  VARCHAR(255) NOT NULL,
     role        VARCHAR(50) NOT NULL,  -- 'user', 'assistant', 'tool', 'thought'
     content     TEXT NOT NULL,
-    embedding   VECTOR(1536),
+    embedding   VECTOR(1024),
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS session_summaries (
     id          SERIAL PRIMARY KEY,
     session_id  VARCHAR(255) NOT NULL,
     summary     TEXT NOT NULL,
-    embedding   VECTOR(1536),
+    embedding   VECTOR(1024),
     turn_start  INTEGER,     -- first turn index covered
     turn_end    INTEGER,     -- last turn index covered
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -182,7 +182,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     content TEXT,                       -- raw text or json payload
     payload JSONB DEFAULT '{}',         -- structured input task arguments
     result JSONB,                       -- structured output from the agent
-    embedding VECTOR(1536),              -- 1536 to match the rest of the embedding columns
+    embedding VECTOR(1024),              -- 1536 to match the rest of the embedding columns
     deadline_at TIMESTAMP,
     fractal_depth INT DEFAULT 0,
     draft_cluster INT,
@@ -279,9 +279,9 @@ CREATE TRIGGER trg_chunks_tsvector BEFORE INSERT OR UPDATE
 -- ============================================================
 CREATE TABLE IF NOT EXISTS chunk_embeddings (
     chunk_id   UUID PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-    embedding  VECTOR(1536) NOT NULL,
+    embedding  VECTOR(1024) NOT NULL,
     model_name VARCHAR(128) NOT NULL,
-    dimension  INTEGER DEFAULT 1536,
+    dimension  INTEGER DEFAULT 1024,
     is_current BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -436,7 +436,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_feedback_negative ON audit_feedback (retrie
 CREATE TABLE IF NOT EXISTS semantic_cache (
     id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     query_hash        CHAR(32) NOT NULL UNIQUE,     -- MD5 of normalized query text
-    query_vector      VECTOR(1536) NOT NULL,
+    query_vector      VECTOR(1024) NOT NULL,
     response_payload  JSONB NOT NULL,
     strategy_used     VARCHAR(64),
     staleness_version INTEGER DEFAULT 1,
@@ -457,7 +457,7 @@ CREATE INDEX IF NOT EXISTS idx_semantic_cache_hnsw
 -- Hybrid Search Stored Procedure
 -- ============================================================
 CREATE OR REPLACE FUNCTION hybrid_search(
-    query_vec VECTOR(1536),
+    query_vec VECTOR(1024),
     query_text TEXT,
     match_limit INTEGER DEFAULT 5
 )

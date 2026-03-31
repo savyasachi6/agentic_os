@@ -275,7 +275,7 @@ async def execute_node(state: AgentState) -> AgentState:
     }
 
 
-def respond_node(state: AgentState) -> AgentState:
+async def respond_node(state: AgentState) -> AgentState:
     """Final answer node. Strips internal ReAct reasoning before returning to user."""
     direct = state.get("direct_response", "")
     if not direct:
@@ -286,6 +286,27 @@ def respond_node(state: AgentState) -> AgentState:
     # Strip any Thought:/Action: prefixes that leaked through — users should only
     # see the final answer, not the internal ReAct monologue.
     direct = _strip_react_internals(direct)
+    
+    # Store this turn in Redis session history for future retrieval context
+    try:
+        from core.message_bus import A2ABus
+        from langchain_core.messages import HumanMessage
+        bus = A2ABus()
+        
+        last_human = next(
+            (m.content for m in reversed(state.get("messages", [])) if isinstance(m, HumanMessage)),
+            ""
+        )
+        
+        await bus.push_session_turn(str(state.get("chain_id", "")), {
+            "user_msg": last_human[:200],
+            "assistant_summary": direct[:200],
+            "skills_used": [state.get("action_name")] if state.get("action_name") else [],
+            "intent": state.get("intent", ""),
+        })
+    except Exception as e:
+        logger.debug(f"Failed to record session turn: {e}")
+
     return {**state, "final_response": direct or "I'm sorry, I couldn't generate a response. Please try again."}
 
 # ─────────────────────────────────────────────
