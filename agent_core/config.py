@@ -20,6 +20,9 @@ class Settings:
     redis_url: str
     ollama_base_url: str
     ollama_model: str
+    ollama_model_nano: str
+    ollama_model_fast: str
+    ollama_model_full: str
     embed_model: str
     lightpanda_ws_url: str
     log_level: str
@@ -116,6 +119,9 @@ def load_settings() -> Settings:
         redis_url        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
         ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "gemma3:4b")),
+        ollama_model_nano = os.getenv("OLLAMA_MODEL_NANO", "qwen2.5:0.5b-instruct-q4_K_M"),
+        ollama_model_fast = os.getenv("OLLAMA_MODEL_FAST", "qwen2.5:1.5b-instruct-q4_K_M"),
+        ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", os.getenv("OLLAMA_MODEL", "gemma3:4b")),
         embed_model      = os.getenv("EMBED_MODEL", "mxbai-embed-large"),
         lightpanda_ws_url= os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222"),
         log_level        = os.getenv("LOG_LEVEL", "INFO"),

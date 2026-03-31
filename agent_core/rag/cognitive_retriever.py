@@ -175,10 +175,12 @@ class CognitiveRetriever:
         )
         try:
             from agent_core.llm.client import LLMClient
+            from agent_core.llm.models import ModelTier
             llm = LLMClient()
             rewritten = await llm.generate_async(
                 [{"role": "user", "content": prompt}],
-                max_tokens=60
+                max_tokens=60,
+                tier=ModelTier.NANO
             )
             rewritten_text = rewritten.strip()
             if rewritten_text:

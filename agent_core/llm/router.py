@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 from agent_core.config import settings
 from .backends import LLMBackend, OllamaBackend, LlamaCPPBackend
 
-from .models import LLMRequest, LLMResponse, BatchGroup, Priority
+from .models import LLMRequest, LLMResponse, BatchGroup, Priority, ModelTier
 
 class BatchManager:
     def __init__(self, batch_interval_ms: int, max_batch_size: int):
@@ -76,6 +76,16 @@ class LLMRouter:
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
+        # Tier → model configuration
+        self.tier_models = {
+            ModelTier.NANO: settings.ollama_model_nano,
+            ModelTier.FAST: settings.ollama_model_fast,
+            ModelTier.FULL: settings.ollama_model_full,
+        }
+
+    def resolve_model(self, tier: ModelTier) -> str:
+        return self.tier_models.get(tier, settings.ollama_model)
+
     def start(self):
         """Start the background routing task."""
         if self._task is None or self._task.done():
@@ -95,7 +105,8 @@ class LLMRouter:
         self, 
         messages: List[Dict[str, str]], 
         session_id: str, 
-        model: str, 
+        model: Optional[str] = None, 
+        tier: ModelTier = ModelTier.FULL,
         max_tokens: int = 2048, 
         temperature: float = 0.7,
         priority: Priority = Priority.NORMAL,
@@ -108,13 +119,15 @@ class LLMRouter:
         # Lazy start the background loop if needed (Phase 9 Hardening)
         self.start()
         
-        print(f"[LLMRouter DEBUG] submit called for session {session_id} with {len(messages)} messages")
+        effective_model = model or self.resolve_model(tier)
+        
+        print(f"[LLMRouter DEBUG] submit called for session {session_id} tier={tier} model={effective_model}")
         request_id = str(uuid.uuid4())
         req = LLMRequest(
             request_id=request_id,
             session_id=session_id,
             messages=messages,
-            model=model,
+            model=effective_model,
             max_tokens=max_tokens,
             temperature=temperature,
             priority=priority,

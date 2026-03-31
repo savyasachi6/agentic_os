@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from agent_core.config import settings
 from .router import LLMRouter
-from .models import Priority
+from .models import Priority, ModelTier
 
 try:
     from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -71,7 +71,9 @@ class LLMClient:
         messages: List[Any],
         session_id: str = "default_session",
         priority: Priority = Priority.NORMAL,
-        stop: Optional[List[str]] = None
+        tier: ModelTier = ModelTier.FULL,
+        stop: Optional[List[str]] = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Asynchronously generate a response via the router."""
         try:
@@ -79,8 +81,9 @@ class LLMClient:
             return await self.router.submit(
                 messages=norm_messages,
                 session_id=session_id,
-                model=self.model_name,
-                max_tokens=self.max_tokens,
+                model=self.model_name if self.model_name != settings.ollama_model else None,
+                tier=tier,
+                max_tokens=max_tokens or self.max_tokens,
                 temperature=self.temperature,
                 priority=priority,
                 stop=stop
@@ -93,6 +96,7 @@ class LLMClient:
         self,
         messages: List[Any],
         priority: Priority = Priority.NORMAL,
+        tier: ModelTier = ModelTier.FULL,
         stop: Optional[List[str]] = None
     ) -> str:
         """
@@ -103,9 +107,9 @@ class LLMClient:
             loop = asyncio.get_running_loop()
             import nest_asyncio
             nest_asyncio.apply()
-            return asyncio.run(self.generate_async(messages, priority=priority, stop=stop))
+            return asyncio.run(self.generate_async(messages, priority=priority, tier=tier, stop=stop))
         except RuntimeError:
-            return asyncio.run(self.generate_async(messages, priority=priority, stop=stop))
+            return asyncio.run(self.generate_async(messages, priority=priority, tier=tier, stop=stop))
 
     async def generate_streaming(
         self,
@@ -140,7 +144,7 @@ class LLMClient:
             {"role": "system", "content": "Concise summary in 2-3 sentences."},
             {"role": "user", "content": text},
         ]
-        return self.generate(messages, priority=Priority.SUMMARIZATION)
+        return self.generate(messages, priority=Priority.SUMMARIZATION, tier=ModelTier.NANO)
 
 def get_llm() -> LLMClient:
     """Helper to return the default LLMClient."""
