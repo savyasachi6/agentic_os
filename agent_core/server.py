@@ -29,6 +29,14 @@ root_dir = os.path.dirname(current_dir)
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
+from agent_core.utils.logging_utils import configure_logging
+configure_logging()
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
 # Load root .env
 load_dotenv(os.path.join(root_dir, ".env"))
 

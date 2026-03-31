@@ -9,44 +9,21 @@ import logging
 import sys
 import os
 from pathlib import Path
+import logging
+
+from agent_core.utils.logging_utils import configure_logging as _configure_logging
 
 def setup_logging(level: str = "INFO", log_file: str = "logs/agentic_os.log"):
     """
     Sets up structured JSON logging to stdout and plain text to a file.
-    Creates the logs directory if it doesn't exist.
+    Delegates to the centralized utils/logging_utils.py.
     """
-    os.makedirs("logs", exist_ok=True)
-    log_level = getattr(logging, level.upper(), logging.INFO)
+    _configure_logging(level=level)
     
-    # 1. Stdout Handler (Structured JSON)
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    try:
-        from pythonjsonlogger import jsonlogger
-        # If LOG_FORMAT=text, use plain text even on stdout
-        if os.getenv("LOG_FORMAT", "json").lower() == "text":
-             stdout_fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
-             stdout_handler.setFormatter(logging.Formatter(stdout_fmt))
-        else:
-             json_fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
-             stdout_handler.setFormatter(jsonlogger.JsonFormatter(json_fmt))
-    except ImportError:
-        # Fallback if dependency not yet installed
-        stdout_fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
-        stdout_handler.setFormatter(logging.Formatter(stdout_fmt))
-
-    # 2. File Handler (Plain Text for easier reading on disk)
+    # Still add a file handler for local persistence if requested
+    import os
+    os.makedirs("logs", exist_ok=True)
     file_fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
     file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
     file_handler.setFormatter(logging.Formatter(file_fmt))
-    
-    # Configure root logger
-    root = logging.getLogger()
-    root.setLevel(log_level)
-    root.handlers = [stdout_handler, file_handler]
-    
-    # Suppress noisy libraries
-    for lib in ["httpx", "httpcore", "openai", "sqlalchemy.engine", "asyncio", "urllib3", "anthropic"]:
-        logging.getLogger(lib).setLevel(logging.WARNING)
-        
-    logger = logging.getLogger(__name__)
-    logger.info("Logging initialized", extra={"event": "startup", "level": level})
+    logging.getLogger().addHandler(file_handler)

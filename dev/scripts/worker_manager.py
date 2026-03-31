@@ -4,15 +4,20 @@ scripts/worker_manager.py
 Lifecycle manager for all background specialist agent workers.
 """
 
-import sys
 import os
+import sys
+
+# Root calculation for early path resolution
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _ROOT not in sys.path:
+    sys.path.append(_ROOT)
+
+from agent_core.utils.logging_utils import configure_logging
+configure_logging()
+
 import time
 import signal
 from typing import List
-
-# Root calculation
-_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.append(_ROOT)
 
 from agent_core.agents.core.worker import AgentWorker
 from agent_core.agents.specialists.rag_agent import ResearchAgentWorker

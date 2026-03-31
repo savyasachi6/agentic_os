@@ -10,6 +10,7 @@ import logging
 import asyncio
 import redis.asyncio as redis
 from typing import Dict, Any, AsyncGenerator, Optional
+from agent_core.config import settings
 
 logger = logging.getLogger("agentos.agents.a2a_bus")
 
@@ -19,12 +20,9 @@ class A2ABus:
     Uses Redis Pub/Sub for low-latency communication.
     """
     def __init__(self, redis_url: Optional[str] = None):
-        host = os.environ.get("REDIS_HOST", "127.0.0.1")
-        port = os.environ.get("REDIS_PORT", "6379")
-        url = redis_url or os.environ.get("REDIS_URL", f"redis://{host}:{port}")
+        url = redis_url or settings.redis_url
         try:
             self.r = redis.from_url(url, decode_responses=True)
-
             self._connected = True
         except Exception as e:
             logger.warning(f"A2ABus failed to connect to Redis at {url}: {e}. Falling back to degraded mode.")
@@ -44,9 +42,16 @@ class A2ABus:
     
     async def listen(self, my_agent: str) -> AsyncGenerator[Dict[str, Any], None]:
         """Listens for messages on the agent's specific channel."""
+        # 0. Reconnection logic (Phase 95/96 Alignment)
         if not self._connected or not self.r:
-            return # Returns an empty generator
-        
+            url = settings.redis_url
+            try:
+                self.r = redis.from_url(url, decode_responses=True)
+                self._connected = True
+            except Exception as e:
+                logger.warning(f"A2ABus failed to reconnect: {e}")
+                return
+
         try:
             pubsub = self.r.pubsub()
             channel = f"agent:{my_agent}"
@@ -63,8 +68,11 @@ class A2ABus:
             self._connected = False
         finally:
             if 'pubsub' in locals():
-                await pubsub.unsubscribe(channel)
-                await pubsub.aclose()
+                try:
+                    await pubsub.unsubscribe(channel)
+                    await pubsub.aclose()
+                except:
+                    pass
 
     async def set_heartbeat(self, agent_role: str):
         """Sets a heartbeat for an agent in Redis with a short TTL (30s)."""

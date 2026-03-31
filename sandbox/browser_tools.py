@@ -1,24 +1,12 @@
 """
-Browser Tools for Agentic OS Sandbox (Playwright / Generic CDP)
+Browser Tools for Agentic OS Sandbox (Playwright / Generic CDP) - Async Version (Phase 98)
 
 Provides browser automation as sandbox tools by connecting to a 
-CDP-compatible browser instance via WebSocket (e.g., Browserless, Chrome).
+CDP-compatible browser instance via WebSocket.
 
 Connection: reads BROWSER_WS_URL (default: ws://127.0.0.1:9222).
 Each handler opens a short-lived Playwright session, performs the action,
 then disconnects — keeping the browser server persistent across calls.
-
-Hardware Assumptions:
-- Network-bound; no GPU required.
-- Runs inside the isolated Sandbox FastAPI worker subprocess.
-- The browser server must be started *separately* (e.g., via Docker);
-  this module never spawns or manages the browser process itself.
-
-Available tools (registered in worker.py TOOL_REGISTRY):
-    browser-navigate   — goto URL, return title + visible text / HTML
-    browser-click      — click a CSS/XPath selector on the current URL
-    browser-evaluate   — evaluate a JS expression and return the result
-    browser-screenshot — capture a full-page PNG (base64-encoded)
 """
 
 from __future__ import annotations
@@ -30,17 +18,17 @@ from typing import TYPE_CHECKING
 
 # ── Optional import guard ─────────────────────────────────────────────
 try:
-    from playwright.sync_api import sync_playwright, Playwright  # type: ignore
+    from playwright.async_api import async_playwright, Playwright  # type: ignore
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
     print(
-        "[browser_tools] Warning: playwright is not installed. "
-        "Browser tools will be disabled. Install with: pip install playwright",
+        "[browser_tools] Warning: playwright (async) is not installed. "
+        "Browser tools will be disabled.",
         file=sys.stderr,
     )
 
-# Import wire models from the lightweight models module (no FastAPI dependency)
+# Import wire models
 from .models import ToolCallRequest, ToolCallResponse  # type: ignore
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -54,59 +42,77 @@ def _unavailable() -> ToolCallResponse:
     return ToolCallResponse(
         success=False,
         error=(
-            "playwright is not installed in the worker environment. "
-            "Install with: pip install playwright && playwright install"
+            "playwright (async) is not installed in the worker environment. "
         ),
     )
 
 
+async def _extract_search_results(page) -> str:
+    """Extract organic results from Google/DDG to reduce noise for the LLM."""
+    try:
+        # Google-specific organic result extraction
+        results = []
+        #有機結果常見類 
+        items = await page.query_selector_all("div.g")
+        for item in items[:6]:
+            title_el = await item.query_selector("h3")
+            link_el = await item.query_selector("a")
+            snippet_el = await item.query_selector("div.VwiC3b")
+            
+            if title_el and link_el:
+                title = await title_el.inner_text()
+                url = await link_el.get_attribute("href")
+                snippet = await snippet_el.inner_text() if snippet_el else ""
+                results.append(f"### {title}\nURL: {url}\n{snippet}")
+        
+        if results:
+            return "\n\n".join(results)
+            
+        # Fallback for other engines
+        return await page.inner_text("body")
+    except Exception:
+        return await page.inner_text("body")
+
+
 # ── Tool handlers ─────────────────────────────────────────────────────
 
-def handle_browser_navigate(request: ToolCallRequest) -> ToolCallResponse:
-    """
-    Navigate to a URL and return the page title plus visible text.
-
-    Request fields:
-        path  | args["url"]  — URL to visit (required)
-        args["content_type"] — "text" (default) or "html"
-        args["timeout_ms"]   — navigation timeout in ms (default 30000)
-    """
+async def handle_browser_navigate(request: ToolCallRequest) -> ToolCallResponse:
     if not PLAYWRIGHT_AVAILABLE:
         return _unavailable()
 
     url = request.path or request.args.get("url")
     if not url:
-        return ToolCallResponse(
-            success=False,
-            error="Missing 'path' or args['url'] for browser-navigate.",
-        )
+        return ToolCallResponse(success=False, error="Missing URL")
 
     content_type: str = request.args.get("content_type", "text")
     timeout_ms: int = int(request.args.get("timeout_ms", 30_000))
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(_cdp_url())
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, timeout=timeout_ms)
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(_cdp_url())
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, timeout=timeout_ms)
 
-            title = page.title()
-            if content_type == "html":
-                content = page.content()            # full HTML
+            title = await page.title()
+            
+            # Phase 100 Hardening: Handle search engines specifically
+            if "google.com/search" in url or "duckduckgo.com" in url:
+                content = await _extract_search_results(page)
+            elif content_type == "html":
+                content = await page.content()
             else:
-                content = page.inner_text("body")   # visible text only
+                content = await page.inner_text("body")
 
-            # Cap to 12 000 chars to stay within LLM context budgets
             if len(content) > 12_000:
                 content = content[:12_000]
                 truncated = True
             else:
                 truncated = False
 
-            page.close()
-            context.close()
-            browser.close()
+            await page.close()
+            await context.close()
+            await browser.close()
 
         return ToolCallResponse(
             success=True,
@@ -119,122 +125,94 @@ def handle_browser_navigate(request: ToolCallRequest) -> ToolCallResponse:
             },
         )
     except Exception as exc:
-        return ToolCallResponse(success=False, error=f"browser-navigate failed: {exc}")
+        return ToolCallResponse(success=False, error=f"browser-navigate (async) failed: {exc}")
 
 
-def handle_browser_click(request: ToolCallRequest) -> ToolCallResponse:
-    """
-    Navigate to a URL then click a CSS/XPath selector.
-
-    Request fields:
-        path  | args["url"]      — URL to visit (required)
-        query | args["selector"] — CSS or XPath selector to click (required)
-        args["timeout_ms"]       — action timeout in ms (default 10000)
-    """
+async def handle_browser_click(request: ToolCallRequest) -> ToolCallResponse:
     if not PLAYWRIGHT_AVAILABLE:
         return _unavailable()
 
     url = request.path or request.args.get("url")
     selector = request.query or request.args.get("selector")
-    if not url:
-        return ToolCallResponse(success=False, error="Missing 'path' or args['url'] for browser-click.")
-    if not selector:
-        return ToolCallResponse(success=False, error="Missing 'query' or args['selector'] for browser-click.")
+    if not url or not selector:
+        return ToolCallResponse(success=False, error="Missing URL or selector")
 
     timeout_ms: int = int(request.args.get("timeout_ms", 10_000))
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(_cdp_url())
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, timeout=timeout_ms * 3)
-            page.locator(selector).click(timeout=timeout_ms)
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(_cdp_url())
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, timeout=timeout_ms * 3)
+            await page.locator(selector).click(timeout=timeout_ms)
             result_url = page.url
 
-            page.close()
-            context.close()
-            browser.close()
+            await page.close()
+            await context.close()
+            await browser.close()
 
         return ToolCallResponse(
             success=True,
             result={"url": url, "selector": selector, "result_url": result_url},
         )
     except Exception as exc:
-        return ToolCallResponse(success=False, error=f"browser-click failed: {exc}")
+        return ToolCallResponse(success=False, error=f"browser-click (async) failed: {exc}")
 
 
-def handle_browser_evaluate(request: ToolCallRequest) -> ToolCallResponse:
-    """
-    Navigate to a URL and evaluate a JavaScript expression.
-
-    Request fields:
-        path  | args["url"]        — URL to visit (required)
-        query | args["expression"] — JS expression to evaluate (required)
-        args["timeout_ms"]         — navigation timeout in ms (default 30000)
-    """
+async def handle_browser_evaluate(request: ToolCallRequest) -> ToolCallResponse:
     if not PLAYWRIGHT_AVAILABLE:
         return _unavailable()
 
     url = request.path or request.args.get("url")
     expression = request.query or request.args.get("expression")
-    if not url:
-        return ToolCallResponse(success=False, error="Missing 'path' or args['url'] for browser-evaluate.")
-    if not expression:
-        return ToolCallResponse(success=False, error="Missing 'query' or args['expression'] for browser-evaluate.")
+    if not url or not expression:
+        return ToolCallResponse(success=False, error="Missing URL or expression")
 
     timeout_ms: int = int(request.args.get("timeout_ms", 30_000))
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(_cdp_url())
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, timeout=timeout_ms)
-            result = page.evaluate(expression)
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(_cdp_url())
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, timeout=timeout_ms)
+            result = await page.evaluate(expression)
 
-            page.close()
-            context.close()
-            browser.close()
+            await page.close()
+            await context.close()
+            await browser.close()
 
         return ToolCallResponse(
             success=True,
             result={"url": url, "expression": expression, "value": result},
         )
     except Exception as exc:
-        return ToolCallResponse(success=False, error=f"browser-evaluate failed: {exc}")
+        return ToolCallResponse(success=False, error=f"browser-evaluate (async) failed: {exc}")
 
 
-def handle_browser_screenshot(request: ToolCallRequest) -> ToolCallResponse:
-    """
-    Navigate to a URL and capture a full-page screenshot (PNG, base64).
-
-    Request fields:
-        path | args["url"]   — URL to visit (required)
-        args["full_page"]    — bool, default True
-        args["timeout_ms"]   — navigation timeout in ms (default 30000)
-    """
+async def handle_browser_screenshot(request: ToolCallRequest) -> ToolCallResponse:
     if not PLAYWRIGHT_AVAILABLE:
         return _unavailable()
 
     url = request.path or request.args.get("url")
     if not url:
-        return ToolCallResponse(success=False, error="Missing 'path' or args['url'] for browser-screenshot.")
+        return ToolCallResponse(success=False, error="Missing URL")
 
     full_page: bool = bool(request.args.get("full_page", True))
     timeout_ms: int = int(request.args.get("timeout_ms", 30_000))
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(_cdp_url())
-            context = browser.new_context()
-            page = context.new_page()
-            page.goto(url, timeout=timeout_ms)
-            png_bytes: bytes = page.screenshot(full_page=full_page)
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(_cdp_url())
+            context = await browser.new_context()
+            page = await context.new_page()
+            await page.goto(url, timeout=timeout_ms)
+            png_bytes: bytes = await page.screenshot(full_page=full_page)
 
-            page.close()
-            context.close()
-            browser.close()
+            await page.close()
+            await context.close()
+            await browser.close()
 
         return ToolCallResponse(
             success=True,
@@ -246,4 +224,4 @@ def handle_browser_screenshot(request: ToolCallRequest) -> ToolCallResponse:
             },
         )
     except Exception as exc:
-        return ToolCallResponse(success=False, error=f"browser-screenshot failed: {exc}")
+        return ToolCallResponse(success=False, error=f"browser-screenshot (async) failed: {exc}")

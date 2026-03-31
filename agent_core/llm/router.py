@@ -1,7 +1,10 @@
 import asyncio
 import time
 import uuid
+import logging
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger("agentos.llm.router")
 
 from agent_core.config import settings
 from .backends import LLMBackend, OllamaBackend, LlamaCPPBackend

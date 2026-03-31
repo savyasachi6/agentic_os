@@ -11,8 +11,10 @@ import re
 import json
 import logging
 import traceback
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from psycopg2.extras import RealDictCursor
+import re as _re
 
 from agent_core.llm.client import LLMClient
 from db.connection import get_db_connection
@@ -23,6 +25,8 @@ from agent_core.agent_types import Intent, AgentRole, NodeStatus
 # Capability logic
 from agent_core.reasoning import parse_react_action
 from agent_core.agents.core.a2a_bus import A2ABus
+from agent_core.utils.logging_utils import log_event
+from agent_core.utils.thought_utils import normalize_thought, should_publish
 from agent_core.config import get_links_markdown
 
 logger = logging.getLogger("agentos.agents.capability")
@@ -94,10 +98,11 @@ class CapabilityAgentWorker:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("SELECT COUNT(*) as count FROM knowledge_skills")
                     skill_count = cur.fetchone()['count']
-                    cur.execute("SELECT count(DISTINCT category) as count FROM knowledge_skills")
+                    # SQL Column Guard: replace 'category' with 'skill_type'
+                    cur.execute("SELECT count(DISTINCT skill_type) as count FROM knowledge_skills")
                     cat_count = cur.fetchone()['count']
             
-            res = f"I am your Agentic OS, equipped with **{skill_count} specialized skills** across **{cat_count} categories**.\n\n"
+            res = f"I am your Agentic OS, equipped with **{skill_count} specialized skills** across **{cat_count} types**.\n\n"
             res += "### 🛠️ Core Toolsets\n"
             res += "- **Autonomous Research**: Multimodal RAG with semantic search over your local brain.\n"
             res += "- **SQL Engine**: Direct database introspection and capability mapping.\n"
@@ -106,7 +111,7 @@ class CapabilityAgentWorker:
             res += "Use 'Sync Skills' in the UI to refresh my knowledge base."
             return res
         except Exception as e:
-            logger.warning(f"Manifest failure: {e}")
+            log_event(logger, "warning", "manifest_failure", error=str(e))
             return "I am equipped for RAG, SQL Discovery, Web Search, and Code execution. I can help you search your knowledge base or interact with external tools."
 
     async def _process_task(self, task: Node):
@@ -131,20 +136,26 @@ class CapabilityAgentWorker:
             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": links_md})
             return
 
-        clean_goal = query_goal.lower().replace("?", "").replace(".", "").strip()
-
+            return
+        
+        # 0. Dynamic Date Injection (Phase 94)
+        current_date_str = datetime.now().strftime("%B %d, %Y")
+        system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
+        
+        # SQL Column Guard: explicit prompt injection
+        guarded_prompt = system_prompt + "\n\nCRITICAL: The table 'knowledge_skills' does NOT have a 'category' column. Use 'skill_type' instead."
+        
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": guarded_prompt},
             {"role": "user", "content": f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
         ]
         
         session_id = str(task.chain_id)
         
-        # Phase 89: Capability Fast-Path
+        # Phase 89/90: Capability Fast-Path
         if is_capability_fastpath(query_goal):
-            logger.info("Capability Fast-Path triggered", extra={
-                "event": "capability_fastpath", "node_id": task.id, "session_id": session_id
-            })
+            log_event(logger, "info", "capability_fastpath_hit", 
+                      node_id=task.id, session_id=session_id)
             manifest = self._build_capability_manifest()
             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "fastpath"})
             return
@@ -161,42 +172,45 @@ class CapabilityAgentWorker:
                     return
 
                 # Update status for UI visibility
-                logger.info("Capability turn start", extra={
-                    "event": "capability_turn_start", 
-                    "node_id": task.id, 
-                    "session_id": session_id,
-                    "turn": i + 1,
-                    "max_turns": max_iterations
-                })
-                response_text = await self.llm.generate_async(messages)
+                log_event(logger, "info", "capability_turn_start", 
+                          node_id=task.id, session_id=session_id, turn=i+1, max_turns=max_iterations)
                 
+                # Phase 90: Explicit initialization to prevent UnboundLocalError
+                thought_text: str = ""
+                response_text: str = ""
+                
+                try:
+                    response_text = await self.llm.generate_async(messages, session_id=session_id)
+                except Exception as exc:
+                    log_event(logger, "error", "llm_generation_failed", 
+                              node_id=task.id, session_id=session_id, error=str(exc))
+                    response_text = ""
+
                 # Extract native model thinking tokens
-                import re as _re
                 thinking_match = _re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, _re.DOTALL)
                 if thinking_match:
-                    native_thinking = thinking_match.group(1).strip()
+                    thought_text = thinking_match.group(1).strip()
                     response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
-                    thought_text = native_thinking
                 else:
                     from agent_core.reasoning import parse_thought
                     thought_text = parse_thought(response_text) if response_text else ""
-
-                from agent_core.reasoning import normalize_thought
                 
+                # Cleanup and Publish using Shared Utilities
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
-                if thought_text:
+                if thought_text and should_publish(thought_text, self._last_published_thought):
                     clean_thought = normalize_thought(thought_text)
-                    
-                    if clean_thought and clean_thought != self._last_published_thought:
-                        turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
-                        await self.bus.publish(self.role.value, {
-                            "type": "thought",
-                            "content": turn_label + clean_thought,
-                            "session_id": session_id
-                        })
-                        self._last_published_thought = clean_thought
+                    turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
+                    await self.bus.publish(self.role.value, {
+                        "type": "thought",
+                        "content": turn_label + clean_thought,
+                        "session_id": session_id
+                    })
+                    self._last_published_thought = clean_thought
+                elif thought_text:
+                    log_event(logger, "debug", "thought_skipped", 
+                              node_id=task.id, turn=i+1)
 
                 # Explicit Last Turn Nudge (Phase 87 Alignment)
                 if i == max_iterations - 1:
@@ -231,14 +245,8 @@ class CapabilityAgentWorker:
                         return
                 
                 action_type, action_payload = action_data
-                logger.info("Capability action parsed", extra={
-                    "event": "capability_action_parsed",
-                    "role": self.role.value,
-                    "node_id": task.id,
-                    "session_id": session_id,
-                    "turn": i + 1,
-                    "action_type": action_type
-                })
+                log_event(logger, "info", "capability_action_parsed", 
+                          node_id=task.id, session_id=session_id, turn=i+1, action_type=action_type)
                 
                 if action_type in ["complete", "done", "respond", "finish", "complete_task", "respond_direct"]:
                     try:
@@ -247,9 +255,8 @@ class CapabilityAgentWorker:
                         final_res = action_payload
 
                     duration_ms = int((time.time() - start_time) * 1000)
-                    logger.info("Capability task completed", extra={
-                        "event": "capability_task_done", "node_id": task.id, "session_id": session_id, "duration_ms": duration_ms
-                    })
+                    log_event(logger, "info", "capability_task_done", 
+                              node_id=task.id, session_id=session_id, duration_ms=duration_ms)
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": final_res, "message": final_res})
                     return
@@ -261,9 +268,8 @@ class CapabilityAgentWorker:
                     if not query_result.get("success"):
                         sql_failures += 1
                         if sql_failures >= 1:
-                            logger.warning("SQL failure guard triggered. Falling back to manifest.", extra={
-                                "event": "sql_guard_fallback", "node_id": task.id, "session_id": session_id, "error": query_result.get("error")
-                            })
+                            log_event(logger, "warning", "sql_guard_fallback", 
+                                      node_id=task.id, session_id=session_id, error=query_result.get("error"))
                             manifest = self._build_capability_manifest()
                             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "sql_guard"})
                             return
@@ -274,29 +280,19 @@ class CapabilityAgentWorker:
                 
                 messages.append({"role": "user", "content": obs})
                 
-            duration = int((time.time() - start_time) * 1000)
-            logger.warning("Max iterations reached", extra={
-                "event": "max_turns",
-                "role": self.role.value,
-                "node_id": task.id,
-                "session_id": str(task.chain_id),
-                "duration_ms": duration
-            })
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "warning", "max_turns", 
+                      node_id=task.id, session_id=session_id, duration_ms=duration_ms)
             assert task.id is not None
             # Provide the last response as a partial success instead of a hard FAILED
             last_resp = messages[-1]["content"] if messages[-1]["role"] == "assistant" else "Max turns reached."
             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": last_resp, "message": last_resp, "status": "partial_success"})
 
         except Exception as e:
-            duration = int((time.time() - start_time) * 1000)
-            logger.error("Critical error in execution loop", extra={
-                "event": "worker_error",
-                "role": self.role.value,
-                "node_id": task.id,
-                "session_id": str(task.chain_id),
-                "error_type": type(e).__name__,
-                "duration_ms": duration
-            }, exc_info=True)
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "error", "worker_error", 
+                      node_id=task.id, session_id=session_id, 
+                      error_type=type(e).__name__, duration_ms=duration_ms, exc_info=True)
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "critical_failure", "error": str(e)})
 
@@ -304,14 +300,19 @@ class CapabilityAgentWorker:
         self._running = True
         logger.info(f"CapabilityAgentWorker started (listening on A2A bus topic: {AgentRole.SCHEMA.value})")
         
-        async for msg in self.bus.listen(AgentRole.SCHEMA.value):
-            if not self._running:
-                break
+        while self._running:
             try:
-                node_id = msg.get("node_id")
-                if node_id:
-                    task = self.tree_store.get_node_by_id(node_id)
-                    if task:
-                        await self._process_task(task)
+                async for msg in self.bus.listen(AgentRole.SCHEMA.value):
+                    if not self._running:
+                        break
+                    try:
+                        node_id = msg.get("node_id")
+                        if node_id:
+                            task = self.tree_store.get_node_by_id(node_id)
+                            if task:
+                                await self._process_task(task)
+                    except Exception as e:
+                        logger.error(f"Error processing A2A message: {e}")
             except Exception as e:
-                logger.error(f"Error processing A2A message: {e}")
+                logger.warning(f"CapabilityAgentWorker listener dropped: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)

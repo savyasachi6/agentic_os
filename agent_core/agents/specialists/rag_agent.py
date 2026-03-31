@@ -12,6 +12,7 @@ import logging
 import traceback
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import re as _re
 
 from agent_core.llm.client import LLMClient
 from db.queries.commands import TreeStore
@@ -19,6 +20,8 @@ from db.models import Node
 from agent_core.graph.state import AgentState
 from agent_core.agent_types import NodeType, AgentRole, AgentResult, NodeStatus
 from agent_core.llm.models import ModelTier
+from agent_core.utils.logging_utils import log_event
+from agent_core.utils.thought_utils import normalize_thought, should_publish
 # RAG logic
 from agent_core.rag.cognitive_retriever import CognitiveRetriever
 from core.message_bus import A2ABus
@@ -57,9 +60,28 @@ class ResearchAgentWorker:
         from agent_core.reasoning import parse_react_action, parse_thought
         import time
         start_time = time.time()
-        import re
-        query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
+        
+        # 1. Initialize Contextual IDs and Goals
+        query_goal = task.payload.get("query") or task.payload.get("goal") or task.content or "Unknown Goal"
         session_id = str(task.chain_id)
+        
+        # 2. Dynamic Date Injection (Phase 94)
+        current_date_str = datetime.now().strftime("%B %d, %Y")
+        system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
+        # Handle legacy {current_date} placeholder if present
+        system_prompt = system_prompt.replace("{current_date}", current_date_str)
+        
+        if "Today is" not in system_prompt:
+            system_prompt = f"Today is {current_date_str}.\n\n" + system_prompt
+
+        # 3. Build Message History
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Task Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
+        ]
+
+        logger.info(f"Task received: node_id={task.id}, role={AgentRole.RAG.value}, goal='{query_goal[:50]}...'")
+        
         research_keywords = [
             r"research", 
             r"search", 
@@ -71,17 +93,6 @@ class ResearchAgentWorker:
             r"how do i"
         ]
         clean_goal = query_goal.lower().replace("?", "").replace(".", "").strip()
-        logger.info(f"Task received: node_id={task.id}, role={AgentRole.RAG.value}, goal='{query_goal[:50]}...'")
-        
-        current_date = datetime.now().strftime("%B %d, %Y")
-        system_content = self.system_prompt.replace("{current_date}", current_date)
-        if "Today is" not in system_content:
-            system_content = f"Today is {current_date}.\n\n" + system_content
-
-        messages = [
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": f"Task Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
-        ]
 
         try:
             max_iterations = task.payload.get("max_turns", 4)
@@ -97,14 +108,8 @@ class ResearchAgentWorker:
                 assert task.id is not None
                 await self.tree_store.update_node_status_async(task.id, NodeStatus.PENDING, result={"progress": status_msg})
 
-                logger.info("Research turn start", extra={
-                    "event": "research_turn_start",
-                    "role": self.role.value,
-                    "node_id": task.id,
-                    "session_id": session_id,
-                    "turn": i + 1,
-                    "max_turns": max_iterations
-                })
+                log_event(logger, "info", "research_turn_start", 
+                          node_id=task.id, session_id=session_id, turn=i+1, max_turns=max_iterations)
                 loop = asyncio.get_running_loop()
 
                 # Log original user goal as a 'user' thought for memory retrieval
@@ -155,39 +160,42 @@ class ResearchAgentWorker:
                 except Exception as ce:
                     logger.error(f"Failed to compact session history: {ce}")
 
-                response_text = await self.llm.generate_async(messages, session_id=session_id)
+                # Phase 90: Explicit initialization to prevent UnboundLocalError
+                thought_text: str = ""
+                response_text: str = ""
                 
-                # Extract native model thinking tokens if present (qwen3-vl:8b / thinking models)
-                # Harden: handle unclosed tags due to truncation
-                import re as _re
+                try:
+                    response_text = await self.llm.generate_async(messages, session_id=session_id)
+                except Exception as exc:
+                    log_event(logger, "error", "llm_generation_failed", 
+                              node_id=task.id, session_id=session_id, error=str(exc))
+                    response_text = ""
+
+                # Extract native model thinking tokens if present
                 thinking_match = _re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, _re.DOTALL)
                 if thinking_match:
-                    native_thinking = thinking_match.group(1).strip()
-                    # Remove the entire thinking block from the response for downstream parsing
+                    thought_text = thinking_match.group(1).strip()
                     response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
-                    thought_text = native_thinking
-                from agent_core.reasoning import normalize_thought
+                else:
+                    from agent_core.reasoning import parse_thought
+                    thought_text = parse_thought(response_text) if response_text else ""
                 
-                # Deduplication logic (Phase 87 Alignment)
+                # Cleanup and Publish using Shared Utilities
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
-                if thought_text:
-                    # Comprehensive cleanup of internal markers (Phase 89)
+                if thought_text and should_publish(thought_text, self._last_published_thought):
                     clean_thought = normalize_thought(thought_text)
-                    
-                    if clean_thought and clean_thought != self._last_published_thought:
-                        turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
-                        await self.bus.publish(self.role.value, {
-                            "type": "thought",
-                            "content": turn_label + clean_thought,
-                            "session_id": session_id
-                        })
-                        self._last_published_thought = clean_thought
-                    else:
-                        logger.debug("Skipping redundant thought publishing", extra={
-                            "event": "thought_skipped", "turn": i + 1, "node_id": task.id
-                        })
+                    turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
+                    await self.bus.publish(self.role.value, {
+                        "type": "thought",
+                        "content": turn_label + clean_thought,
+                        "session_id": session_id
+                    })
+                    self._last_published_thought = clean_thought
+                elif thought_text:
+                    log_event(logger, "debug", "thought_skipped", 
+                              node_id=task.id, turn=i+1)
 
                 # Explicit Last Turn Nudge (Phase 87 Alignment)
                 if i == max_iterations - 1:
@@ -240,14 +248,8 @@ class ResearchAgentWorker:
                     return
                 
                 action_type, action_payload = action_data
-                logger.info("Research action parsed", extra={
-                    "event": "research_action_parsed",
-                    "role": self.role.value,
-                    "node_id": task.id,
-                    "session_id": session_id,
-                    "turn": i + 1,
-                    "action_type": action_type
-                })
+                log_event(logger, "info", "research_action_parsed", 
+                          node_id=task.id, session_id=session_id, turn=i+1, action_type=action_type)
                 
                 if action_type in ["complete", "done", "respond", "finish"]:
                     try:
@@ -256,9 +258,8 @@ class ResearchAgentWorker:
                         final_res = action_payload
 
                     duration_ms = int((time.time() - start_time) * 1000)
-                    logger.info("Research task completed", extra={
-                        "event": "research_task_done", "node_id": task.id, "session_id": session_id, "duration_ms": duration_ms
-                    })
+                    log_event(logger, "info", "research_task_done", 
+                              node_id=task.id, session_id=session_id, duration_ms=duration_ms)
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(
                         task.id, 
@@ -272,8 +273,8 @@ class ResearchAgentWorker:
                     )
                     return
 
-                # Unified payload parsing to prevent UnboundLocalError (Gap 78 Stabilization)
-                p = {}
+                # Phase 90: Explicit initialization to prevent UnboundLocalError
+                p: dict = {}
                 if isinstance(action_payload, str):
                     try:
                         p = json.loads(action_payload) if action_payload.strip().startswith("{") else {"query": action_payload, "url": action_payload}
@@ -329,17 +330,20 @@ class ResearchAgentWorker:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_search":
                     if not PLAYWRIGHT_AVAILABLE:
-                        obs = "Observation: web_search unavailable."
+                        obs = "Observation: web_search unavailable (playwright missing)."
                     else:
                         query = p.get("query")
                         if not query:
                             obs = "Observation: Error: No query provided for web_search."
                         else:
                             try:
-                                # Map search to a Google Search navigation call
+                                log_event(logger, "info", "browser_search_start", 
+                                          node_id=task.id, session_id=session_id, query=query)
+                                # Search mapping
                                 search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
                                 req = ToolCallRequest(path=search_url, args={})
-                                response = handle_browser_navigate(req)
+                                # Phase 98: handle_browser_navigate is now async
+                                response = await handle_browser_navigate(req)
                                 if response.success:
                                     res = response.result
                                     obs = f"Observation: Success [Search: {query}]\nResults: {res['content']}"
@@ -349,16 +353,18 @@ class ResearchAgentWorker:
                                 obs = f"Observation: web_search error: {e}"
                 elif action_type == "web_fetch":
                     if not PLAYWRIGHT_AVAILABLE:
-                        obs = "Observation: web_fetch unavailable."
+                        obs = "Observation: web_fetch unavailable (playwright missing)."
                     else:
                         url = p.get("url")
                         if not url:
                             obs = "Observation: Error: No URL provided for web_fetch."
                         else:
                             try:
-                                # Use the production browser-navigate tool
+                                log_event(logger, "info", "browser_fetch_start", 
+                                          node_id=task.id, session_id=session_id, url=url)
                                 req = ToolCallRequest(path=url, args={})
-                                response = handle_browser_navigate(req)
+                                # Phase 98: handle_browser_navigate is now async
+                                response = await handle_browser_navigate(req)
                                 if response.success:
                                     res = response.result
                                     obs = f"Observation: Success [URL: {res['url']}]\nTitle: {res['title']}\nContent: {res['content']}"
@@ -371,14 +377,9 @@ class ResearchAgentWorker:
                 
                 messages.append({"role": "user", "content": obs})
                 
-            duration = int((time.time() - start_time) * 1000)
-            logger.warning("Max turns reached", extra={
-                "event": "max_turns",
-                "role": self.role.value,
-                "node_id": task.id,
-                "session_id": session_id,
-                "duration_ms": duration
-            })
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "warning", "max_turns", 
+                      node_id=task.id, session_id=session_id, duration_ms=duration_ms)
             assert task.id is not None
             # Revert to DONE with partial success instead of FAILED (Alignment pass)
             last_resp = messages[-1]["content"] if messages[-1]["role"] == "assistant" else "Max research turns reached."
@@ -389,15 +390,10 @@ class ResearchAgentWorker:
             )
 
         except Exception as e:
-            duration = int((time.time() - start_time) * 1000)
-            logger.error("Critical error in research loop", extra={
-                "event": "worker_error",
-                "role": self.role.value,
-                "node_id": task.id,
-                "session_id": session_id,
-                "error_type": type(e).__name__,
-                "duration_ms": duration
-            }, exc_info=True)
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "error", "worker_error", 
+                      node_id=task.id, session_id=session_id, 
+                      error_type=type(e).__name__, duration_ms=duration_ms, exc_info=True)
             assert task.id is not None
             await self.tree_store.update_node_status_async(
                 task.id, 
@@ -409,14 +405,19 @@ class ResearchAgentWorker:
         self._running = True
         logger.info(f"ResearchAgentWorker started (listening on A2A bus topic: {AgentRole.RAG.value})")
         
-        async for msg in self.bus.listen(AgentRole.RAG.value):
-            if not self._running:
-                break
+        while self._running:
             try:
-                node_id = msg.get("node_id")
-                if node_id:
-                    task = self.tree_store.get_node_by_id(node_id)
-                    if task:
-                        await self._process_task(task)
+                async for msg in self.bus.listen(AgentRole.RAG.value):
+                    if not self._running:
+                        break
+                    try:
+                        node_id = msg.get("node_id")
+                        if node_id:
+                            task = self.tree_store.get_node_by_id(node_id)
+                            if task:
+                                await self._process_task(task)
+                    except Exception as e:
+                        logger.error(f"Error processing A2A message: {e}")
             except Exception as e:
-                logger.error(f"Error processing A2A message: {e}")
+                logger.warning(f"ResearchAgentWorker listener dropped: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)

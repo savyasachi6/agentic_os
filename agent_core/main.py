@@ -35,9 +35,9 @@ if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
 
 def setup_main_logging():
     """Initialize the centralized logging system."""
-    from agent_core.logging_config import setup_logging
+    from agent_core.utils.logging_utils import configure_logging
     from agent_core.config import settings
-    setup_logging(level=settings.log_level)
+    configure_logging(level=settings.log_level)
 
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
