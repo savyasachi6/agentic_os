@@ -10,7 +10,7 @@ dev/models/
 *.bin
 *.safetensors
 *.npz
-
+*log
 # Build artifacts
 *.egg-info/
 dist/

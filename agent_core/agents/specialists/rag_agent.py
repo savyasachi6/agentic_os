@@ -162,14 +162,15 @@ class ResearchAgentWorker:
                 else:
                     thought_text = parse_thought(response_text)
                 
-                # Deduplication logic (Phase 83 Implementation)
+                from agent_core.reasoning import clean_thought_text
+                
+                # Deduplication logic (Phase 87 Alignment)
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
-                if thought_text and thought_text.strip():
-                    import re as _re
-                    # Strip any existing [Turn X/Y] or **[Turn X/Y]** or Iterate patterns that models hallucinate
-                    clean_thought = _re.sub(r"(?i)(?:\*\*)?\[?Turn\s+\d+/\d+\]?(?:\*\*)?:?\s*", "", thought_text).strip()
+                if thought_text:
+                    # Comprehensive cleanup of internal markers (Phase 87)
+                    clean_thought = clean_thought_text(thought_text)
                     
                     if clean_thought and clean_thought != self._last_published_thought:
                         turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
@@ -180,7 +181,14 @@ class ResearchAgentWorker:
                         })
                         self._last_published_thought = clean_thought
                     else:
-                        logger.debug(f"Skipping redundant thought publishing on Turn {i+1}")
+                        logger.debug("Skipping redundant thought publishing", extra={"turn": i+1, "node_id": task.id})
+
+                # Explicit Last Turn Nudge (Phase 87 Alignment)
+                if i == max_iterations - 1:
+                     messages.append({
+                         "role": "user", 
+                         "content": "CRITICAL: This is your LAST TURN. Based on the tools called so far, provide a final BEST-EFFORT response to the query. Do not call any more tools."
+                     })
 
                 if not response_text or response_text.strip() == "":
                     if thinking_match:
@@ -348,18 +356,33 @@ class ResearchAgentWorker:
                 
                 messages.append({"role": "user", "content": obs})
                 
-            duration = time.time() - start_time
-            logger.warning(f"Max turns reached. node_id={task.id}, duration={duration:.2f}s")
+            duration = int((time.time() - start_time) * 1000)
+            logger.warning("Max turns reached", extra={
+                "event": "max_turns",
+                "role": self.role.value,
+                "node_id": task.id,
+                "session_id": session_id,
+                "duration_ms": duration
+            })
             assert task.id is not None
+            # Revert to DONE with partial success instead of FAILED (Alignment pass)
+            last_resp = messages[-1]["content"] if messages[-1]["role"] == "assistant" else "Max research turns reached."
             await self.tree_store.update_node_status_async(
                 task.id, 
-                NodeStatus.FAILED, 
-                result={"error_type": "max_turns", "error": "Max reasoning turns reached without finding an answer."}
+                NodeStatus.DONE, 
+                result={"message": last_resp, "status": "partial_success", "error": "Max iterations reached."}
             )
 
         except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
+            duration = int((time.time() - start_time) * 1000)
+            logger.error("Critical error in research loop", extra={
+                "event": "worker_error",
+                "role": self.role.value,
+                "node_id": task.id,
+                "session_id": session_id,
+                "error_type": type(e).__name__,
+                "duration_ms": duration
+            }, exc_info=True)
             assert task.id is not None
             await self.tree_store.update_node_status_async(
                 task.id, 

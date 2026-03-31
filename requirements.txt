@@ -36,4 +36,5 @@ langgraph>=0.2.0
 bs4
 lxml
 arxiv
+python-json-logger
 

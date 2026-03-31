@@ -132,11 +132,33 @@ class CapabilityAgentWorker:
                 else:
                     from agent_core.reasoning import parse_thought
                     thought_text = parse_thought(response_text) if response_text else ""
+
+                from agent_core.reasoning import clean_thought_text
                 
+                # Deduplication logic (Phase 87 Alignment)
+                if not hasattr(self, "_last_published_thought"):
+                    self._last_published_thought = ""
+
                 if thought_text:
-                    await self.bus.publish(self.role.value, {
-                        "type": "thought",
-                        "content": f"**[Turn {i+1}/{max_iterations}]** {thought_text}"
+                    # Comprehensive cleanup of internal markers
+                    clean_thought = clean_thought_text(thought_text)
+                    
+                    if clean_thought and clean_thought != self._last_published_thought:
+                        turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
+                        await self.bus.publish(self.role.value, {
+                            "type": "thought",
+                            "content": turn_label + clean_thought,
+                            "session_id": str(task.chain_id)
+                        })
+                        self._last_published_thought = clean_thought
+                    else:
+                        logger.debug("Skipping redundant thought publishing", extra={"turn": i+1, "node_id": task.id})
+
+                # Explicit Last Turn Nudge (Phase 87 Alignment)
+                if i == max_iterations - 1:
+                    messages.append({
+                        "role": "user", 
+                        "content": "CRITICAL: This is your LAST TURN. Based on the findings so far, provide a final BEST-EFFORT response to the goal. Do not call any more tools."
                     })
 
                 if not response_text or response_text.strip() == "":
@@ -188,14 +210,29 @@ class CapabilityAgentWorker:
                 
                 messages.append({"role": "user", "content": obs})
                 
-            duration = time.time() - start_time
-            logger.warning(f"Max iterations reached. node_id={task.id}, duration={duration:.2f}s")
+            duration = int((time.time() - start_time) * 1000)
+            logger.warning("Max iterations reached", extra={
+                "event": "max_turns",
+                "role": self.role.value,
+                "node_id": task.id,
+                "session_id": str(task.chain_id),
+                "duration_ms": duration
+            })
             assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "max_turns", "error": "Max iterations reached without completing."})
+            # Provide the last response as a partial success instead of a hard FAILED
+            last_resp = messages[-1]["content"] if messages[-1]["role"] == "assistant" else "Max turns reached."
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": last_resp, "message": last_resp, "status": "partial_success"})
 
         except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
+            duration = int((time.time() - start_time) * 1000)
+            logger.error("Critical error in execution loop", extra={
+                "event": "worker_error",
+                "role": self.role.value,
+                "node_id": task.id,
+                "session_id": str(task.chain_id),
+                "error_type": type(e).__name__,
+                "duration_ms": duration
+            }, exc_info=True)
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "critical_failure", "error": str(e)})
 

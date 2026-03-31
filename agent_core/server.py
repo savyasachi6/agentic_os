@@ -14,6 +14,9 @@ import json
 import asyncio
 from typing import Optional
 import sys
+import logging
+
+logger = logging.getLogger("agentos.server")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,21 +69,22 @@ _worker_tasks: list[asyncio.Task] = []
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
+    from agent_core.logging_config import setup_logging
+    setup_logging(level=settings.log_level)
+    
     init_db_pool()
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
     
     # Start specialist agent workers as background tasks.
-    # Note: CodeAgentWorker and others should be imported from agent_core.agents/
-    # For now, starting the ones we have refactored.
     rag_worker = ResearchAgentWorker()
     _worker_tasks.append(asyncio.create_task(rag_worker.run_forever(), name="rag_agent_worker"))
     
     capability_worker = CapabilityAgentWorker()
     _worker_tasks.append(asyncio.create_task(capability_worker.run_forever(), name="capability_agent_worker"))
     
-    print("[server] Agent OS ready (LLM Router started, workers running).")
+    logger.info("Agent OS ready", extra={"event": "startup", "router": "started", "workers": len(_worker_tasks)})
 
 
 @app.on_event("shutdown")
@@ -238,10 +242,14 @@ async def chat_ws(ws: WebSocket):
             await ws.send_json({"type": "final", "content": response})
 
     except WebSocketDisconnect:
-        print(f"[server] WebSocket disconnected (session: {session_id})")
+        logger.info("WebSocket disconnected", extra={"event": "ws_disconnect", "session_id": session_id})
     except Exception as e:
+        logger.error("WebSocket error", extra={
+            "event": "ws_error",
+            "session_id": session_id,
+            "error_type": type(e).__name__
+        }, exc_info=True)
         try:
             await ws.send_json({"type": "error", "content": str(e)})
         except Exception:
             pass
-        print(f"[server] WebSocket error: {e}")

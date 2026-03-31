@@ -33,6 +33,12 @@ if sys.stdout and getattr(sys.stdout, 'encoding', '').lower() != 'utf-8':
         pass
 
 
+def setup_main_logging():
+    """Initialize the centralized logging system."""
+    from agent_core.logging_config import setup_logging
+    from agent_core.config import settings
+    setup_logging(level=settings.log_level)
+
 def load_project_env(project_name: str):
     """Load project-specific .env file if it exists."""
     project_path = os.path.join(root_dir, "dev", "projects", project_name)
@@ -208,6 +214,7 @@ def cmd_system(args):
 
 
 def main():
+    setup_main_logging()
     parser = argparse.ArgumentParser(
         prog="agent-os",
         description="AgentOS-style Agent OS — local LPX-ready agent with skills and pgvector RAG.",
