@@ -28,15 +28,22 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
                 cur.execute(
                     """
                     SELECT role, content, 1 - (embedding <=> %s::vector) AS score
-                    FROM thoughts WHERE session_id = %s
+                    FROM thoughts 
+                    WHERE session_id = %s
+                      AND 1 - (embedding <=> %s::vector) > 0.55
                     ORDER BY score DESC LIMIT %s
                     """,
-                    (query_vec, session_id, limit)
+                    (query_vec, session_id, query_vec, limit)
                 )
             else:
                 cur.execute(
-                    "SELECT role, content, 1 - (embedding <=> %s::vector) AS score FROM thoughts ORDER BY score DESC LIMIT %s",
-                    (query_vec, limit)
+                    """
+                    SELECT role, content, 1 - (embedding <=> %s::vector) AS score 
+                    FROM thoughts 
+                    WHERE 1 - (embedding <=> %s::vector) > 0.55
+                    ORDER BY score DESC LIMIT %s
+                    """,
+                    (query_vec, query_vec, limit)
                 )
             rows = cur.fetchall()
             return [{"role": r[0], "content": r[1], "score": r[2]} for r in rows]

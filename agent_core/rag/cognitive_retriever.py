@@ -309,7 +309,7 @@ class CognitiveRetriever:
                             """
                             SELECT result->>'message' AS content
                             FROM nodes
-                            WHERE chain_id = (SELECT id FROM chains WHERE session_id = %s LIMIT 1)
+                            WHERE chain_id = (SELECT id FROM chains WHERE session_id = %s ORDER BY created_at DESC LIMIT 1)
                               AND status = 'done'
                               AND agent_role IN ('rag', 'research')
                               AND result->>'message' IS NOT NULL
