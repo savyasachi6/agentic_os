@@ -501,7 +501,7 @@ class CognitiveRetriever:
                 if key not in content_map:
                     content_map[key] = item
 
-    # Apply recency multiplier
+        # Apply recency multiplier
         final = []
         for key, rrf_score in rrf_scores.items():
             item = dict(content_map[key])

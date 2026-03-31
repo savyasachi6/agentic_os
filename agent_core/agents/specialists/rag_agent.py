@@ -97,6 +97,17 @@ class ResearchAgentWorker:
                 await self.tree_store.update_node_status_async(task.id, NodeStatus.PENDING, result={"progress": status_msg})
 
                 logger.info(f"{status_msg} Starting LLM generation...")
+                # Log original user goal as a 'user' thought for memory retrieval
+                try:
+                    query_goal = task.payload.get("goal", task.payload.get("query", ""))
+                    if query_goal:
+                        loop = asyncio.get_running_loop()
+                        _uq_emb, _ = await self.retriever.embedder.generate_embedding_async(query_goal[:500])
+                        from db.queries.thoughts import log_thought
+                        await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
+                except Exception as e:
+                    logger.error(f"Failed to log user query thought: {e}")
+
                 response_text = await self.llm.generate_async(messages, session_id=session_id)
                 
                 # Extract native model thinking tokens if present (qwen3-vl:8b / thinking models)
@@ -135,15 +146,12 @@ class ResearchAgentWorker:
                 # Fix Break 4: Persist thought for future memory retrieval
                 try:
                     from db.queries.thoughts import log_thought
-                    from agent_core.rag.embedder import Embedder
-                    # Log in executor to avoid blocking the main reasoning loop
-                    # Only log first 500 chars to avoid prompt blow-up in subsequent retrievals
+                    # Reuse already-instantiated embedder from self.retriever
                     loop = asyncio.get_running_loop()
-                    embedder = Embedder()
-                    _emb_val, _ = await embedder.generate_embedding_async(response_text[:500])
+                    _emb_val, _ = await self.retriever.embedder.generate_embedding_async(response_text[:500])
                     await loop.run_in_executor(None, log_thought, session_id, "assistant", response_text[:500], _emb_val)
                 except Exception as e:
-                    logger.error(f"Failed to log thought: {e}")
+                    logger.error(f"Failed to log assistant thought: {e}")
                 
                 action_data = parse_react_action(response_text)
                 
