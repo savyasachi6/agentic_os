@@ -132,6 +132,19 @@ class ResearchAgentWorker:
 
                 messages.append({"role": "assistant", "content": response_text})
                 
+                # Fix Break 4: Persist thought for future memory retrieval
+                try:
+                    from db.queries.thoughts import log_thought
+                    from agent_core.rag.embedder import Embedder
+                    # Log in executor to avoid blocking the main reasoning loop
+                    # Only log first 500 chars to avoid prompt blow-up in subsequent retrievals
+                    loop = asyncio.get_running_loop()
+                    embedder = Embedder()
+                    _emb_val, _ = await embedder.generate_embedding_async(response_text[:500])
+                    await loop.run_in_executor(None, log_thought, session_id, "assistant", response_text[:500], _emb_val)
+                except Exception as e:
+                    logger.error(f"Failed to log thought: {e}")
+                
                 action_data = parse_react_action(response_text)
                 
                 rl_meta = task.payload.get("rl_metadata", {})
@@ -198,15 +211,17 @@ class ResearchAgentWorker:
                         if not chunks_text or chunks_text.strip() == "":
                             obs = "Observation: No relevant context found."
                         else:
-                            obs = f"Observation: Found relevant context:\n{chunks_text}"
+                            obs = f"[CONTEXT_GROUNDING]\nThe following information was retrieved from the brain for this task:\n\n{chunks_text}"
                         
                         # Update RL metadata with local depth info (duck-typing for telemetry)
                         depth_meta = self.retriever.get_depth(task.payload.get("intent"))
                         rl_meta.update({
                             "top_k": depth_meta["top_k"],
                             "depth": depth_meta["depth"],
-                            "query_hash_rl": depth_meta["query_hash_rl"]
                         })
+                        
+                        messages.append({"role": "system", "content": obs})
+                        continue
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_fetch":

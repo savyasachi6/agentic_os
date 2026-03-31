@@ -115,7 +115,7 @@ class CognitiveRetriever:
         rewritten_query = await self._rewrite_query(query, session_ctx)
 
         # 2. Parallel retrieval based on layer policy
-        results = await self._execute_layers(rewritten_query, query, top_k, layers, intent_key)
+        results = await self._execute_layers(rewritten_query, query, session_id, top_k, layers, intent_key)
 
         # 3. Contextual Window Expansion (Adjacent chunks)
         results = await self._expand_with_neighbors(results)
@@ -307,14 +307,16 @@ class CognitiveRetriever:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
-                            SELECT content FROM nodes
+                            SELECT result->>'message' AS content
+                            FROM nodes
                             WHERE chain_id = (SELECT id FROM chains WHERE session_id = %s LIMIT 1)
                               AND status = 'done'
                               AND agent_role IN ('rag', 'research')
+                              AND result->>'message' IS NOT NULL
                             ORDER BY created_at DESC
                             LIMIT 3;
                             """,
-                            (session_id,)
+                            (session_id,),
                         )
                         return [r[0] for r in cur.fetchall() if r[0]]
             rows = await loop.run_in_executor(None, _fetch)
@@ -328,15 +330,22 @@ class CognitiveRetriever:
     # ------------------------------------------------------------------
 
     async def _execute_layers(
-        self, rewritten_query: str, raw_query: str, top_k: int, layers: str, intent_key: str
-    ) -> List[Dict[str, Any]]:
+        self, 
+        rewritten_query: str, 
+        original_query: str, 
+        session_id: str,
+        top_k: int, 
+        layers: str, 
+        intent: str
+    ) -> List[Dict]:
+        """Runs the requested retrieval layers in parallel."""
         tasks = []
-        skill_type_filter = "code" if intent_key == "code_gen" else None
+        skill_type_filter = "code" if intent == "code_gen" else None
 
         if "M" in layers:
-            tasks.append(self._search_memory(rewritten_query, top_k))
+            tasks.append(self._search_memory(rewritten_query, session_id, top_k=5))
         if "S" in layers:
-            tasks.append(self._search_skills(raw_query, top_k, skill_type_filter))
+            tasks.append(self._search_skills(original_query, top_k, skill_type_filter))
 
         if not tasks: return []
 
@@ -368,32 +377,25 @@ class CognitiveRetriever:
     # Internal: Vector searches
     # ------------------------------------------------------------------
 
-    async def _search_memory(self, query: str, top_k: int) -> List[Dict]:
-        if not self.db: return []
+    async def _search_memory(self, query: str, session_id: str, top_k: int) -> List[Dict]:
+        """Vector search over thoughts (memory) scoped to the current session."""
         try:
-            from sqlalchemy import select
-            from .schema import MemoryChunk
+            from db.queries.thoughts import search_thoughts
             query_vec, _ = await self.embedder.generate_embedding_async(query)
-            distance_expr = MemoryChunk.embedding.cosine_distance(query_vec)
-            stmt = (
-                select(MemoryChunk, distance_expr.label("distance"))
-                .filter(MemoryChunk.session_id == session_id)
-                .filter(distance_expr < self.distance_threshold)
-                .order_by(distance_expr)
-                .limit(top_k)
-            )
+            
             loop = asyncio.get_running_loop()
-            rows = await loop.run_in_executor(None, lambda: self.db.execute(stmt).all())
+            hits = await loop.run_in_executor(None, search_thoughts, query_vec, session_id, top_k)
+            
             return [
                 {
-                    "chunk_id": r.MemoryChunk.id,
-                    "content": r.MemoryChunk.content,
+                    "chunk_id": None,
+                    "content": f"Past Memory ({h['role']}): {h['content']}",
                     "source": "memory",
-                    "score": 1.0 - float(r.distance),
-                    "metadata_json": getattr(r.MemoryChunk, "metadata_json", {}) or {},
+                    "score": float(h["score"]),
+                    "metadata_json": {"role": h["role"]},
                     "hop": 0,
                 }
-                for r in rows
+                for h in hits
             ]
         except Exception as e:
             logger.error(f"Memory search error: {e}")

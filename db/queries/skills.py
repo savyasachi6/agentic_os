@@ -37,7 +37,7 @@ def search_skills_raw(
     sql = f"""
         SELECT
             sc.skill_id, s.name, s.description, s.eval_lift,
-            sc.heading, sc.content,
+            sc.heading, sc.content, sc.id AS chunk_id,
             1 - (sc.embedding <=> %(vec)s::vector) AS score
         FROM skill_chunks sc
         JOIN knowledge_skills s ON sc.skill_id = s.id
@@ -56,7 +56,8 @@ def search_skills_raw(
             return [
                 {
                     "skill_id": r[0], "skill_name": r[1], "skill_description": r[2],
-                    "eval_lift": r[3], "heading": r[4], "content": r[5], "score": r[6]
+                    "eval_lift": r[3], "heading": r[4], "content": r[5], 
+                    "chunk_id": r[6], "score": r[7]
                 } for r in rows
             ]
  
