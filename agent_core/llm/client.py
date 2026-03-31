@@ -87,9 +87,9 @@ class LLMClient:
             
             # Tier logic: 
             # 1. If tier != FULL, pass model=None so the router resolves it via tier.
-            # 2. If tier == FULL but caller didn't override model, pass None so router uses FULL default.
-            # 3. Only pass self.model_name explicitly if it was an override during init.
-            explicit_model = self.model_name if (self.model_name != settings.ollama_model and tier == ModelTier.FULL) else None
+            # 2. If tier == FULL, pass self.model_name explicitly (which defaults to settings.ollama_model).
+            # This ensures that NANO/FAST requests always hit those tiers, but FULL uses the client's default.
+            explicit_model = self.model_name if tier == ModelTier.FULL else None
             
             return await self.router.submit(
                 messages=norm_messages,

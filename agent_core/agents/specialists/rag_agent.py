@@ -41,6 +41,7 @@ class ResearchAgentWorker:
         self.bus = A2ABus()
         self.role = AgentRole.RAG
         self.system_prompt = ""
+        self.compaction_threshold = 50
         self._load_prompt()
         self._running = False
 
@@ -107,6 +108,25 @@ class ResearchAgentWorker:
                         await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
                 except Exception as e:
                     logger.error(f"Failed to log user query thought: {e}")
+
+                # Check for session history compaction (Gap 5 Closure)
+                try:
+                    from db.queries.thoughts import get_session_history, store_session_summary
+                    history = await loop.run_in_executor(None, get_session_history, session_id)
+                    if len(history) >= self.compaction_threshold:
+                        logger.info(f"Session {session_id} exceeds threshold ({len(history)}). Compacting...")
+                        # 1. Summarize
+                        summary_prompt = [
+                            {"role": "system", "content": "Summarize the key findings and progress of this research session so far. Focus on what was found and what is still needed."},
+                            {"role": "user", "content": str(history)}
+                        ]
+                        summary_text = await self.llm.generate_async(summary_prompt, tier=ModelTier.FAST)
+                        # 2. Embed and Store
+                        emb, _ = await self.retriever.embedder.generate_embedding_async(summary_text)
+                        await loop.run_in_executor(None, store_session_summary, session_id, summary_text, emb, 0, len(history))
+                        logger.info(f"Compaction complete for session {session_id}.")
+                except Exception as ce:
+                    logger.error(f"Failed to compact session history: {ce}")
 
                 response_text = await self.llm.generate_async(messages, session_id=session_id)
                 

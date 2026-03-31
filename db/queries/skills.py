@@ -38,11 +38,16 @@ def search_skills_raw(
         SELECT
             sc.skill_id, s.name, s.description, s.eval_lift,
             sc.heading, sc.content, sc.id AS chunk_id,
-            1 - (sc.embedding <=> %(vec)s::vector) AS score
+            1 - (sc.embedding <=> %(vec)s::vector) AS score,
+            COALESCE(cs.performance_score, 0.0) AS performance_score
         FROM skill_chunks sc
         JOIN knowledge_skills s ON sc.skill_id = s.id
+        LEFT JOIN chunk_scores cs ON cs.chunk_id = uuid_generate_v5('6ba7b810-9dad-11d1-80b4-00c04fd430c8', sc.id::text)
         WHERE 1=1 {type_clause}
-        ORDER BY (sc.embedding <=> %(vec)s::vector) - (0.1 * COALESCE(s.eval_lift, 0.0)) ASC
+        ORDER BY 
+            (sc.embedding <=> %(vec)s::vector) 
+            - (0.1 * COALESCE(s.eval_lift, 0.0)) 
+            - (0.15 * COALESCE(cs.performance_score, 0.0)) ASC
         LIMIT %(limit)s;
     """
     params = {"vec": query_vec, "limit": limit}
@@ -57,7 +62,7 @@ def search_skills_raw(
                 {
                     "skill_id": r[0], "skill_name": r[1], "skill_description": r[2],
                     "eval_lift": r[3], "heading": r[4], "content": r[5], 
-                    "chunk_id": r[6], "score": r[7]
+                    "chunk_id": r[6], "score": r[7], "performance_score": r[8]
                 } for r in rows
             ]
  
