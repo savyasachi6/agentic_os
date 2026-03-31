@@ -1,8 +1,8 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.guards import AgentCallGuard
+from agents.orchestrator import OrchestratorAgent
+from core.guards import AgentCallGuard
 
 @pytest.mark.asyncio
 async def test_bug4_budget_exhaustion():
@@ -22,11 +22,11 @@ async def test_bug4_budget_exhaustion():
         "research": mock_research
     }
     
-    coordinator = CoordinatorAgent(agent_registry=agents, llm_client=mock_llm)
+    coordinator = OrchestratorAgent(agent_registry=agents, llm_client=mock_llm)
     
     # We expect it to stop after 8 calls (default max_total)
     # But for this test, let's manually trigger exhaustion if possible or just check functionality
-    # Actually, CoordinatorAgent.run_turn has for _ in range(5), so total calls can't exceed 5 in one turn 
+    # Actually, OrchestratorAgent.run_turn has for _ in range(5), so total calls can't exceed 5 in one turn 
     # unless it's the coordinator itself looping.
     # The max_total=8 is more than the loop range(5), so it won't hit it in one run_turn call
     # unless it's configured lower.
@@ -35,25 +35,25 @@ async def test_bug4_budget_exhaustion():
     # We can't easily inject it into the local scope of run_turn, 
     # but we can monkeypatch the class.
     
-    import agent_core.agents.coordinator
-    original_guard = agents.coordinator.AgentCallGuard
+    import agents.orchestrator
+    original_guard = agents.orchestrator.AgentCallGuard
     try:
         class MockGuard(AgentCallGuard):
             def __init__(self, *args, **kwargs):
                 super().__init__(max_total=2)
         
-        agents.coordinator.AgentCallGuard = MockGuard
+        agents.orchestrator.AgentCallGuard = MockGuard
         
         result = await coordinator.run_turn("test")
         assert "Agent budget exhausted" in result
         assert mock_research.execute.call_count == 2
     finally:
-        agents.coordinator.AgentCallGuard = original_guard
+        agents.orchestrator.AgentCallGuard = original_guard
 
 @pytest.mark.asyncio
 async def test_bug6_streaming_generator_fix():
     # Verify generate_streaming doesn't crash from 'await' on generator
-    from agent_core.llm.client import LLMClient
+    from core.llm.client import LLMClient
     
     client = LLMClient()
     
@@ -68,7 +68,7 @@ async def test_bug6_streaming_generator_fix():
     mock_async_client.chat.return_value = mock_chat_gen()
     
     # Patch the import in llm.client
-    import agent_core.llm.client
+    import core.llm.client.client
     with MagicMock() as mock_ollama:
         mock_ollama.AsyncClient.return_value = mock_async_client
         # We need to ensure 'from ollama import AsyncClient' inside generate_streaming gets our mock
@@ -87,7 +87,7 @@ async def test_bug6_streaming_generator_fix():
 @pytest.mark.asyncio
 async def test_bug5_redundant_ensure_chain():
     # Verify _ensure_chain is only called once
-    coordinator = CoordinatorAgent()
+    coordinator = OrchestratorAgent()
     coordinator.tree_store = MagicMock()
     coordinator.tree_store.get_chain_by_session_id_async = AsyncMock(return_value=MagicMock(id=123))
     

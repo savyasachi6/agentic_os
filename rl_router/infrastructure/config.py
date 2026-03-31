@@ -6,8 +6,29 @@ This is the ONLY module that touches env vars and files.
 Domain and application layers receive config values via injection.
 """
 
-from pydantic import Field
+import os
+import logging
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("rl_router.config")
+
+def get_secret(env_path_var: str, fallback_env: str, default: str) -> str:
+    """Utility to read secret from /run/secrets/ or env var."""
+    secret_path = os.environ.get(env_path_var)
+    if secret_path and os.path.isfile(secret_path):
+        try:
+            with open(secret_path, 'r') as f:
+                val = f.read().strip()
+                return val
+        except Exception as e:
+            logger.error(f"Failed to read secret from {secret_path}: {e}")
+    
+    fallback = os.environ.get(fallback_env)
+    if fallback:
+        return fallback
+        
+    return default
 
 
 class DatabaseSettings(BaseSettings):
@@ -16,6 +37,12 @@ class DatabaseSettings(BaseSettings):
     name: str = Field(default="agent_os", validation_alias="POSTGRES_DB")
     user: str = Field(default="agent", validation_alias="POSTGRES_USER")
     password: str = Field(default="password", validation_alias="POSTGRES_PASSWORD")
+    
+    @model_validator(mode='after')
+    def resolve_secrets(self) -> 'DatabaseSettings':
+        self.password = get_secret("POSTGRES_PASSWORD_FILE", "POSTGRES_PASSWORD", self.password)
+        return self
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 

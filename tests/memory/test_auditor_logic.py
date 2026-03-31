@@ -4,8 +4,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 import pytest
-from agent_core.rag.auditor import Auditor
-from agent_core.rag.retriever import RetrievedChunk
+from rag.auditor import Auditor
+from rag.retriever import RetrievedChunk
 
 @pytest.mark.asyncio
 async def test_auditor_single_chunk_pass():

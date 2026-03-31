@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Any, Dict, List
 from pydantic import BaseModel, Field
-from agent_core.agent_types import AgentRole, NodeType, NodeStatus
+from core.agent_types import AgentRole, NodeType, NodeStatus
 
 class Chain(BaseModel):
     id: Optional[int] = None
@@ -21,6 +21,7 @@ class Chain(BaseModel):
 class Node(BaseModel):
     id: Optional[int] = None
     chain_id: int
+    session_id: Optional[str] = None
     parent_id: Optional[int] = None
     agent_role: AgentRole
     type: NodeType

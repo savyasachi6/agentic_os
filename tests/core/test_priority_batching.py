@@ -2,8 +2,8 @@ import pytest
 import asyncio
 import time
 from unittest.mock import AsyncMock, patch
-from agent_core.llm_router.router import LLMRouter
-from agent_core.llm_router.models import Priority, LLMRequest
+from core.llm.router import LLMRouter
+from core.llm.models import Priority, LLMRequest
 
 @pytest.mark.asyncio
 async def test_priority_batching_order():

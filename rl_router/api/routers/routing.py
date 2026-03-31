@@ -3,6 +3,11 @@
 from fastapi import APIRouter, Depends
 
 from rl_router.api.dependencies import get_routing_service
+"""POST /route — π₁ bandit arm selection."""
+
+from fastapi import APIRouter, Depends
+
+from rl_router.api.dependencies import get_routing_service
 from rl_router.application.services.routing_service import RoutingService
 from rl_router.schemas.api_models import RouteRequest, RouteResponse
 
@@ -15,4 +20,6 @@ async def route(
     svc: RoutingService = Depends(get_routing_service),
 ) -> RouteResponse:
     """Select the optimal retrieval depth and speculative strategy."""
-    return svc.route(request)
+    print('--- ROUTING REQUEST RECEIVED FROM WORKER ---')
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(svc.route, request)

@@ -1,14 +1,14 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.agent_types import Intent, NodeStatus
+from agents.orchestrator import OrchestratorAgent
+from core.agent_types import Intent, NodeStatus
 from langchain_core.messages import AIMessage
 
 @pytest.mark.asyncio
 async def test_planner_integration_flow():
     """Verify that a complex task triggers the planner bridge."""
     # 1. Setup Coordinator
-    coordinator = CoordinatorAgent()
+    coordinator = OrchestratorAgent()
     
     # 2. Mock the planner BridgeAgent
     mock_planner = AsyncMock()

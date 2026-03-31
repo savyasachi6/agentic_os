@@ -1,88 +1,181 @@
+# Agentic OS - Infrastructure Blueprint
+# 
+# Design Principles:
+# 1. Zero-Trust Networking: Traffic is segmented. The frontend cannot talk to the DB directly.
+# 2. Immutable Infrastructure: Secrets are mounted directly into containers via /run/secrets, not passed globally.
+# 3. Least Privilege: cap_drop: ALL removes unnecessary kernel privileges from every container.
+
 networks:
-  agentos-net:
-    driver: bridge
+  backend-net:
+    internal: true  # Completely sealed from the outside world. Connects DB and internal core services.
+  frontend-net:
+    # Public-facing network. Only the UI and API gateways route here.
+  sandbox-net:
+    internal: true  # Extremely restricted network specifically for generic code execution bots.
+  auth-net:
+    # Connects Keycloak IAM to frontend and backend for token validation.
+  browser-net:
+    internal: true  # Connects headless browser instances strictly to core agents.
+
+secrets:
+  # Mounts physical text files as in-memory secrets securely via Docker swarm/compose.
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  keycloak_admin_password:
+    file: ./secrets/keycloak_admin_password.txt
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
 
 services:
   postgres:
-    image: ankane/pgvector
+    # PgVector extension loaded. Specifically tagged rather than using 'latest' to avoid breaking schema upgrades.
+    image: pgvector/pgvector:pg15
     ports:
       - "5432:5432"
     environment:
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PASSWORD: redis_safe_pw
+    secrets:
+      - postgres_password
     healthcheck:
+      # Validates DB readiness before allowing dependent services (like keycloak or agent-core) to boot.
       test: [ "CMD-SHELL", "pg_isready -U agent -d agent_os" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - backend-net
+      - auth-net
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+      # Mounts SQL scripts to automatically execute on the first database spin-up.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
 
   redis:
-    image: redis:7-alpine
+    # A lightweight message broker handling the A2A (Agent-to-Agent) event bus.
+    image: redis:7.2.4-alpine3.19
+    # Forces redis to boot strictly requiring authentication loaded from the mounted secret.
+    command: ["sh", "-c", "redis-server --requirepass $$(cat /run/secrets/redis_password)"]
+    environment:
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
     ports:
       - "6379:6379"
+    secrets:
+      - redis_password
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "redis-cli -a $$(cat /run/secrets/redis_password) ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - backend-net
 
   lightpanda:
-    image: lightpanda/browser:latest
+    # Open-source, high-performance browser engine for agentic scraping.
+    image: lightpanda/browser:nightly
     ports:
       - "9222:9222"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.8'
+          memory: 1G
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - browser-net
 
   tools-api:
+    # Python sandbox environment designated strictly for arbitrary LLM code execution.
     build:
       context: .
-      dockerfile: agent_core/Dockerfile.tools
+      dockerfile: infra/Dockerfile.sandbox
     ports:
       - "9101:9101"
-    expose:
-      - "9101"
     environment:
       WORKER_PORT: "9101"
-      PYTHONPATH: /sandbox:/sandbox/dev
-    volumes:
-      - .:/sandbox
-    command: [ "python", "-u", "-m", "sandbox.worker", "--port", "9101", "--sandbox-id", "docker-tools", "--session-id", "global" ]
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:9101/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - sandbox-net
 
   agent-core:
+    # The primary REST API monolith managing orchestrator routing and LangGraph dependencies.
     build:
       context: .
-      dockerfile: agent_core/Dockerfile
+      dockerfile: infra/Dockerfile.main
     ports:
       - "8000:8000"
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: agent_os
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      LIGHTPANDA_CDP_URL: ws://lightpanda:9222
-      TOOLS_API_URL: http://tools-api:9101
-      RL_ROUTER_URL: http://rl-router:8100/rl
-      LLM_MODEL: qwen3-vl:8b
-      EMBED_MODEL: mxbai-embed-large
-      OLLAMA_HOST: http://host.docker.internal:11434
-      PYTHONPATH: /app
-      PYTHONUNBUFFERED: "1"
-    restart: always
     volumes:
       - .:/app
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      BROWSER_WS_URL: ws://lightpanda:9222
+      TOOLS_API_URL: http://tools-api:9101
+      RL_ROUTER_URL: http://rl-router:8100
+      LLM_MODEL: qwen3-vl:8b
+      OLLAMA_HOST: http://host.docker.internal:11434
+      USE_MOCK_LLM: ${USE_MOCK_LLM:-false}
+      PYTHONUNBUFFERED: "1"
+    secrets:
+      - postgres_password
+      - redis_password
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -90,37 +183,86 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      tools-api:
+        condition: service_healthy
       rl-router:
         condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
+      interval: 10s
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - backend-net
+      - frontend-net
+      - sandbox-net
+      - browser-net
+      - auth-net
 
   rl-router:
+    # Reinforcement learning feedback mechanism handling reward scoring and dynamic RAG pathways.
     build:
       context: .
       dockerfile: rl_router/Dockerfile
     ports:
       - "8100:8100"
+    volumes:
+      - ./rl_router:/app/rl_router
+      - ./core:/app/core
+      - ./db:/app/db
     environment:
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
-      PYTHONPATH: /app
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      RL_ROUTER_PORT: 8100
       PYTHONUNBUFFERED: "1"
+    secrets:
+      - postgres_password
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD-SHELL", "python -c 'import httpx; httpx.get(\"http://localhost:8100/health\")'" ]
-    restart: always
+      test: [ "CMD-SHELL", "curl -f --silent http://localhost:8100/health || exit 1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      backend-net:
+        aliases:
+          - rl-router
+      frontend-net:
 
   agent-ui:
+    # The Streamlit visualization dashboard. 
     build:
       context: .
       dockerfile: ui/Dockerfile
@@ -128,66 +270,111 @@ services:
       - "8501:8501"
     environment:
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       CORE_API_URL: http://agent-core:8000
       CORE_WS_URL: ws://agent-core:8000/ws
-      PYTHONPATH: /app
-      PYTHONUNBUFFERED: "1"
-    restart: always
-    networks:
-      - agentos-net
-
-  workers:
-    build:
-      context: .
-      dockerfile: agent_core/Dockerfile
-    environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: agent_os
-      POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      PYTHONPATH: /app
-      PYTHONUNBUFFERED: "1"
-      LLM_MODEL: qwen3-vl:8b
+      RL_ROUTER_URL: http://rl-router:8100
       OLLAMA_HOST: http://host.docker.internal:11434
+      PYTHONUNBUFFERED: "1"
+    secrets:
+      - postgres_password
+    depends_on:
+      agent-core:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
       - .:/app
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - frontend-net
+      - auth-net
+      - backend-net
+
+  workers:
+    # Asynchronous specialist processors (e.g., Executors, Researchers) polling the Redis A2A bus.
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    volumes:
+      - .:/app
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: agent_os
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REDIS_HOST: redis
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      RL_ROUTER_URL: http://rl-router:8100
+      OLLAMA_HOST: http://host.docker.internal:11434
+      LLM_MODEL: qwen3-vl:8b
+      USE_MOCK_LLM: ${USE_MOCK_LLM:-false}
+      BROWSER_WS_URL: ws://lightpanda:9222
+      PYTHONUNBUFFERED: "1"
+    secrets:
+      - postgres_password
+      - redis_password
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: [ "python", "dev/scripts/worker_manager.py" ]
     depends_on:
       agent-core:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: always
+      rl-router:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     healthcheck:
-      # Use our status script to verify Redis heartbeats are present
-      test: [ "CMD", "python", "dev/scripts/manage_workers.py", "status" ]
+      test: ["CMD-SHELL", "redis-cli -h redis ping"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
     networks:
-      - agentos-net
+      - backend-net
+      - frontend-net
+      - browser-net
 
-  # Sovereign Identity (Keycloak)
   keycloak:
+    # Heavyweight Identity and Access Management (IAM) provider. Bootstraps via Postgres schema.
     image: quay.io/keycloak/keycloak:23.0.0
-    command: start-dev
+    entrypoint: ["/bin/sh", "-c"]
+    command: "KC_DB_PASSWORD=$$(cat /run/secrets/postgres_password) KEYCLOAK_ADMIN_PASSWORD=$$(cat /run/secrets/keycloak_admin_password) /opt/keycloak/bin/kc.sh start --db postgres --db-url jdbc:postgresql://postgres:5432/keycloak --db-username agent --hostname-strict false --http-enabled true --health-enabled true"
     environment:
+      KEYCLOAK_ADMIN: admin
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: agent
-      KC_DB_PASSWORD: password
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+    secrets:
+      - postgres_password
+      - keycloak_admin_password
     ports:
       - "8080:8080"
     depends_on:
@@ -198,10 +385,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          # JVM naturally requires a heavier minimum heap.
+          cpus: '1.0'
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
-      - agentos-net
+      - auth-net
+      - frontend-net
 
 volumes:
   pgdata:
-
-

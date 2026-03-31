@@ -10,6 +10,7 @@ import os
 import sys
 import pandas as pd
 from datetime import datetime
+import streamlit.components.v1 as components
 
 # Root calculation
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,6 +26,29 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Phase 3.9: Senior UI Polish - CSS Injection for Alignment
+st.markdown("""
+<style>
+    /* Align icons in sidebar buttons */
+    section[data-testid="stSidebar"] button[kind="secondary"], 
+    section[data-testid="stSidebar"] button[kind="primary"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        text-align: left !important;
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+    }
+    /* Ensure emoji doesn't float higher than text */
+    section[data-testid="stSidebar"] button div[data-testid="stMarkdownContainer"] p {
+        margin-bottom: 0 !important;
+        line-height: 1.2 !important;
+        display: flex;
+        align-items: center;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Configuration constants — override via env vars in Docker
 CORE_API_URL = os.environ.get("CORE_API_URL", "http://localhost:8000")
@@ -45,6 +69,22 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  # List of {"role": "...", "content": "...", "type": "..."}
 if "is_processing" not in st.session_state:
     st.session_state.is_processing = False
+if "last_rl_metadata" not in st.session_state:
+    st.session_state.last_rl_metadata = {}
+
+def force_scroll_bottom():
+    """Inject JavaScript to scroll the main container to the bottom."""
+    components.html(
+        """
+        <script>
+            var body = window.parent.document.querySelector(".main");
+            if (body) {
+                body.scrollTop = body.scrollHeight;
+            }
+        </script>
+        """,
+        height=0,
+    )
 
 # ---------------------------------------------------------------------------
 # Database Utilities for Skill Explorer
@@ -97,8 +137,11 @@ def get_inheritance(normalized_name: str):
 # ---------------------------------------------------------------------------
 # API Utilities
 # ---------------------------------------------------------------------------
-def load_db_history(session_id: str):
-    """Fetch the permanent history from pgvector and populate st.session_state."""
+def load_db_history(session_id: str, force_refresh: bool = False):
+    """Fetch the permanent history from pgvector and update st.session_state."""
+    if not force_refresh and st.session_state.chat_history:
+        return True # Avoid redundant DB hits if we already have it in memory
+        
     try:
         response = requests.get(f"{CORE_API_URL}/chat/{session_id}/history", timeout=5)
         if response.status_code == 200:
@@ -121,7 +164,8 @@ def load_db_history(session_id: str):
                         st.session_state.chat_history.append({"role": "assistant", "content": content, "type": "observation"})
                 return True
     except Exception as e:
-        st.error(f"Failed to load history: {e}")
+        st.error(f"Failed to load history for session {session_id[:8]}...: {e}")
+        print(f"Failed to load history: {e}")
     return False
 
 def load_sessions():
@@ -136,16 +180,26 @@ def load_sessions():
         print(f"Failed to load sessions: {e}")
     return []
 
+@st.cache_data(ttl=10) # Phase 13: Fix B5 - Increase TTL and handle offline proxy
 def get_router_stats():
-    """Fetches bandit diagnostics directly from the mounted RL Router sub-app."""
+    """Fetches bandit diagnostics directly from the mounted RL Router sub-app via Gateway proxy."""
+    # Reset error state at start of fetch
+    st.session_state["rl_error"] = None
     try:
-        # Bypassing the /router/stats proxy in server.py which can cause deadlocks
-        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=10)
+        # Increase timeout for the gateway diagnostic cold-starts (22s)
+        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=22)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            # Ensure we only return truthy data and not the 'offline' error envelope
+            if "arm_stats" in data:
+                return data
+        else:
+            st.session_state["rl_error"] = f"HTTP {response.status_code}: {response.text}"
     except Exception as e:
-        # Silently fail or log for UI
-        print(f"Router stats fetch error: {e}")
+        # Log to browser console/stderr for debugging
+        err_msg = str(e)
+        print(f"Router stats fetch error: {err_msg}")
+        st.session_state["rl_error"] = f"Connection error: {err_msg}"
     return None
 
 def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int, chain_id: int = 0, metrics: dict = None):
@@ -169,6 +223,23 @@ def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: in
             st.error(f"Feedback error: {response.text}")
     except Exception as e:
         st.error(f"Failed to submit feedback: {e}")
+
+def train_rl_bandit():
+    """Trigger the RL Router to re-train the bandit from historical episodes."""
+    try:
+        response = requests.post(f"{CORE_API_URL}/rl/bandit/train", timeout=60)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success":
+                st.toast(f"RL Training Complete! Trained on {data.get('trained_on', 0)} episodes. 🧠✨")
+                return True
+            else:
+                st.error(f"Training failed: {data.get('message', 'Unknown error')}")
+        else:
+            st.error(f"HTTP Error {response.status_code}: {response.text}")
+    except Exception as e:
+        st.error(f"Failed to trigger RL training: {e}")
+    return False
 
 # ---------------------------------------------------------------------------
 # WebSocket Communication
@@ -227,24 +298,32 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
 
                 elif msg_type == "token":
                     current_response += content
-                    response_placeholder.markdown(current_response + "▌")
+                    # Phase 15 Fix B5: Use non-breaking space to avoid breaking markdown highlighting
+                    response_placeholder.markdown(current_response + "\u00A0")
 
                 elif msg_type == "final":
                     if content:
                         current_response = content.strip()
                     
                     if not current_response:
-                        current_response = "*(The agent was unable to produce a response. Please check the 'Agent Reasoning' logs above for details.)*"
+                        current_response = (
+                            "> ℹ️ **The agent finished reasoning but produced no output.**\n\n"
+                            "Try asking with more context, or use a more specific query."
+                        )
 
                     status_placeholder.empty()
-                    response_placeholder.markdown(current_response)
+                    response_placeholder.markdown(current_response) # Final clean render
                     
                     # Store everything including thoughts in history at the end
                     if current_thought:
                         st.session_state.chat_history.append({"role": "assistant", "content": current_thought, "type": "thought"})
 
                     # Store RL metadata with the message for feedback buttons
+                    # Fix B5: Fallback to embedded rl_metadata if the separate message didn't arrive
                     msg_metadata = st.session_state.get("last_rl_metadata", {})
+                    if not msg_metadata and data.get("rl_metadata"):
+                        msg_metadata = data.get("rl_metadata")
+                        
                     st.session_state.chat_history.append({
                         "role": "assistant", 
                         "content": current_response, 
@@ -258,9 +337,24 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     pass
 
                 elif msg_type == "error":
-                    error_msg = f"Agent Error: {content}"
-                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg, "type": "message"})
+                    # Never expose raw internal error strings to the user (Phase 15 Fix B8)
+                    user_facing_error = (
+                        "> ⚠️ **The agent could not complete this request.**\n\n"
+                        "This can happen when the question requires live web access that is currently unavailable, "
+                        "or when the reasoning loop exceeded its turn limit. Try rephrasing your query, "
+                        "or check the **Agent Reasoning** expander above for details."
+                    )
+                    st.session_state.chat_history.append({
+                        "role": "assistant", 
+                        "content": user_facing_error, 
+                        "type": "message"
+                    })
+                    # Log the real error to terminal only
+                    print(f"[UI] Internal agent error: {content}")
                     break
+                
+                # After each streaming chunk, we force scroll if needed
+                force_scroll_bottom()
 
     except Exception as e:
         error_msg = f"WebSocket Connection Error: {e}\n\n(Is the Agentic OS backend running?)"
@@ -282,38 +376,97 @@ with st.sidebar:
     st.markdown("---")
     
     if page == "💬 Terminal":
-        st.subheader("Session Management")
+        st.subheader("Conversations")
         
+        # Phase 3.5: Senior UI Polish - Premium Navigation
+        if st.button("➕ New Conversation", use_container_width=True, type="primary"):
+            st.session_state.session_id = str(uuid.uuid4())
+            st.session_state.chat_history = []
+            st.rerun()
+
+        # Phase 7: Session Deletion Capability
+        if st.button("🗑 Delete Conversation", use_container_width=True, type="secondary"):
+            sid = st.session_state.session_id
+            try:
+                resp = requests.delete(f"{CORE_API_URL}/chat/{sid}", timeout=5)
+                if resp.status_code == 200 and resp.json().get("status") == "success":
+                    st.success("Conversation deleted.")
+                    st.session_state.session_id = str(uuid.uuid4())
+                    st.session_state.chat_history = []
+                    st.rerun()
+                else:
+                    st.error(f"Delete failed: {resp.text}")
+            except Exception as e:
+                st.error(f"Delete error: {e}")
+
         available_sessions = load_sessions()
         
         if available_sessions:
-            session_options = {s["session_id"]: f"{str(s.get('first_message', 'No message'))[:40]}... ({str(s.get('created_at', '')).split(' ')[0]})" for s in available_sessions}
+            # Add Search Box
+            search_term = st.text_input("🔍 Search conversations", "", key="sess_search", label_visibility="collapsed")
             
-            selected_session = st.selectbox(
-                "Select Past Session", 
-                options=[""] + list(session_options.keys()),
-                format_func=lambda x: session_options.get(x, "--- Select a session ---"),
-                index=0
-            )
+            # Filter and Grouping Logic
+            filtered = [s for s in available_sessions if search_term.lower() in s.get("first_message", "").lower()]
             
-            session_input = st.text_input("Session ID (or leave blank to use dropdown)", value=selected_session or st.session_state.session_id)
-        else:
-            session_input = st.text_input("Session ID", value=st.session_state.session_id)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Load History", use_container_width=True):
-                if session_input:
-                    st.session_state.session_id = session_input
-                    if load_db_history(session_input):
-                        st.success("History hydrated!")
+            # Phase 3.6: Ensure Active Session is always present
+            current_sid = st.session_state.session_id
+            if current_sid not in [s["session_id"] for s in filtered]:
+                # Temporary entry for brand new session not yet committed/indexed
+                topic = "Current Active Chat"
+                if st.session_state.chat_history:
+                    # Try to use the first message as topic if available in memory
+                    first = [m for m in st.session_state.chat_history if m["role"] == "user"]
+                    if first: topic = first[0]["content"]
+                
+                filtered.insert(0, {"session_id": current_sid, "first_message": topic, "created_at": datetime.now().isoformat()})
+
+            from datetime import datetime
+            today = datetime.now().date()
+            
+            groups = {"Active": [], "Today": [], "Yesterday": [], "Previous Days": []}
+            for s in filtered:
+                try:
+                    sid = s["session_id"]
+                    if sid == st.session_state.session_id:
+                        groups["Active"].append(s)
+                        continue
+                        
+                    dt_str = s.get("created_at", "").replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(dt_str).date()
+                    if dt == today:
+                        groups["Today"].append(s)
+                    elif (today - dt).days == 1:
+                        groups["Yesterday"].append(s)
                     else:
-                        st.warning("No history found.")
-        with col2:
-            if st.button("New Session", use_container_width=True):
-                st.session_state.session_id = str(uuid.uuid4())
-                st.session_state.chat_history = []
-                st.rerun()
+                        groups["Previous Days"].append(s)
+                except:
+                    groups["Previous Days"].append(s)
+
+            for group_name, g_sessions in groups.items():
+                if g_sessions:
+                    st.caption(group_name)
+                    for s in g_sessions:
+                        sid = s["session_id"]
+                        # Phase 3.8: Clean label and icon logic
+                        msg = s.get("first_message", "Untitled") or "Untitled"
+                        msg = msg.replace("\n", " ").strip() # Flatten multi-line titles
+                        
+                        label = f"{msg[:32]}..." if len(msg) > 32 else msg
+                        
+                        # Use different icons based on status/group
+                        icon = "💬" if sid == st.session_state.session_id else "🕒"
+                        if group_name == "Active": icon = "✨"
+                        
+                        is_active = (sid == st.session_state.session_id)
+                        
+                        # Senior Component: Standardized button height
+                        if st.button(f"{icon} {label}", key=f"sess_{sid}", use_container_width=True, 
+                                     type="primary" if is_active else "secondary"):
+                            st.session_state.session_id = sid
+                            load_db_history(sid, force_refresh=True)
+                            st.rerun()
+        else:
+            st.info("No past conversations. Your first message will appear here.")
     
     elif page == "🧩 Skill Explorer": # Skill Explorer Sidebar
         st.subheader("Knowledge Stats")
@@ -326,7 +479,7 @@ with st.sidebar:
             with st.spinner("Indexing..."):
                 import subprocess
                 # Run the indexer from core
-                result = subprocess.run([sys.executable, os.path.join(_ROOT, "main.py"), "index"], capture_output=True, text=True)
+                result = subprocess.run([sys.executable, os.path.join(_ROOT, "gateway", "main.py"), "index"], capture_output=True, text=True)
                 if result.returncode == 0:
                     st.success("Synced!")
                     st.rerun()
@@ -335,21 +488,45 @@ with st.sidebar:
 
     elif page == "🎯 RL Strategy":
         st.subheader("Bandit Telemetry")
-        stats = get_router_stats()
-        if stats and "arm_stats" in stats:
-            pulls = sum(a["pulls"] for a in stats["arm_stats"])
+        
+        # Phase 16: Enhanced Logs/Status
+        with st.status("Fetching stats...", expanded=False) as status:
+            stats = get_router_stats()
+            if stats and stats.get("arm_stats"):
+                status.update(label="✅ Stats synced", state="complete")
+            else:
+                status.update(label="⚠️ Sync failed", state="error")
+        
+        if stats and stats.get("arm_stats"):
+            pulls = sum(a.get("pulls", 0) for a in stats["arm_stats"])
             st.metric("Total Decisions", pulls)
-            best_arm = max(stats["arm_stats"], key=lambda x: x["mean_reward"])
+            best_arm = max(stats["arm_stats"], key=lambda x: x.get("mean_reward", 0))
             st.metric("Winning Strategy", f"Arm {best_arm['arm']}")
         else:
+            # Phase 15: Fix B5 - Handle cold-starts and add manual retry
             st.caption("Router offline.")
+            
+            # Phase 16: Show detailed error trace in expander
+            err = st.session_state.get("rl_error")
+            if err:
+                with st.expander("🔍 Error Logs", expanded=True):
+                    st.code(err, language="text")
+            
+            if st.button("🔄 Retry Sync", key="sidebar_rl_retry", use_container_width=True):
+                get_router_stats.clear() # Clear streamlit cache
+                st.rerun()
 
     st.markdown("---")
     st.caption("Permanent memory written to `pgvector`.")
 
 # Main Interface Logic
 if page == "💬 Terminal":
-    st.header("Terminal")
+    # Phase 3.6: Self-Hydrating History Layer
+    # If history is empty but SID exists, try to recover from DB (handling page refreshes)
+    if not st.session_state.chat_history:
+        load_db_history(st.session_state.session_id)
+
+    st.header("Workspace Terminal")
     
     # Render existing chat history
     i = 0
@@ -368,11 +545,16 @@ if page == "💬 Terminal":
                     depth = metadata.get("depth", 0)
                     cid = metadata.get("chain_id", 0)
                     
-                    c1, c2, c3 = st.columns([0.05, 0.05, 0.9])
+                    c1, c2, c3, c4 = st.columns([0.05, 0.05, 0.2, 0.7])
                     if c1.button("👍", key=f"up_{qh}"):
                         submit_feedback(qh, arm, depth, 1, chain_id=cid, metrics=metadata)
                     if c2.button("👎", key=f"down_{qh}"):
                         submit_feedback(qh, arm, depth, -1, chain_id=cid, metrics=metadata)
+                    
+                    # Show the strategy info
+                    arm_names = {0: "Collapsed", 1: "Collapsed (Spec)", 2: "Standard", 3: "Standard (Spec)", 4: "Multi-hop", 5: "Multi-hop (Spec)", 6: "Fractal", 7: "Fractal (Spec)"}
+                    strategy_label = arm_names.get(arm, f"Arm {arm}")
+                    c3.caption(f"Strategy: **{strategy_label}**")
             i += 1
                         
         elif msg["type"] == "thought":
@@ -383,9 +565,16 @@ if page == "💬 Terminal":
                 combined_thought += "\n\n" + st.session_state.chat_history[i]["content"]
                 i += 1
                 
-            with st.chat_message("assistant", avatar="🧠"):
-                with st.expander("Agent Thought", expanded=False):
-                    st.markdown(combined_thought)
+            # Visual divider before thought block so it's clearly separate from response
+            st.markdown(
+                """<div style='border-left: 3px solid #444; padding-left: 10px; 
+                margin: 6px 0 6px 42px; opacity: 0.75; font-size:0.85em;'>
+                🧠 <strong>Agent Reasoning</strong></div>""",
+                unsafe_allow_html=True
+            )
+            with st.expander("View reasoning steps", expanded=False):
+                st.code(combined_thought, language="")   # code block preserves newlines cleanly
+
                     
         elif msg["type"] == "observation":
             with st.chat_message("assistant", avatar="🛠️"):
@@ -400,6 +589,7 @@ if page == "💬 Terminal":
         st.session_state.chat_history.append({"role": "user", "content": prompt, "type": "message"})
         with st.chat_message("user"):
             st.markdown(prompt)
+            force_scroll_bottom()
             
         st.session_state.is_processing = True
         with st.chat_message("assistant"):
@@ -459,7 +649,14 @@ elif page == "🎯 RL Strategy":
     
     stats = get_router_stats()
     
-    if stats and "arm_stats" in stats:
+    if not stats:
+        # Phase 15 Fix B5: Better "no-stats" handling with retry
+        err = st.session_state.get("rl_error", "Unknown error")
+        st.warning(f"RL Router unavailable — `{err}`")
+        if st.button("🔄 Retry Sync Strategy", key="main_rl_retry"):
+            get_router_stats.clear()
+            st.rerun()
+    elif stats.get("arm_stats"):
         # 1. Summary Metrics
         pull_counts = [a["pulls"] for a in stats["arm_stats"]]
         total_episodes = sum(pull_counts)
@@ -488,12 +685,13 @@ elif page == "🎯 RL Strategy":
         display_df = df_stats[["Action Name", "pulls", "mean_reward", "violation_rate", "theta_norm"]].copy()
         st.table(display_df.style.highlight_max(axis=0, subset=["mean_reward"], color="#2E7D32"))
         
-        # 3. Visualization
+        # 3. Visualization (Fix B6: Compatibility with older Streamlit)
         st.divider()
         st.subheader("Policy Confidence (Weight Gradients)")
         
-        # Simple bar chart for rewards
-        st.bar_chart(df_stats, x="Action Name", y="mean_reward", color="#FFD700")
+        # Format the dataframe specifically for st.bar_chart
+        chart_data = df_stats.set_index("Action Name")[["mean_reward"]]
+        st.bar_chart(chart_data)
         
         # 4. Recent Episodes (Audit Log)
         if "episodes" in stats and stats["episodes"]:
@@ -502,5 +700,16 @@ elif page == "🎯 RL Strategy":
             df_eps = pd.DataFrame(stats["episodes"])
             # Format JSON reward vector for readability
             st.dataframe(df_eps[["created_at", "query_hash", "depth_used", "speculative_used", "success", "reward_scalar", "final_utility_score"]], use_container_width=True)
+        
+        # 5. Training Control
+        st.divider()
+        st.subheader("🛠️ Strategy Maintenance")
+        c1, c2 = st.columns([0.3, 0.7])
+        if c1.button("🚀 Train RL from logged episodes", use_container_width=True):
+            with st.spinner("Replaying episodes into bandit..."):
+                if train_rl_bandit():
+                    st.success("Bandit weights updated and saved to DB.")
+                    st.rerun()
+        c2.caption("Replays up to 1000 recent episodes into the LinUCB bandit to stabilize weights and refine retrieval decision boundaries.")
     else:
         st.info("RL Router not detected or no stats available. Start the `rl_router` service.")

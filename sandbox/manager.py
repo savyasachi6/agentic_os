@@ -13,7 +13,7 @@ from typing import Optional, Dict, List
 
 import httpx
 
-from agent_core.config import settings
+from core.settings import settings
 from .models import SandboxInfo, SandboxConfig, WorkerStatus
 
 

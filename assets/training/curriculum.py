@@ -19,8 +19,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.rag.retrieval.rl_client import RLRoutingClient
+from agents.orchestrator import OrchestratorAgent
+from rag.retrieval.rl_client import RLRoutingClient
 from rl_router.schemas.api_models import ToolCallLogInput
 from rl_router.domain.models import HallucinationCategory
 
@@ -57,7 +57,7 @@ class CurriculumAgent:
     Implements ADPO via multiple rollouts per task.
     """
     def __init__(self, n_rollouts: int = 3):
-        self.agent = CoordinatorAgent()
+        self.agent = OrchestratorAgent()
         self.rl_client = RLRoutingClient()
         self.n_rollouts = n_rollouts
 

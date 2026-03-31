@@ -5,15 +5,15 @@ import sys
 # Ensure project root is in Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.agents.capability_agent import CapabilityAgentWorker
-from agent_core.llm_router.router import LLMRouter
+from agents.orchestrator import OrchestratorAgent
+from agents.capability_agent import CapabilityAgentWorker
+from core.llm.router import LLMRouter
 
 async def main():
     router = LLMRouter.get_instance()
     router.start()
     
-    coordinator = CoordinatorAgent()
+    coordinator = OrchestratorAgent()
     sql_worker = SQLAgentWorker()
     
     print("--- Testing SQL Agent Delivery ---")

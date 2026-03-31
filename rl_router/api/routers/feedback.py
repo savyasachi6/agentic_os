@@ -15,4 +15,5 @@ async def feedback(
     svc: FeedbackService = Depends(get_feedback_service),
 ) -> FeedbackResponse:
     """Accept telemetry from the RAG pipeline and update the bandit."""
-    return svc.process_feedback(request)
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(svc.process_feedback, request)

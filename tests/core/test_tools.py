@@ -4,7 +4,7 @@ import os
 import tempfile
 import pytest
 
-from agent_core.tools import (
+from tools import (
     build_tool_registry,
     format_tool_descriptions,
     ReadFileAction,

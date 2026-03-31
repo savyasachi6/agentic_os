@@ -1,13 +1,13 @@
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agent_core.agents.core.coordinator import CoordinatorAgent
-from agent_core.graph.state import AgentState
-from agent_core.agent_types import NodeType, Intent, AgentRole, NodeStatus
+from agents.orchestrator import OrchestratorAgent
+from agents.graph.state import AgentState
+from core.agent_types import NodeType, Intent, AgentRole, NodeStatus
 
 @pytest.fixture
 def mock_tree_store():
-    with patch('agents.coordinator.TreeStore') as mock:
+    with patch('agents.orchestrator.TreeStore') as mock:
         store = mock.return_value
         mock_chain = MagicMock(id=1, root_node_id=10)
         store.create_chain_async = AsyncMock(return_value=mock_chain)
@@ -32,7 +32,7 @@ def mock_tree_store():
 
 @pytest.fixture
 def mock_llm():
-    with patch('agents.coordinator.LLMClient') as mock:
+    with patch('agents.orchestrator.LLMClient') as mock:
         client = mock.return_value
         # Default behavior
         client.generate_async = AsyncMock(return_value="Action: respond(Done)")
@@ -44,11 +44,11 @@ def mock_llm():
         yield client
 
 
-# Removed mock_skill_retriever as it is no longer used in CoordinatorAgent
+# Removed mock_skill_retriever as it is no longer used in OrchestratorAgent
 
 @pytest.fixture
 def mock_agent_state():
-    with patch('agents.coordinator.AgentState') as mock:
+    with patch('agents.orchestrator.AgentState') as mock:
         state = mock.return_value
         state.history = []
         state.session_id = "test-session-id"
@@ -64,7 +64,7 @@ async def test_coordinator_routing_to_productivity(mock_tree_store, mock_llm, mo
         "Action: respond(Final Answer)"
     ]
 
-    coordinator = CoordinatorAgent()
+    coordinator = OrchestratorAgent()
     coordinator.session_id = "test-session-id"
     
     with patch.object(coordinator, '_wait_for_task', return_value={"status": "done"}):
@@ -83,7 +83,7 @@ async def test_specialist_budget_increase(mock_tree_store, mock_llm, mock_agent_
         "Action: respond(Final Answer)"
     ]
 
-    coordinator = CoordinatorAgent()
+    coordinator = OrchestratorAgent()
     coordinator.session_id = "test-session-id"
     
     with patch.object(coordinator, '_wait_for_task', return_value="hello"):

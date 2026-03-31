@@ -25,6 +25,8 @@ coverage.xml
 # Local Environment
 .env
 .env.example
+.env.*
+secrets/
 
 # IDEs
 .vscode
@@ -40,13 +42,15 @@ node_modules/
 dist/
 build/
 *.egg-info/
+legacy/
+docs/
 
 # Large Files & Models (DO NOT BUNDLE)
 models/
-dev/models/
-dev/checkpoints/
 *.gguf
 *.npz
 *.bin
 *.pt
 *.onnx
+*.sqlite
+*.db

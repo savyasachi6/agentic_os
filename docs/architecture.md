@@ -43,14 +43,15 @@ Autonomous workers that perform specific domain tasks.
 - **Segregated Workers**: RAG, Code Gen, Planner, and Capability workers run as distinct processes.
 - **Status Telemetry**: Workers provide real-time reasoning progress updates to the TreeStore.
 
-## Data Flow: Reasoning Loop
+## Data Flow: Reasoning Loop (v2.6)
 
 1. **Input**: User sends a message via WebSocket/API.
-2. **Context Retrieval**: Coordinator asks RAG specialist for relevant knowledge.
+2. **Context Retrieval**: Coordinator asks RAG specialist for relevant knowledge via `A2ABus.send`.
 3. **Reasoning Turn**: Coordinator sends a batched request to the LLM.
-4. **Action**: If the LLM proposes a tool call, Coordinator enqueues it in the TreeStore and notifies the specialist via A2ABus.
-5. **Worker Execution**: The specialist (e.g., Code Agent) processes the task and updates its status.
-6. **Observation**: Coordinator monitors status, logs result, and proceeds until a Final Answer.
+4. **Action**: If LLM proposes a tool call, Coordinator enqueues it in the `TreeStore` and notifies the specialist via `A2ABus.send`.
+5. **Real-time Waiting**: Coordinator uses `A2ABus.wait_for_topic` to listen for a `node_done` event on the bus.
+6. **Worker Execution**: The `AgentWorker` backbone processes the task, updates the DB, and **broadcasts** completion on the `node_done` channel.
+7. **Observation**: Coordinator receives the notification instantly, retrieves the result from the DB, and proceeds to the next reasoning turn.
 
 ## Security Model
 

@@ -1,7 +1,7 @@
 """Tests for the SKILL.md chunking logic in skills.indexer."""
 
 import pytest
-from agent_core.rag.indexer import chunk_markdown, _estimate_tokens, _classify_chunk_type
+from rag.indexer import chunk_markdown, _estimate_tokens, _classify_chunk_type
 
 
 # ---------------------------------------------------------------------------

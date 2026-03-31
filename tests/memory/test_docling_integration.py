@@ -20,9 +20,9 @@ sys.modules["rag.ingestion.enrichment"] = MagicMock()
 sys.modules["memory.rag_store"] = MagicMock()
 sys.modules["memory.vector_store"] = MagicMock()
 
-from agent_core.rag.worker import ingest_document
-from agent_core.rag.docling_parser import DoclingParser
-from agent_core.rag.docling_chunker import DoclingChunker
+from rag.worker import ingest_document
+from rag.docling_parser import DoclingParser
+from rag.docling_chunker import DoclingChunker
 from docling_core.types.doc import DoclingDocument
 
 class TestDoclingIntegration(unittest.TestCase):

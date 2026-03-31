@@ -1,5 +1,5 @@
 import ollama
-from agent_core.config import settings as model_settings
+from core.settings import settings as model_settings
 
 def test_ollama_embeddings():
     print(f"Testing Ollama integration with model: {model_settings.embed_model}")

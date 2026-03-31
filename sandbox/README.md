@@ -76,7 +76,7 @@ The sandbox exposes four browser-automation tools powered by
 > [!TIP]
 > **Windows Users**: Lightpanda does not yet support native Windows binaries. Use the Docker command above to run the CDP server.
 
-3. **Install the Playwright Python package** (optional dep):
+1. **Install the Playwright Python package** (optional dep):
 
    ```powershell
    pip install "agentic-os[browser]"
@@ -85,7 +85,7 @@ The sandbox exposes four browser-automation tools powered by
    playwright install chromium
    ```
 
-4. **Set the CDP endpoint** (default is already `ws://127.0.0.1:9222`):
+2. **Set the CDP endpoint** (default is already `ws://127.0.0.1:9222`):
 
    ```powershell
    $env:LIGHTPANDA_CDP_URL = "ws://127.0.0.1:9222"

@@ -49,6 +49,7 @@ class RouteResponse(BaseModel):
     use_speculative: bool
     is_exploration: bool
     arm_scores: List[ArmScore]
+    query_hash_rl: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from agent_core.intent.classifier import classify_intent, is_llm_generatable
-from agent_core.agent_types import Intent
-from agent_core.agents.core.coordinator import CoordinatorAgent
+from agents.intent.classifier import classify_intent, is_llm_generatable
+from core.agent_types import Intent
+from agents.orchestrator import OrchestratorAgent
 
 @pytest.mark.asyncio
 async def test_bug1_news_intent():
@@ -41,7 +41,7 @@ async def test_bug4_circuit_breaker():
         "code": mock_executor
     }
     
-    coordinator = CoordinatorAgent(agent_registry=agents, llm_client=mock_llm)
+    coordinator = OrchestratorAgent(agent_registry=agents, llm_client=mock_llm)
     
     # This should call code (fail) -> LLM -> respond
     message = "run a command"

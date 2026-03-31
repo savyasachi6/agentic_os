@@ -1,8 +1,8 @@
 import pytest
 import asyncio
-from agent_core.agents.planner import PlannerAgentWorker
+from agents.planner import PlannerAgentWorker
 from db.models import Node
-from agent_core.agent_types import AgentRole, NodeStatus, NodeType
+from core.agent_types import AgentRole, NodeStatus, NodeType
 
 @pytest.mark.asyncio
 async def test_planner_worker_processing():

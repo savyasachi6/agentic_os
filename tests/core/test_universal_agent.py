@@ -4,26 +4,26 @@ import pytest
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agent_core.agents.core.coordinator import UniversalAgentWorker
+from agents.orchestrator import UniversalAgentWorker
 from db.models import Node, AgentRole, NodeType, NodeStatus
 
 @pytest.fixture
 def mock_tree_store():
-    with patch('agent_core.agents.universal_agent.TreeStore') as mock:
+    with patch('agents.universal_agent.TreeStore') as mock:
         store = mock.return_value
         store.update_node_status = AsyncMock()
         yield store
 
 @pytest.fixture
 def mock_skill_retriever():
-    with patch('agent_core.agents.universal_agent.SkillRetriever') as mock:
+    with patch('agents.universal_agent.SkillRetriever') as mock:
         retriever = mock.return_value
         retriever.retrieve_context = MagicMock(return_value="## Instructions\n1. Use shell_execute to echo 'Hello'\n2. respond(Done)")
         yield retriever
 
 @pytest.fixture
 def mock_llm():
-    with patch('agent_core.agents.universal_agent.LLMClient') as mock:
+    with patch('agents.universal_agent.LLMClient') as mock:
         client = mock.return_value
         client.generate_async = AsyncMock()
         yield client

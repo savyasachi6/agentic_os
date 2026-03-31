@@ -1,0 +1,47 @@
+# Agentic OS - Tool Execution Sandbox
+# A constrained environment for arbitrary shell and python script execution.
+
+FROM python:3.11.9-slim-bookworm
+
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
+
+# Create a non-root sandbox user
+RUN groupadd -g 1001 sandboxuser && \
+    useradd -r -u 1001 -g sandboxuser sandboxuser
+
+WORKDIR /app
+
+# Install minimal system utilities for certain shell tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install specific sandbox dependencies (e.g. langchain for search tools)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn pydantic
+
+# Copy only the sandbox and support modules
+COPY --chown=sandboxuser:sandboxuser sandbox/ sandbox/
+COPY --chown=sandboxuser:sandboxuser core/ core/
+COPY --chown=sandboxuser:sandboxuser tools/ tools/
+COPY --chown=sandboxuser:sandboxuser entrypoint.sh .
+RUN chmod +x entrypoint.sh && chown sandboxuser:sandboxuser entrypoint.sh
+
+# Switch to non-root user
+USER sandboxuser
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s CMD curl -f http://localhost:9101/health || exit 1
+
+# Expose the designated sandbox port
+EXPOSE 9101
+
+ENTRYPOINT ["/bin/bash", "./entrypoint.sh"]
+# Start the sandbox worker directly
+# Note: The 'sandbox-id' and 'session_id' are passed at runtime by compose or manager
+CMD ["python", "-m", "sandbox.worker", "--port", "9101", "--sandbox-id", "docker-tools", "--session-id", "global"]

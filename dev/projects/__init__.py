@@ -1,2 +1,0 @@
-
-# Agentic OS Projects

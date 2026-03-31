@@ -5,7 +5,7 @@ import hashlib
 import json
 import numpy as np
 import httpx
-from agent_core.config import settings
+from core.settings import settings
 from .connection import get_pool, get_redis
 
 async def embed(text: str) -> list[float]:

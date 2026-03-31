@@ -8,7 +8,7 @@ from typing import List, Optional, Union
 from .models import TodoItem, TodoStatus
 
 
-from agent_core.rag.vector_store import VectorStore
+from rag.vector_store import VectorStore
 
 class TodoManager:
     def __init__(self, vector_store: Optional[VectorStore] = None):

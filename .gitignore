@@ -3,6 +3,19 @@ dev/checkpoints/
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
+!.env.docker.example
+secrets/*
+!secrets/*.example
+.vscode/
+*.key
+*.pem
+*.pfx
+*.ppk
+*.pub
+# Allow public key files if explicitly needed, but default to ignore.
+
 
 # Large model files — store locally, never commit
 dev/models/
@@ -28,3 +41,4 @@ tmp_*.py
 check_db.py
 debug_*.py
 migrate_*.py
+path

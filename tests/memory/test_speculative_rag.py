@@ -5,7 +5,7 @@ import pytest
 Unit tests for SpeculativeDrafter, FractalVerifier, and Collapsed Tree retrieval.
 All LLM calls and database operations are mocked.
 """
-from agent_core.agents.core.coordinator import CoordinatorAgent
+from agents.orchestrator import OrchestratorAgent
 import pytest
 import os
 import sys
@@ -39,15 +39,15 @@ sys.modules.setdefault("core.llm", MagicMock())
 
 # Now do the actual imports (they won't fail due to missing dependencies)
 try:
-    import agent_core.rag.retrieval.speculative_fractal_rag as sfr_module
+    import rag.retrieval.speculative_fractal_rag as sfr_module
 except ImportError:
     import pytest
 try:
-    import agent_core.rag.retrieval.collapsed_tree as ct_module
+    import rag.retrieval.collapsed_tree as ct_module
 except ImportError:
     import pytest
-from agent_core.rag.speculative_fractal_rag import SpeculativeDrafter, FractalVerifier
-from agent_core.rag.collapsed_tree import collapsed_tree_retrieve, fractal_loop
+from rag.speculative_fractal_rag import SpeculativeDrafter, FractalVerifier
+from rag.collapsed_tree import collapsed_tree_retrieve, fractal_loop
 
 
 # ============================================================
