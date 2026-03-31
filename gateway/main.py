@@ -53,6 +53,8 @@ def cmd_run(args):
     from core.llm.router import LLMRouter
     from db.connection import init_db_pool
     from core.settings import settings
+    # Phase 7: Ensure all tools are registered via the tool loader
+    import core.tool_loader
     
     
     init_db_pool()
@@ -144,6 +146,8 @@ def cmd_worker(args):
     import asyncio
     from db.connection import init_db_pool
     from core.llm.router import LLMRouter
+    # Phase 7: Ensure all tools are registered via the tool loader
+    import core.tool_loader
 
     init_db_pool()
 

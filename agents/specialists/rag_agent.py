@@ -254,8 +254,14 @@ class ResearchAgentWorker(AgentWorker):
                     query = str(action_payload).strip()
                     try:
                         res = await registry.invoke("web_search", query=query, count=5)
-                        if hasattr(res, "data") and "output" in res.data:
-                            out = res.data["output"]
+                        # Phase 15 Fix B8: Robust check for ActionResult vs Dict vs raw string
+                        out = ""
+                        if hasattr(res, "data") and isinstance(res.data, dict):
+                            out = res.data.get("output", "")
+                        elif isinstance(res, dict):
+                            out = res.get("data", {}).get("output", res.get("output", ""))
+                        
+                        if out:
                             obs = (
                                 f"Observation: Web search returned no results for '{query}'."
                                 if "no results" in out.lower()
@@ -263,22 +269,28 @@ class ResearchAgentWorker(AgentWorker):
                             )
                         elif getattr(res, "success", True) is False:
                             obs = (
-                                "Observation: Web search is unavailable. "
-                                f"Reason: {getattr(res, 'error_trace', 'unknown')}"
+                                "Observation: Web search is currently unavailable. "
+                                f"Reason: {getattr(res, 'error_trace', 'Service Timeout')}"
                             )
                         else:
                             obs = f"Observation: {str(res)}"
                     except Exception as e:
-                        obs = f"Observation: Web search error: {e}"
+                        obs = f"Observation: Web search error: {e}. Try searching with a different phrasing."
 
                 elif action_type == "web_scrape":
                     url = str(action_payload).strip()
                     try:
                         res = await registry.invoke("web_scrape", url=url)
-                        if hasattr(res, "data") and "output" in res.data:
-                            obs = f"Observation (scraped page content — synthesize this into a direct answer, do NOT bullet-point the chunks):\n{res.data['output']}"
+                        out = ""
+                        if hasattr(res, "data") and isinstance(res.data, dict):
+                            out = res.data.get("output", "")
+                        elif isinstance(res, dict):
+                            out = res.get("data", {}).get("output", res.get("output", ""))
+
+                        if out:
+                            obs = f"Observation (scraped page content — synthesize this into a direct answer, do NOT bullet-point the chunks):\n{out}"
                         else:
-                            obs = f"Observation: {str(res)}"
+                            obs = f"Observation: Web scrape returned no content or failed. Result: {str(res)}"
                     except Exception as e:
                         obs = f"Observation: Web scrape error: {e}"
 
@@ -300,6 +312,7 @@ class ResearchAgentWorker(AgentWorker):
 
             # Phase 15: Submit failure feedback with corrected arm_index
             if rl_meta.get("query_hash_rl"):
+                # Use to_thread to ensure feedback submission doesn't block if there's I/O wait
                 await self.rl_client.submit_feedback(
                     query_hash=rl_meta["query_hash_rl"],
                     reward=0.0,
@@ -308,7 +321,7 @@ class ResearchAgentWorker(AgentWorker):
                     speculative=bool(rl_meta.get("speculative")),
                     latency_ms=(time.time() - start_time) * 1000,
                     success=False,
-                    hallucination_flag=True,  # Failure to find answer is treated as a logic gap
+                    hallucination_flag=True,
                 )
 
             await self.tree_store.update_node_status_async(

@@ -7,15 +7,13 @@ from fastapi import APIRouter, Depends
 from rl_router.api.dependencies import get_bandit
 from rl_router.domain.bandit import LinUCBBandit
 
+from fastapi import APIRouter, Request, HTTPException
+
 router = APIRouter()
 
-
 @router.get("/health")
-async def health(
-    bandit: LinUCBBandit = Depends(get_bandit),
-) -> Dict[str, Any]:
-    return {
-        "status": "ok",
-        "service": "rl_router",
-        "bandit_arms": bandit.n_arms,
-    }
+async def health(request: Request):
+    # Workers use /health for readiness. Only return 200 when initialized.
+    if not getattr(request.app.state, "ready", False):
+        raise HTTPException(status_code=503, detail="Bandit not yet initialized")
+    return {"status": "ok", "service": "rl-router"}

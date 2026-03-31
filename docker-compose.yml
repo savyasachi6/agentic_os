@@ -185,6 +185,8 @@ services:
         condition: service_healthy
       tools-api:
         condition: service_healthy
+      rl-router:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
       interval: 10s

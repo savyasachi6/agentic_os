@@ -54,6 +54,9 @@ async def startup():
     router = LLMRouter.get_instance()
     router.start()
     
+    # Phase 7: Ensure all local tools are registered via the tool loader
+    import core.tool_loader
+    
     # Phase 12: Non-blocking MCP tool discovery
     from tools.mcp.mcp_registry import mcp_registry
     try:

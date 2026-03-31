@@ -17,6 +17,12 @@ _CONNECT_TIMEOUT = 2.0   # fail fast if the service is down
 _READ_TIMEOUT    = 30.0  # Phase 7: Increased buffer for tail latencies
 
 
+# Circuit breaker state (module-level to persist across client instances in the same process)
+_consecutive_failures = 0
+_last_failure_time = 0.0
+_MAX_CONSECUTIVE_FAILURES = 3
+_CIRCUIT_BREAKER_RESET_TIME = 60.0  # seconds
+
 class RLRoutingClient:
     def __init__(self, base_url: Optional[str] = None, timeout: Optional[float] = None):
         """
@@ -64,6 +70,24 @@ class RLRoutingClient:
         query_embedding: Optional[list] = None,
         intent_logits: Optional[list] = None,
     ) -> Dict[str, Any]:
+        global _consecutive_failures, _last_failure_time
+        
+        import time
+        now = time.time()
+
+        # Circuit Breaker Logic
+        if _consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+            if now - _last_failure_time < _CIRCUIT_BREAKER_RESET_TIME:
+                logger.warning(
+                    "[RL Bypassed] Circuit breaker open (failures=%d). Skipping RL Router.",
+                    _consecutive_failures
+                )
+                return self._default_fallback("circuit breaker open")
+            else:
+                # Reset after cooldown period to allow a retry
+                logger.info("[RL Retry] Cooldown period over. Attempting to rejoin RL Router.")
+                _consecutive_failures = 0
+
         payload = {
             "query_text": query,
             "query_embedding": query_embedding or ([0.0] * 1024),
@@ -74,40 +98,62 @@ class RLRoutingClient:
             "session_id": session_id,
             "corpus_id": corpus_id,
         }
+        import asyncio
+        max_retries = 3
+        backoff = 1.5
+
         try:
-            client = await self._get_client()
-            resp = await client.post(f"{self.base_url}/route", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+            for attempt in range(max_retries):
+                try:
+                    client = await self._get_client()
+                    resp = await client.post(f"{self.base_url}/route", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
 
-            action = data.get("action")
-            depth  = data.get("depth", 1)
-            top_k  = self._arm_to_top_k(action, depth)
-            speculative = bool(action is not None and action % 2 == 1)
+                    # Success: reset circuit breaker
+                    _consecutive_failures = 0
+                    
+                    action = data.get("action")
+                    depth  = data.get("depth", 1)
+                    top_k  = self._arm_to_top_k(action, depth)
+                    speculative = bool(action is not None and action % 2 == 1)
 
-            return {
-                "action":        action,
-                "arm_index":     action,       # FIX: expose as arm_index so rag_agent.py reads it correctly
-                "depth":         depth,
-                "top_k":         top_k,
-                "speculative":   speculative,
-                "query_hash_rl": data.get("query_hash_rl"),
-                "raw":           data,
-            }
+                    return {
+                        "action":        action,
+                        "arm_index":     action,
+                        "depth":         depth,
+                        "top_k":         top_k,
+                        "speculative":   speculative,
+                        "query_hash_rl": data.get("query_hash_rl"),
+                        "raw":           data,
+                    }
 
-        except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
-            # Recreate client — stale socket, service restarted, or connection refused
-            try:
-                await self.client.aclose()
-            except Exception:
-                pass
-            self.client = self._make_client()
-            logger.warning(
-                "RL Router connection/read failure (%s). Falling back to default depth. Client recreated.", repr(e)
-            )
-            return self._default_fallback(str(e))
+                except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError) as e:
+                    # Phase 15 Fix: Retry with exponential backoff for cold-starting router
+                    if attempt < max_retries - 1:
+                        wait_sec = backoff ** (attempt + 1)
+                        logger.warning(
+                            "RL Router timeout/error (%s). Retrying in %.1fs (attempt %d/%d)...",
+                            repr(e), wait_sec, attempt + 1, max_retries
+                        )
+                        await asyncio.sleep(wait_sec)
+                        # Recreate client on every retry to clear potentially stale connections
+                        try:
+                            await self.client.aclose()
+                        except Exception:
+                            pass
+                        self.client = self._make_client()
+                        continue
+                    
+                    # Final failure after max retries: trigger circuit breaker
+                    _consecutive_failures += 1
+                    _last_failure_time = time.time()
+                    logger.error("RL Router connection failure after %d attempts: %s", max_retries, repr(e))
+                    return self._default_fallback(str(e))
 
         except Exception as e:
+            _consecutive_failures += 1
+            _last_failure_time = time.time()
             try:
                 await self.client.aclose()
             except Exception:
