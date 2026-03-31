@@ -18,6 +18,7 @@ import json
 import logging
 import math
 from typing import Any, Dict, List, Optional
+from collections import defaultdict
 
 logger = logging.getLogger("agentos.rag.cognitive")
 
@@ -76,7 +77,24 @@ class CognitiveRetriever:
     ) -> str:
         """
         Main entry point. Returns a formatted context string for the LLM.
-        intent should be the .value string from agent_core.agent_types.Intent (or equivalent).
+        """
+        context, _ = await self.retrieve_context_with_meta(
+            query=query,
+            session_id=session_id,
+            intent=intent,
+            override_top_k=override_top_k
+        )
+        return context
+
+    async def retrieve_context_with_meta(
+        self,
+        query: str,
+        session_id: Optional[str] = None,
+        intent: Optional[str] = None,
+        override_top_k: Optional[int] = None,
+    ) -> tuple[str, List[str]]:
+        """
+        Returns (formatted_context_string, List[skill_names_retrieved]).
         """
         intent_key = (intent or "").lower()
         top_k, layers = _DEPTH_POLICY.get(intent_key, _DEFAULT_POLICY)
@@ -84,27 +102,37 @@ class CognitiveRetriever:
         if override_top_k is not None:
             top_k = override_top_k
 
-        # Fast exit — no retrieval needed for these intents
+        # Fast exit — no retrieval needed
         if top_k == 0 or not layers:
-            return ""
+            return "", []
 
-        # 1. Build augmented query using session history
+        # 1. Query Rewriting (Contextualization)
         session_ctx = await self._get_session_context(session_id) if session_id else {}
-        augmented_query = self._augment_query(query, session_ctx)
+        rewritten_query = await self._rewrite_query(query, session_ctx)
 
         # 2. Parallel retrieval based on layer policy
-        results = await self._execute_layers(augmented_query, query, top_k, layers, intent_key)
+        results = await self._execute_layers(rewritten_query, query, top_k, layers, intent_key)
 
-        # 3. Inject recent session episodes as prefix context
+        # 3. Contextual Window Expansion (Adjacent chunks)
+        results = await self._expand_with_neighbors(results)
+
+        # 4. Inject recent session episodes as prefix context
         episode_prefix = await self._get_session_episodes(session_id) if session_id else ""
 
         if not results:
-            return episode_prefix  # return at least what we know from session
+            return episode_prefix, []
 
-        # 4. Fusion scoring and rerank
+        # 5. RRF Fusion scoring and rerank
         reranked = self._fuse_and_rerank(results, session_ctx)[:top_k]
 
-        # 5. Format context block
+        # Extract skill names for metadata
+        retrieved_skills = list(set([
+            res.get("metadata_json", {}).get("skill_name")
+            for res in reranked
+            if res.get("metadata_json", {}).get("skill_name")
+        ]))
+
+        # 6. Format context block
         blocks = []
         if episode_prefix:
             blocks.append(f"[Session History]\n{episode_prefix}")
@@ -115,64 +143,147 @@ class CognitiveRetriever:
             hop = res.get("hop", 0)
             rel_tag = f" relational(hop={hop})" if hop > 0 else ""
             blocks.append(
-                f"[{source} - {i}] score={score:.3f}{rel_tag}\n{res.get('content', '')}"
+                f"[{source} - {i}] rrf_score={score:.4f}{rel_tag}\n{res.get('content', '')}"
             )
 
-        return "\n\n".join(blocks)
+        return "\n\n".join(blocks), retrieved_skills
 
     async def retrieve_context_async(self, query: str, session_id: Optional[str] = None) -> str:
         """Duck-typing for HybridRetriever compatibility."""
         return await self.retrieve_context(query=query, session_id=session_id)
 
     # ------------------------------------------------------------------
-    # Depth policy exposure (replaces RLRoutingClient.get_retrieval_action)
+    # Internal: Query Rewriting
+    # ------------------------------------------------------------------
+
+    async def _rewrite_query(self, query: str, session_ctx: Dict) -> str:
+        """
+        Use the LLM to rewrite the query into a self-contained retrieval statement.
+        Only fires if session context exists — otherwise returns query unchanged.
+        """
+        prior = session_ctx.get("prior_topics", [])
+        if not prior or len(query.split()) > 20:
+            # Long queries are already specific — don't rewrite
+            return query
+        
+        context_str = "; ".join(prior[-2:])
+        prompt = (
+            f"Prior conversation context: {context_str}\n"
+            f"Current query: {query}\n\n"
+            f"Rewrite the current query as a single, self-contained search statement "
+            f"that incorporates relevant prior context. Return only the rewritten query, nothing else."
+        )
+        try:
+            from agent_core.llm.client import LLMClient
+            llm = LLMClient()
+            rewritten = await llm.generate_async(
+                [{"role": "user", "content": prompt}],
+                max_tokens=60
+            )
+            rewritten_text = rewritten.strip()
+            if rewritten_text:
+                logger.debug(f"Query rewritten: '{query}' -> '{rewritten_text}'")
+                return rewritten_text
+            return query
+        except Exception as e:
+            logger.debug(f"Query rewrite failed: {e}")
+            return query
+
+    # ------------------------------------------------------------------
+    # Internal: Contextual Neighbor Expansion
+    # ------------------------------------------------------------------
+
+    async def _expand_with_neighbors(
+        self, results: List[Dict], window: int = 1
+    ) -> List[Dict]:
+        """
+        For each skill_registry result, fetch ±window adjacent chunks
+        from the same skill to provide surrounding context.
+        """
+        try:
+            from db.connection import get_db_connection
+            loop = asyncio.get_running_loop()
+
+            skill_chunk_ids = [
+                (r["metadata_json"].get("skill_id"), r.get("chunk_id"))
+                for r in results
+                if r.get("source") == "skill_registry"
+                and r.get("chunk_id")
+            ]
+            if not skill_chunk_ids:
+                return results
+
+            def _fetch_neighbors():
+                neighbors = []
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        for skill_id, chunk_id in skill_chunk_ids:
+                            try:
+                                chunk_id_int = int(chunk_id)
+                                cur.execute(
+                                    """
+                                    SELECT id, heading, content
+                                    FROM skill_chunks
+                                    WHERE skill_id = %s
+                                      AND id BETWEEN %s AND %s
+                                      AND id != %s
+                                    ORDER BY id;
+                                    """,
+                                    (skill_id, chunk_id_int - window, chunk_id_int + window, chunk_id_int)
+                                )
+                                for row in cur.fetchall():
+                                    neighbors.append({
+                                        "content": f"[neighbor of chunk {chunk_id}]\n{row[2]}",
+                                        "source": "skill_neighbor",
+                                        "score": 0.35,  # lower than direct match
+                                        "metadata_json": {"skill_id": skill_id},
+                                        "hop": 0,
+                                    })
+                            except (ValueError, TypeError):
+                                continue
+                return neighbors
+
+            neighbors = await loop.run_in_executor(None, _fetch_neighbors)
+            return results + neighbors
+        except Exception as e:
+            logger.debug(f"Neighbor expansion failed: {e}")
+            return results
+
+    # ------------------------------------------------------------------
+    # Depth policy exposure
     # ------------------------------------------------------------------
 
     def get_depth(self, intent: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Returns the depth decision for a given intent.
-        Provides the same interface as RLRoutingClient.get_retrieval_action
-        but synchronously, in-process, with zero network calls.
-        """
         intent_key = (intent or "").lower()
         top_k, layers = _DEPTH_POLICY.get(intent_key, _DEFAULT_POLICY)
         return {
             "top_k": top_k,
             "layers": layers,
             "intent": intent_key,
-            "query_hash_rl": f"local_{intent_key}",  # no actual RL hash
-            "arm_index": None,
             "depth": {0: 0, 5: 1, 10: 2, 20: 3}.get(top_k, 1),
             "speculative": False,
         }
 
     # ------------------------------------------------------------------
-    # Internal: Session context from Redis
+    # Internal: Session context / Episodes
     # ------------------------------------------------------------------
 
     async def _get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """
-        Pull last 5 turns from Redis session list.
-        Key: session:{session_id}:turns  — a Redis LIST of JSON strings.
-        """
         try:
             from core.message_bus import A2ABus
             bus = A2ABus()
             if not bus.is_connected():
                 return {}
-            
-            # Fetch last 5 entries
             turns = await bus.get_session_turns(session_id, last_n=5)
-            
             topics, skills_referenced = [], []
             for turn in turns:
-                try:
-                    msg = turn.get("user_msg", "") or turn.get("query", "")
-                    if msg:
-                        topics.append(msg[:100])
-                    skills_referenced.extend(turn.get("skills_used", []))
-                except Exception:
-                    continue
+                msg = turn.get("user_msg", "") or turn.get("query", "")
+                if msg: topics.append(msg[:100])
+                skills_used = turn.get("skills_used", [])
+                if isinstance(skills_used, list):
+                    skills_referenced.extend(skills_used)
+                elif isinstance(skills_used, str):
+                    skills_referenced.append(skills_used)
             
             return {
                 "prior_topics": topics,
@@ -183,27 +294,10 @@ class CognitiveRetriever:
             logger.debug(f"Session context fetch failed: {e}")
             return {}
 
-    def _augment_query(self, query: str, session_ctx: Dict) -> str:
-        prior = session_ctx.get("prior_topics", [])
-        if not prior:
-            return query
-        # Only append last 2 prior topics to avoid query pollution
-        context_str = "; ".join(prior[-2:])
-        return f"{query} [prior context: {context_str}]"
-
-    # ------------------------------------------------------------------
-    # Internal: Session episodes from Postgres chain_nodes
-    # ------------------------------------------------------------------
-
     async def _get_session_episodes(self, session_id: str) -> str:
-        """
-        Pull last 3 completed assistant responses from chain_nodes for this session.
-        This gives the LLM continuity without re-embedding old turns.
-        """
         try:
             from db.connection import get_db_connection
             loop = asyncio.get_running_loop()
-
             def _fetch():
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -219,13 +313,10 @@ class CognitiveRetriever:
                             (session_id,)
                         )
                         return [r[0] for r in cur.fetchall() if r[0]]
-
             rows = await loop.run_in_executor(None, _fetch)
-            if not rows:
-                return ""
-            return "\n---\n".join(rows[::-1])  # chronological order
-        except Exception as e:
-            logger.debug(f"Episode recall failed: {e}")
+            if not rows: return ""
+            return "\n---\n".join(rows[::-1])
+        except Exception:
             return ""
 
     # ------------------------------------------------------------------
@@ -233,23 +324,17 @@ class CognitiveRetriever:
     # ------------------------------------------------------------------
 
     async def _execute_layers(
-        self,
-        augmented_query: str,
-        raw_query: str,
-        top_k: int,
-        layers: str,
-        intent_key: str,
+        self, rewritten_query: str, raw_query: str, top_k: int, layers: str, intent_key: str
     ) -> List[Dict[str, Any]]:
         tasks = []
         skill_type_filter = "code" if intent_key == "code_gen" else None
 
         if "M" in layers:
-            tasks.append(self._search_memory(augmented_query, top_k))
+            tasks.append(self._search_memory(rewritten_query, top_k))
         if "S" in layers:
             tasks.append(self._search_skills(raw_query, top_k, skill_type_filter))
 
-        if not tasks:
-            return []
+        if not tasks: return []
 
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
         base: List[Dict] = []
@@ -257,18 +342,22 @@ class CognitiveRetriever:
             if isinstance(r, list):
                 base.extend([x for x in r if not math.isnan(x.get("score", 0.0))])
 
-        # Relational walk — only if "R" in layers and we got skill hits
         if "R" in layers and base:
             matched_ids = [
                 r["metadata_json"].get("skill_id")
                 for r in base
                 if r.get("source") == "skill_registry"
-                and isinstance(r.get("metadata_json", {}).get("skill_id"), int)
+                and isinstance(r.get("metadata_json", {}).get("skill_id"), (int, str))
             ]
             if matched_ids:
-                related = await self._relational_skill_walk(matched_ids, depth=2)
-                base.extend(related)
-
+                # Ensure they are ints for the SQL ANY(%s) query
+                clean_ids = []
+                for mid in matched_ids:
+                    try: clean_ids.append(int(mid))
+                    except: continue
+                if clean_ids:
+                    related = await self._relational_skill_walk(clean_ids, depth=2)
+                    base.extend(related)
         return base
 
     # ------------------------------------------------------------------
@@ -276,12 +365,10 @@ class CognitiveRetriever:
     # ------------------------------------------------------------------
 
     async def _search_memory(self, query: str, top_k: int) -> List[Dict]:
-        if not self.db:
-            return []
+        if not self.db: return []
         try:
             from sqlalchemy import select
             from .schema import MemoryChunk
-
             query_vec, _ = await self.embedder.generate_embedding_async(query)
             distance_expr = MemoryChunk.embedding.cosine_distance(query_vec)
             stmt = (
@@ -291,15 +378,10 @@ class CognitiveRetriever:
                 .limit(top_k)
             )
             loop = asyncio.get_running_loop()
-            # Wrap execution in to_thread/executor for non-blocking
-            def _exec():
-                return self.db.execute(stmt).all()
-            
-            rows = await loop.run_in_executor(None, _exec)
+            rows = await loop.run_in_executor(None, lambda: self.db.execute(stmt).all())
             return [
                 {
                     "chunk_id": r.MemoryChunk.id,
-                    "document_id": getattr(r.MemoryChunk, "document_id", None),
                     "content": r.MemoryChunk.content,
                     "source": "memory",
                     "score": 1.0 - float(r.distance),
@@ -312,49 +394,30 @@ class CognitiveRetriever:
             logger.error(f"Memory search error: {e}")
             return []
 
-    async def _search_skills(
-        self, query: str, top_k: int, skill_type_filter: Optional[str] = None
-    ) -> List[Dict]:
+    async def _search_skills(self, query: str, top_k: int, skill_type_filter: Optional[str] = None) -> List[Dict]:
         try:
             from db.queries.skills import search_skills_raw
             query_vec, _ = await self.embedder.generate_embedding_async(query)
             hits = search_skills_raw(query_vec, limit=top_k, skill_type=skill_type_filter)
             return [
                 {
-                    "content": (
-                        f"Skill: {s['skill_name']} ({s['heading']})\n"
-                        f"Description: {s['skill_description']}\n---\n{s['content']}"
-                    ),
+                    "chunk_id": s.get("chunk_id"),
+                    "content": f"Skill: {s['skill_name']} ({s['heading']})\nDescription: {s['skill_description']}\n---\n{s['content']}",
                     "source": "skill_registry",
                     "score": float(s.get("score") or 0.0),
-                    "metadata_json": {
-                        "skill_name": s["skill_name"],
-                        "skill_id": s.get("skill_id"),
-                    },
+                    "metadata_json": {"skill_name": s["skill_name"], "skill_id": s.get("skill_id")},
                     "hop": 0,
                 }
-                for s in hits
-                if s.get("score") is not None
+                for s in hits if s.get("score") is not None
             ]
         except Exception as e:
             logger.error(f"Skill search error: {e}")
             return []
 
-    # ------------------------------------------------------------------
-    # Internal: Relational skill walk (recursive CTE)
-    # ------------------------------------------------------------------
-
-    async def _relational_skill_walk(
-        self, seed_skill_ids: List[int], depth: int = 2
-    ) -> List[Dict]:
-        """
-        Walk the skill_relations graph from seed_skill_ids up to `depth` hops.
-        Returns related skill chunks with a score decaying by hop distance.
-        """
+    async def _relational_skill_walk(self, seed_skill_ids: List[int], depth: int = 2) -> List[Dict]:
         try:
             from db.connection import get_db_connection
             loop = asyncio.get_running_loop()
-
             def _walk():
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -364,39 +427,26 @@ class CognitiveRetriever:
                                 SELECT id, name, description, 0 AS hop
                                 FROM knowledge_skills
                                 WHERE id = ANY(%s)
-
                                 UNION ALL
-
                                 SELECT ks.id, ks.name, ks.description, sg.hop + 1
                                 FROM knowledge_skills ks
-                                JOIN skill_relations sr
-                                  ON sr.target_skill_id = ks.id
-                                  OR sr.source_skill_id = ks.id
-                                JOIN skill_graph sg
-                                  ON sg.id = sr.source_skill_id
-                                  OR sg.id = sr.target_skill_id
-                                WHERE sg.hop < %s
-                                  AND ks.id <> ALL(%s)
+                                JOIN skill_relations sr ON sr.target_skill_id = ks.id OR sr.source_skill_id = ks.id
+                                JOIN skill_graph sg ON sg.id = sr.source_skill_id OR sg.id = sr.target_skill_id
+                                WHERE sg.hop < %s AND ks.id <> ALL(%s)
                             )
-                            SELECT DISTINCT
-                                sg.id, sg.name, sg.description, sg.hop,
-                                sc.heading, sc.content
+                            SELECT DISTINCT sg.id, sg.name, sg.description, sg.hop, sc.heading, sc.content, sc.id as chunk_id
                             FROM skill_graph sg
                             JOIN skill_chunks sc ON sc.skill_id = sg.id
-                            ORDER BY sg.hop, sg.id
-                            LIMIT 20;
+                            ORDER BY sg.hop, sg.id LIMIT 20;
                             """,
                             (seed_skill_ids, depth, seed_skill_ids),
                         )
                         return cur.fetchall()
-
             rows = await loop.run_in_executor(None, _walk)
             return [
                 {
-                    "content": (
-                        f"Skill: {r[1]} ({r[4]})\n"
-                        f"Description: {r[2]}\n---\n{r[5]}"
-                    ),
+                    "chunk_id": r[6],
+                    "content": f"Skill: {r[1]} ({r[4]})\nDescription: {r[2]}\n---\n{r[5]}",
                     "source": "relational_skill",
                     "score": max(0.3, 1.0 - (r[3] * 0.25)),
                     "metadata_json": {"skill_id": r[0], "skill_name": r[1]},
@@ -404,47 +454,49 @@ class CognitiveRetriever:
                 }
                 for r in rows
             ]
-        except Exception as e:
-            logger.debug(f"Relational walk skipped (table may not exist yet): {e}")
-            return []
+        except Exception: return []
 
     # ------------------------------------------------------------------
-    # Internal: Fusion scoring
+    # Internal: Reciprocal Rank Fusion (RRF)
     # ------------------------------------------------------------------
 
-    def _fuse_and_rerank(
-        self, results: List[Dict], session_ctx: Dict
-    ) -> List[Dict]:
+    def _fuse_and_rerank(self, results: List[Dict], session_ctx: Dict) -> List[Dict]:
         """
-        Fuse scores from multiple sources:
-          final = 0.5 * vector_sim
-                + 0.3 * relational_bonus  (1.0 if hop=0, decays with hop)
-                + 0.2 * recency_bonus     (1.0 if skill was recently referenced)
+        Reciprocal Rank Fusion across retrieval sources.
+        score(d) = Σ 1 / (60 + rank_in_source)
+        Recency bonus applied as a post-RRF multiplier.
         """
+        K = 60
         recent_skills = set(session_ctx.get("skills_referenced", []))
-        seen_content: set = set()
-        deduped: List[Dict] = []
 
+        # Group results by source, sort each group by original score descending
+        by_source: Dict[str, List[Dict]] = defaultdict(list)
         for r in results:
-            key = (r.get("source"), r.get("content", "")[:80])
-            if key in seen_content:
-                continue
-            seen_content.add(key)
+            by_source[r.get("source", "unknown")].append(r)
+        
+        for src in by_source:
+            by_source[src].sort(key=lambda x: x.get("score", 0.0), reverse=True)
 
-            vector_sim = r.get("score", 0.0)
-            hop = r.get("hop", 0)
-            relational_bonus = max(0.0, 1.0 - hop * 0.25)
-            skill_name = r.get("metadata_json", {}).get("skill_name", "")
-            recency_bonus = 1.0 if skill_name in recent_skills else 0.0
+        # Compute RRF score per unique content key
+        rrf_scores: Dict[tuple, float] = defaultdict(float)
+        content_map: Dict[tuple, Dict] = {}
 
-            fused = (
-                0.5 * vector_sim
-                + 0.3 * relational_bonus
-                + 0.2 * recency_bonus
-            )
-            r = dict(r)
-            r["score"] = fused
-            deduped.append(r)
+        for src, ranked_list in by_source.items():
+            for rank, item in enumerate(ranked_list, start=1):
+                # Unique key: source + prefix of content
+                key = (item.get("source"), item.get("content", "")[:80])
+                rrf_scores[key] += 1.0 / (K + rank)
+                if key not in content_map:
+                    content_map[key] = item
 
-        deduped.sort(key=lambda x: x["score"], reverse=True)
-        return deduped
+    # Apply recency multiplier
+        final = []
+        for key, rrf_score in rrf_scores.items():
+            item = dict(content_map[key])
+            skill_name = item.get("metadata_json", {}).get("skill_name", "")
+            recency_mult = 1.25 if skill_name in recent_skills else 1.0
+            item["score"] = rrf_score * recency_mult
+            final.append(item)
+
+        final.sort(key=lambda x: x["score"], reverse=True)
+        return final

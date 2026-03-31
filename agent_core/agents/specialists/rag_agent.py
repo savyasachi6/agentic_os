@@ -181,11 +181,20 @@ class ResearchAgentWorker:
                     try:
                         p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
                         # CognitiveRetriever handles depth, session context, and augmented query internally
-                        chunks_text = await self.retriever.retrieve_context(
+                        chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
                             query=p.get("query", query_goal),
                             session_id=session_id,
                             intent=task.payload.get("intent")
                         )
+                        
+                        # Push retrieval metadata back to session so future turns know which skills were consulted
+                        await self.bus.push_session_turn(session_id, {
+                            "user_msg": p.get("query", query_goal)[:200],
+                            "skills_used": retrieved_skills,
+                            "intent": task.payload.get("intent", ""),
+                            "turn_type": "retrieval",
+                        })
+
                         if not chunks_text or chunks_text.strip() == "":
                             obs = "Observation: No relevant context found."
                         else:

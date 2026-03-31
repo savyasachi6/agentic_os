@@ -276,6 +276,28 @@ class SkillIndexer:
                 )
         return True
 
+    def _refresh_skill_relations(self) -> None:
+        """Re-seed skill_relations graph after indexing completes."""
+        from db.connection import get_db_connection
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO skill_relations
+                            (source_skill_id, target_skill_id, relation_type, weight)
+                        SELECT a.id, b.id, 'similar',
+                               1 - (a.embedding <=> b.embedding)
+                        FROM knowledge_skills a
+                        CROSS JOIN knowledge_skills b
+                        WHERE a.id < b.id
+                          AND 1 - (a.embedding <=> b.embedding) > 0.75
+                        ON CONFLICT DO NOTHING;
+                    """)
+                conn.commit()
+            print("[indexer] skill_relations graph refreshed")
+        except Exception as e:
+            print(f"[indexer] skill_relations refresh failed (non-fatal): {e}")
+
     def index_all(self) -> None:
         """Recursively scan the skills directory and index everything."""
         if not self.skills_dir.exists():
@@ -309,6 +331,7 @@ class SkillIndexer:
                         count += 1
 
         print(f"[indexer] Done - indexed/synced {count} nodes")
+        self._refresh_skill_relations()
 
 
 if __name__ == "__main__":
