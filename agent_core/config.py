@@ -127,6 +127,14 @@ class Settings:
     def db_name(self) -> str:
         return urlparse(self.database_url).path.lstrip("/") or "agent_os"
 
+    @property
+    def redis_host(self) -> str:
+        return urlparse(self.redis_url).hostname or "localhost"
+
+    @property
+    def redis_port(self) -> int:
+        return urlparse(self.redis_url).port or 6379
+
 def load_settings() -> Settings:
     """Load settings from environment variables with validation."""
     load_dotenv()
@@ -142,9 +150,19 @@ def load_settings() -> Settings:
     if not db_url:
         db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
 
+    # Resolve Redis details (Phase 85 Container Alignment)
+    redis_h = os.getenv("REDIS_HOST", os.getenv("REDIS__HOST", "redis"))
+    redis_p = os.getenv("REDIS_PORT", "6379")
+    redis_db = os.getenv("REDIS_DB", "0")
+    
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        # Default to the container name 'redis' instead of loopback
+        redis_url = f"redis://{redis_h}:{redis_p}/{redis_db}"
+
     settings = Settings(
         database_url     = db_url,
-        redis_url        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
+        redis_url        = redis_url,
         ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
         ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "deepseek/deepseek-r1:free")),
         ollama_model_nano = os.getenv("OLLAMA_MODEL_NANO", "google/gemma-2-9b-it:free"),
@@ -155,7 +173,7 @@ def load_settings() -> Settings:
         log_level        = os.getenv("LOG_LEVEL", "INFO"),
         admin_secret     = resolve_secret("ADMIN_SECRET", "change-me-immediately"),
         api_token        = resolve_secret("API_TOKEN", "change-me-immediately"),
-        openrouter_api_key = resolve_secret("OPENROUTER_API_KEY", ""),
+        openrouter_api_key = resolve_secret("OPENROUTER_API_KEY", resolve_secret("LLM__OPENAI_API_KEY", "")),
         openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         keycloak_url     = os.getenv("KEYCLOAK_URL", "http://keycloak:8080"),
         keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "agent-os"),

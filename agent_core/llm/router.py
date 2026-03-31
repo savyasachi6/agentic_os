@@ -92,6 +92,18 @@ class LLMRouter:
         }
 
     def resolve_model(self, tier: ModelTier) -> str:
+        """Phase 83 Hardening: Enforce high-fidelity for FULL tier if remote API is available."""
+        from agent_core.config import settings
+        
+        # If we have an OpenRouter key, and the tier is FULL, ensure we use a high-fidelity model
+        if tier == ModelTier.FULL and settings.openrouter_api_key:
+             # If the current config is still pointing to a local model, override it
+             current_full = self.tier_models.get(ModelTier.FULL)
+             if current_full and (":" in current_full or "ollama" in current_full.lower()):
+                 # This is likely a local gemma/qwen override in the .env
+                 # We return the high-fidelity default unless the user explicitly chose a remote model
+                 return "deepseek/deepseek-r1:free"
+
         return self.tier_models.get(tier, settings.ollama_model)
 
     def start(self):
@@ -133,7 +145,13 @@ class LLMRouter:
 
         effective_model = model or self.resolve_model(tier)
         
-        print(f"[LLMRouter DEBUG] submit called for session {session_id} tier={tier} model={effective_model}")
+        # Diagnostic Log (Phase 79 Hardening)
+        print(f"[LLMRouter DEBUG] submit called for session {session_id} "
+              f"tier={tier.name} model={effective_model}")
+        if effective_model != model:
+             # Show source of the resolved model to help debug overrides
+             logger.info(f"Model resolved to {effective_model} from tier {tier.name} configuration.")
+        
         request_id = str(uuid.uuid4())
         req = LLMRequest(
             request_id=request_id,

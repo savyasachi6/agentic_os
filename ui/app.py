@@ -277,7 +277,7 @@ with st.sidebar:
     st.title("🌌 Agentic OS")
     st.markdown("---")
     
-    page = st.selectbox("Navigation", ["💬 Terminal", "🧩 Skill Explorer", "🎯 RL Strategy"])
+    page = st.selectbox("Navigation", ["💬 Terminal", "🧩 Skill Explorer", "🎯 RL Strategy (Inactive)"])
     
     st.markdown("---")
     
@@ -453,9 +453,17 @@ elif page == "🧩 Skill Explorer": # Skill Explorer Page
     else:
         st.warning("No skills found.")
 
-elif page == "🎯 RL Strategy":
-    st.header("🎯 RL Strategy Optimizer")
-    st.markdown("Monitor and analyze the **Dynamic Retrieval Depth** policy.")
+elif page == "🎯 RL Strategy (Inactive)":
+    st.header("🎯 Reinforcement Learning Strategy")
+    st.warning("⚠️ Telemetry Service Offline: The RL Router is not currently active in the standard specialist stack.")
+    st.markdown("""
+    This dashboard traditionally displays:
+    - **Exploration vs. Exploitation** weights for specialist routing.
+    - **Reward distributions** per agent role.
+    - **Bandit convergence** metrics.
+    
+    *The RL Strategizer is a dangling feature awaiting telemetry re-integration.*
+    """)
     
     stats = get_router_stats()
     

@@ -283,14 +283,12 @@ class SkillIndexer:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO skill_relations
-                            (source_skill_id, target_skill_id, relation_type, weight)
-                        SELECT a.id, b.id, 'similar',
-                               1 - (a.embedding <=> b.embedding)
-                        FROM knowledge_skills a
-                        CROSS JOIN knowledge_skills b
-                        WHERE a.id < b.id
-                          AND 1 - (a.embedding <=> b.embedding) > 0.75
+                        INSERT INTO skill_relations (source_skill_id, target_skill_id, relation_type, weight)
+                        SELECT a.skill_id, b.skill_id, 'similar', MAX(1 - (a.embedding <=> b.embedding)) as sim
+                        FROM skill_chunks a
+                        JOIN skill_chunks b ON a.skill_id < b.skill_id
+                        GROUP BY a.skill_id, b.skill_id
+                        HAVING MAX(1 - (a.embedding <=> b.embedding)) > 0.85
                         ON CONFLICT DO NOTHING;
                     """)
                 conn.commit()

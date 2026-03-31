@@ -130,13 +130,55 @@ class AgentWorker:
                 print(f"[AgentWorker] Task loop error in {self.role.value}: {e}")
                 await asyncio.sleep(self.poll_interval)
 
+    async def _wait_for_services(self):
+        """Phase 83 Hardening: Block until Postgres and Redis are ready."""
+        import redis.asyncio as aioredis
+        from db.connection import get_db_connection
+        
+        while not self._stop_event.is_set():
+            postgres_ready = False
+            redis_ready = False
+            
+            # Check Postgres
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                        postgres_ready = True
+            except Exception as e:
+                print(f"[AgentWorker] Waiting for Postgres (172.18.0.x:5432)... ({e})")
+            
+            # Check Redis
+            try:
+                if hasattr(self.agent, "bus") and self.agent.bus:
+                    # Ping Redis directly using our bus connection if possible
+                    # Or just a quick check
+                    from agent_core.config import settings
+                    r = aioredis.from_url(settings.redis_url, socket_timeout=2)
+                    await r.ping()
+                    await r.aclose()
+                    redis_ready = True
+                else:
+                    redis_ready = True # No bus, skip redis check
+            except Exception as e:
+                print(f"[AgentWorker] Waiting for Redis ({getattr(settings, 'redis_url', 'unknown')})... ({e})")
+            
+            if postgres_ready and redis_ready:
+                print(f"[AgentWorker] Infrastructure READY. Starting {self.role.value} worker.")
+                break
+            
+            await asyncio.sleep(5)
+
     def _loop(self):
         # Create a local event loop for this thread's async operations
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
         try:
-            # Run heartbeat, listener, and task loop concurrently
+            # 0. Wait for infrastructure to be available
+            loop.run_until_complete(self._wait_for_services())
+            
+            # 1. Run heartbeat, listener, and task loop concurrently
             loop.run_until_complete(asyncio.gather(
                 self._heartbeat_loop(),
                 self._listen_loop(),

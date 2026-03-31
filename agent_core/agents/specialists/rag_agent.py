@@ -25,8 +25,7 @@ from core.message_bus import A2ABus
 from db.connection import init_db_pool
 
 # Sandbox tools re-enabled (Phase 72)
-from sandbox.browser_tools import handle_browser_navigate, ToolCallRequest
-PLAYWRIGHT_AVAILABLE = True
+from sandbox.browser_tools import handle_browser_navigate, ToolCallRequest, PLAYWRIGHT_AVAILABLE
 
 logger = logging.getLogger("agentos.agents.rag")
 
@@ -163,13 +162,25 @@ class ResearchAgentWorker:
                 else:
                     thought_text = parse_thought(response_text)
                 
+                # Deduplication logic (Phase 83 Implementation)
+                if not hasattr(self, "_last_published_thought"):
+                    self._last_published_thought = ""
+
                 if thought_text and thought_text.strip():
-                    turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
-                    await self.bus.publish(self.role.value, {
-                        "type": "thought",
-                        "content": turn_label + thought_text,
-                        "session_id": session_id
-                    })
+                    import re as _re
+                    # Strip any existing [Turn X/Y] or **[Turn X/Y]** or Iterate patterns that models hallucinate
+                    clean_thought = _re.sub(r"(?i)(?:\*\*)?\[?Turn\s+\d+/\d+\]?(?:\*\*)?:?\s*", "", thought_text).strip()
+                    
+                    if clean_thought and clean_thought != self._last_published_thought:
+                        turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
+                        await self.bus.publish(self.role.value, {
+                            "type": "thought",
+                            "content": turn_label + clean_thought,
+                            "session_id": session_id
+                        })
+                        self._last_published_thought = clean_thought
+                    else:
+                        logger.debug(f"Skipping redundant thought publishing on Turn {i+1}")
 
                 if not response_text or response_text.strip() == "":
                     if thinking_match:
@@ -238,10 +249,19 @@ class ResearchAgentWorker:
                     )
                     return
 
+                # Unified payload parsing to prevent UnboundLocalError (Gap 78 Stabilization)
+                p = {}
+                if isinstance(action_payload, str):
+                    try:
+                        p = json.loads(action_payload) if action_payload.strip().startswith("{") else {"query": action_payload, "url": action_payload}
+                    except Exception:
+                        p = {"query": action_payload, "url": action_payload}
+                elif isinstance(action_payload, dict):
+                    p = action_payload
+
                 obs = ""
                 if action_type == "hybrid_search":
                     try:
-                        p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
                         # CognitiveRetriever handles depth, session context, and augmented query internally
                         
                         # Resilience wrap for DB/VectorStore access
