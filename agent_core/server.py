@@ -152,14 +152,25 @@ async def reindex_skills():
 
 
 # ---------------------------------------------------------------------------
-# Chat History Endpoint
+# Chat History & Session Management
 # ---------------------------------------------------------------------------
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    """Retrieve a list of all historical session IDs and their first messages."""
+    try:
+        vs = VectorStore()
+        sessions = await vs.get_all_sessions_async()
+        # Format for UI stability
+        return {"status": "success", "sessions": sessions}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/chat/{session_id}/history")
 async def get_chat_history(session_id: str):
     """Retrieve the chronological chat and reasoning history from pgvector."""
     try:
         vs = VectorStore()
-        history = vs.get_session_history(session_id)
+        history = await vs.get_session_history_async(session_id)
         # Convert datetime objects to ISO format strings for JSON serialization
         for entry in history:
             if 'created_at' in entry and hasattr(entry['created_at'], 'isoformat'):

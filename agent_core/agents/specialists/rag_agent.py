@@ -22,11 +22,11 @@ from agent_core.llm.models import ModelTier
 # RAG logic
 from agent_core.rag.cognitive_retriever import CognitiveRetriever
 from core.message_bus import A2ABus
+from db.connection import init_db_pool
 
-# Sandbox tools temporarily disabled until moved to core/sandbox
-PLAYWRIGHT_AVAILABLE = False
-handle_browser_navigate = None
-ToolCallRequest = None
+# Sandbox tools re-enabled (Phase 72)
+from sandbox.browser_tools import handle_browser_navigate, ToolCallRequest
+PLAYWRIGHT_AVAILABLE = True
 
 logger = logging.getLogger("agentos.agents.rag")
 
@@ -107,14 +107,28 @@ class ResearchAgentWorker:
                     if query_goal:
                         _uq_emb, _ = await self.retriever.embedder.generate_embedding_async(query_goal[:500])
                         from db.queries.thoughts import log_thought
-                        await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
+                        from db.connection import get_db_connection
+                        
+                        # Resilience wrap: detect if DB is down and wait/retry once
+                        try:
+                            await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
+                        except Exception as dbe:
+                            logger.warning(f"Initial thought log failed (likely DB restart): {dbe}. Retrying in 2s...")
+                            await asyncio.sleep(2.0)
+                            await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
                 except Exception as e:
                     logger.error(f"Failed to log user query thought: {e}")
 
                 # Check for session history compaction (Gap 5 Closure)
                 try:
                     from db.queries.thoughts import get_session_history, store_session_summary, get_last_compacted_turn
-                    history = await loop.run_in_executor(None, get_session_history, session_id)
+                    # Resilience wrap for history retrieval
+                    try:
+                        history = await loop.run_in_executor(None, get_session_history, session_id)
+                    except Exception:
+                        await asyncio.sleep(1.0)
+                        history = await loop.run_in_executor(None, get_session_history, session_id)
+                        
                     num_thoughts = len(history)
                     if num_thoughts >= self.compaction_threshold:
                         last_compacted_turn = await loop.run_in_executor(None, get_last_compacted_turn, session_id)
@@ -229,11 +243,22 @@ class ResearchAgentWorker:
                     try:
                         p = json.loads(action_payload) if isinstance(action_payload, str) else action_payload
                         # CognitiveRetriever handles depth, session context, and augmented query internally
-                        chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
-                            query=p.get("query", query_goal),
-                            session_id=session_id,
-                            intent=task.payload.get("intent")
-                        )
+                        
+                        # Resilience wrap for DB/VectorStore access
+                        try:
+                            chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
+                                query=p.get("query", query_goal),
+                                session_id=session_id,
+                                intent=task.payload.get("intent")
+                            )
+                        except Exception as hse:
+                            logger.warning(f"Hybrid search failed (likely DB restart): {hse}. Retrying in 2s...")
+                            await asyncio.sleep(2.0)
+                            chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
+                                query=p.get("query", query_goal),
+                                session_id=session_id,
+                                intent=task.payload.get("intent")
+                            )
                         
                         # Push retrieval metadata back to session so future turns know which skills were consulted
                         await self.bus.push_session_turn(session_id, {
@@ -259,11 +284,45 @@ class ResearchAgentWorker:
                         continue
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
+                elif action_type == "web_search":
+                    if not PLAYWRIGHT_AVAILABLE:
+                        obs = "Observation: web_search unavailable."
+                    else:
+                        query = p.get("query")
+                        if not query:
+                            obs = "Observation: Error: No query provided for web_search."
+                        else:
+                            try:
+                                # Map search to a Google Search navigation call
+                                search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
+                                req = ToolCallRequest(path=search_url, args={})
+                                response = handle_browser_navigate(req)
+                                if response.success:
+                                    res = response.result
+                                    obs = f"Observation: Success [Search: {query}]\nResults: {res['content']}"
+                                else:
+                                    obs = f"Observation: web_search failed: {response.error}"
+                            except Exception as e:
+                                obs = f"Observation: web_search error: {e}"
                 elif action_type == "web_fetch":
                     if not PLAYWRIGHT_AVAILABLE:
                         obs = "Observation: web_fetch unavailable."
                     else:
-                        obs = "Observation: [Simulated web_fetch content]"
+                        url = p.get("url")
+                        if not url:
+                            obs = "Observation: Error: No URL provided for web_fetch."
+                        else:
+                            try:
+                                # Use the production browser-navigate tool
+                                req = ToolCallRequest(path=url, args={})
+                                response = handle_browser_navigate(req)
+                                if response.success:
+                                    res = response.result
+                                    obs = f"Observation: Success [URL: {res['url']}]\nTitle: {res['title']}\nContent: {res['content']}"
+                                else:
+                                    obs = f"Observation: web_fetch failed: {response.error}"
+                            except Exception as e:
+                                obs = f"Observation: web_fetch error: {e}"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
                 

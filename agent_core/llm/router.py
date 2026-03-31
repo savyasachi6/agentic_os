@@ -63,7 +63,15 @@ class LLMRouter:
             self.backend: LLMBackend = LlamaCPPBackend(
                 model_path=getattr(settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')
             )
+        elif backend_type in ["openai", "openrouter"]:
+            from .backends import OpenAIBackend
+            print(f"[LLMRouter] Configuring High-Fidelity Remote Backend ({backend_type})")
+            self.backend: LLMBackend = OpenAIBackend(
+                base_url=settings.openrouter_base_url,
+                api_key=settings.openrouter_api_key
+            )
         else:
+            from .backends import OllamaBackend
             self.backend: LLMBackend = OllamaBackend(
                 base_url=getattr(settings, "ollama_base_url", "http://localhost:11434")
             )

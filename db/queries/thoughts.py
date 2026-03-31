@@ -73,13 +73,24 @@ def retrieve_session_context(query_vec: List[float], session_id: str, limit: int
             rows = cur.fetchall()
             return [{"summary": r[0], "turn_start": r[1], "turn_end": r[2], "score": r[3]} for r in rows]
  
-def get_all_sessions() -> List[str]:
-    """Retrieve unique session IDs from thoughts and summaries."""
+def get_all_sessions() -> List[Dict[str, Any]]:
+    """Retrieve unique session IDs with a preview and creation timestamp."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT session_id FROM thoughts UNION SELECT DISTINCT session_id FROM session_summaries")
+            # Efficiently grab the earliest message for each session to provide a preview
+            cur.execute("""
+                SELECT DISTINCT ON (session_id) 
+                    session_id, 
+                    content as first_message, 
+                    created_at
+                FROM thoughts
+                ORDER BY session_id, created_at ASC
+            """)
             rows = cur.fetchall()
-            return [r[0] for r in rows]
+            return [
+                {"session_id": r[0], "first_message": r[1], "created_at": r[2]} 
+                for r in rows
+            ]
 
 def get_session_history(session_id: str) -> List[Dict[str, Any]]:
     """Retrieve full history for a session, ordered by time."""

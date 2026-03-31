@@ -81,6 +81,25 @@ class A2ABus:
             logger.warning(f"get_session_turns failed: {e}")
             return []
 
+    async def set_heartbeat(self, agent_role: str):
+        """Sets a heartbeat for an agent in Redis with a short TTL (30s)."""
+        if not self.is_connected(): return
+        try:
+            key = f"heartbeat:{agent_role}"
+            await self.r.set(key, "alive", ex=30)
+        except Exception as e:
+            logger.warning(f"A2ABus failed to set heartbeat for {agent_role}: {e}")
+
+    async def get_heartbeat(self, agent_role: str) -> bool:
+        """Checks if an agent's heartbeat is still active."""
+        if not self.is_connected(): return False
+        try:
+            key = f"heartbeat:{agent_role}"
+            return await self.r.exists(key) > 0
+        except Exception as e:
+            logger.warning(f"A2ABus failed to check heartbeat for {agent_role}: {e}")
+            return False
+
     async def close(self):
         if self.is_connected():
             await self.r.aclose()

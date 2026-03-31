@@ -55,6 +55,8 @@ class Settings:
     log_level: str
     admin_secret: str
     api_token: str
+    openrouter_api_key: str
+    openrouter_base_url: str
     
     # --- Keycloak ---
     keycloak_url: str
@@ -144,15 +146,17 @@ def load_settings() -> Settings:
         database_url     = db_url,
         redis_url        = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0"),
         ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
-        ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "gemma3:4b")),
-        ollama_model_nano = os.getenv("OLLAMA_MODEL_NANO", "qwen2.5:1.5b-instruct-q4_K_M"),
-        ollama_model_fast = os.getenv("OLLAMA_MODEL_FAST", "qwen2.5:7b-q4_K_M"),
-        ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", os.getenv("OLLAMA_MODEL", "gemma3:4b")),
+        ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "deepseek/deepseek-r1:free")),
+        ollama_model_nano = os.getenv("OLLAMA_MODEL_NANO", "google/gemma-2-9b-it:free"),
+        ollama_model_fast = os.getenv("OLLAMA_MODEL_FAST", "meta-llama/llama-3-8b-instruct:free"),
+        ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", os.getenv("OLLAMA_MODEL", "deepseek/deepseek-r1:free")),
         embed_model      = os.getenv("EMBED_MODEL", "mxbai-embed-large"),
         browser_ws_url   = os.getenv("BROWSER_WS_URL", os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222")),
         log_level        = os.getenv("LOG_LEVEL", "INFO"),
         admin_secret     = resolve_secret("ADMIN_SECRET", "change-me-immediately"),
         api_token        = resolve_secret("API_TOKEN", "change-me-immediately"),
+        openrouter_api_key = resolve_secret("OPENROUTER_API_KEY", ""),
+        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         keycloak_url     = os.getenv("KEYCLOAK_URL", "http://keycloak:8080"),
         keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "agent-os"),
         keycloak_client_secret = resolve_secret("KEYCLOAK_CLIENT_SECRET", "change-me"),
