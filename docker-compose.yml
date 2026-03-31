@@ -34,10 +34,10 @@ services:
     networks:
       - agentos-net
 
-  lightpanda:
-    image: lightpanda/browser:latest
+  browser:
+    image: browserless/chrome:latest
     ports:
-      - "9222:9222"
+      - "9222:3000"
     networks:
       - agentos-net
 
@@ -69,10 +69,10 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      LIGHTPANDA_CDP_URL: ws://lightpanda:9222
+      BROWSER_WS_URL: ws://browser:3000
       TOOLS_API_URL: http://tools-api:9101
       LLM_MODEL: qwen3-vl:8b
       EMBED_MODEL: mxbai-embed-large
@@ -80,6 +80,8 @@ services:
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     restart: always
+    secrets:
+      - db_password
     volumes:
       - .:/app
     extra_hosts:
@@ -105,12 +107,14 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       CORE_API_URL: http://agent-core:8000
       CORE_WS_URL: ws://agent-core:8000/ws
       PYTHONPATH: /app
       PYTHONUNBUFFERED: "1"
     restart: always
+    secrets:
+      - db_password
     networks:
       - agentos-net
 
@@ -123,7 +127,7 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       PYTHONPATH: /app
@@ -132,6 +136,8 @@ services:
       OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
       - .:/app
+    secrets:
+      - db_password
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: [ "python", "dev/scripts/worker_manager.py" ]
@@ -142,7 +148,6 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      # Use our status script to verify Redis heartbeats are present
       test: [ "CMD", "python", "dev/scripts/manage_workers.py", "status" ]
       interval: 30s
       timeout: 10s
@@ -159,11 +164,13 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: agent
-      KC_DB_PASSWORD: password
+      KC_DB_PASSWORD_FILE: /run/secrets/db_password
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
     ports:
       - "8080:8080"
+    secrets:
+      - db_password
     depends_on:
       postgres:
         condition: service_healthy
@@ -177,5 +184,9 @@ services:
 
 volumes:
   pgdata:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
 
 

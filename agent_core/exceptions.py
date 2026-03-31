@@ -30,4 +30,4 @@ class ReasoningBudgetExceeded(AgenticOSError):
     """Raised when per-message agent call limit is exceeded."""
 
 class WebSearchUnavailable(AgenticOSError):
-    """Raised when Lightpanda or web search cannot be reached."""
+    """Raised when web search cannot be reached."""

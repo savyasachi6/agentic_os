@@ -18,6 +18,7 @@ from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
 from agent_core.agent_types import NodeType, AgentRole, AgentResult, NodeStatus
+from agent_core.llm.models import ModelTier
 # RAG logic
 from agent_core.rag.cognitive_retriever import CognitiveRetriever
 from core.message_bus import A2ABus
@@ -98,11 +99,12 @@ class ResearchAgentWorker:
                 await self.tree_store.update_node_status_async(task.id, NodeStatus.PENDING, result={"progress": status_msg})
 
                 logger.info(f"{status_msg} Starting LLM generation...")
+                loop = asyncio.get_running_loop()
+
                 # Log original user goal as a 'user' thought for memory retrieval
                 try:
                     query_goal = task.payload.get("goal", task.payload.get("query", ""))
                     if query_goal:
-                        loop = asyncio.get_running_loop()
                         _uq_emb, _ = await self.retriever.embedder.generate_embedding_async(query_goal[:500])
                         from db.queries.thoughts import log_thought
                         await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)

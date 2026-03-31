@@ -11,7 +11,34 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
+from pathlib import Path
 from urllib.parse import urlparse
+
+def resolve_secret(env_name: str, default: str = "") -> str:
+    """
+    Resolve a configuration value, prioritizing:
+    1. ${env_name}_FILE (e.g. POSTGRES_PASSWORD_FILE) pointing to a secret file
+    2. ${env_name} environment variable directly
+    3. Provided default value
+    """
+    # 1. Check for secret file (Docker Secrets convention)
+    file_path = os.getenv(f"{env_name}_FILE")
+    if file_path and os.path.exists(file_path):
+        try:
+            return Path(file_path).read_text().strip()
+        except Exception:
+            pass
+            
+    # 2. Check for explicit secrets folder mapping as backup
+    alt_local = Path(f"secrets/{env_name.lower()}.txt")
+    if alt_local.exists():
+        try:
+            return alt_local.read_text().strip()
+        except Exception:
+            pass
+
+    # 3. Fallback to standard environment variable
+    return os.getenv(env_name, default)
 
 @dataclass(frozen=True)
 class Settings:
@@ -24,7 +51,7 @@ class Settings:
     ollama_model_fast: str
     ollama_model_full: str
     embed_model: str
-    lightpanda_ws_url: str
+    browser_ws_url: str
     log_level: str
     admin_secret: str
     api_token: str
@@ -102,17 +129,16 @@ def load_settings() -> Settings:
     """Load settings from environment variables with validation."""
     load_dotenv()
     
+    # Resolve DB password via secret files or env
+    pw = resolve_secret("POSTGRES_PASSWORD", "password")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "agent_os")
+    user = os.getenv("POSTGRES_USER", "agent")
+    
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
-        host = os.getenv("POSTGRES_HOST", "localhost")
-        port = os.getenv("POSTGRES_PORT", "5432")
-        db = os.getenv("POSTGRES_DB", "agent_os")
-        user = os.getenv("POSTGRES_USER", "agent")
-        pw = os.getenv("POSTGRES_PASSWORD")
-        if pw:
-            db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
-        else:
-            db_url = "postgresql://agent:test@localhost:5432/agent_os"
+        db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
 
     settings = Settings(
         database_url     = db_url,
@@ -123,13 +149,13 @@ def load_settings() -> Settings:
         ollama_model_fast = os.getenv("OLLAMA_MODEL_FAST", "qwen2.5:7b-q4_K_M"),
         ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", os.getenv("OLLAMA_MODEL", "gemma3:4b")),
         embed_model      = os.getenv("EMBED_MODEL", "mxbai-embed-large"),
-        lightpanda_ws_url= os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222"),
+        browser_ws_url   = os.getenv("BROWSER_WS_URL", os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222")),
         log_level        = os.getenv("LOG_LEVEL", "INFO"),
-        admin_secret     = os.getenv("ADMIN_SECRET", os.getenv("JWT_SECRET", "change-me-immediately")),
-        api_token        = os.getenv("API_TOKEN", "change-me-immediately"),
+        admin_secret     = resolve_secret("ADMIN_SECRET", "change-me-immediately"),
+        api_token        = resolve_secret("API_TOKEN", "change-me-immediately"),
         keycloak_url     = os.getenv("KEYCLOAK_URL", "http://keycloak:8080"),
         keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "agent-os"),
-        keycloak_client_secret = os.getenv("KEYCLOAK_CLIENT_SECRET", "change-me"),
+        keycloak_client_secret = resolve_secret("KEYCLOAK_CLIENT_SECRET", "change-me"),
         skills_dir       = os.getenv("SKILLS_DIR", "skills"),
         chunk_min_tokens = int(os.getenv("CHUNK_MIN_TOKENS", "100")),
         chunk_max_tokens = int(os.getenv("CHUNK_MAX_TOKENS", "250")),

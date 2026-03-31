@@ -9,33 +9,31 @@ MISSING_TOOLS = [
     {
         "name": "web_search",
         "description": (
-            "Search the live web using Lightpanda headless browser "
-            "at localhost:9222. Use for news, current events, live data, "
-            "any query needing real-time information."
+            "Search the live web using a headless browser "
+            "for real-time news and facts."
         ),
         "risk_level": "low",
         "endpoint": "http://localhost:9222",
-        "tags": ["web", "search", "news", "live", "browser", "lightpanda"]
+        "tags": ["web", "search", "news", "live", "browser"]
     },
     {
         "name": "web_scrape",
         "description": (
-            "Scrape content from a specific URL using Lightpanda browser. "
-            "Handles JavaScript-rendered pages. Returns full page text."
+            "Scrape content from a specific URL using a headless browser. "
+            "Returns title, full text, and HTML status."
         ),
         "risk_level": "low",
         "endpoint": "http://localhost:9222",
-        "tags": ["web", "scrape", "browser", "lightpanda", "url"]
+        "tags": ["web", "scrape", "browser", "url"]
     },
     {
-        "name": "web_navigate",
+        "name": "browser_navigate",
         "description": (
-            "Navigate to any URL and extract content using "
-            "Lightpanda headless browser. Full JS rendering."
+            "Headless browser navigation. Full JS rendering."
         ),
         "risk_level": "low",
         "endpoint": "http://localhost:9222",
-        "tags": ["web", "navigate", "browser", "lightpanda"]
+        "tags": ["web", "navigate", "browser"]
     },
 ]
 

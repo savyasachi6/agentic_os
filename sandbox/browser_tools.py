@@ -1,17 +1,17 @@
 """
-Browser Tools for Agentic OS Sandbox (Lightpanda / Playwright CDP)
+Browser Tools for Agentic OS Sandbox (Playwright / Generic CDP)
 
-Provides browser automation as sandbox tools by connecting to a Lightpanda
-(or any CDP-compatible browser) instance via WebSocket.
+Provides browser automation as sandbox tools by connecting to a 
+CDP-compatible browser instance via WebSocket (e.g., Browserless, Chrome).
 
-Connection: reads LIGHTPANDA_CDP_URL (default: ws://127.0.0.1:9222).
+Connection: reads BROWSER_WS_URL (default: ws://127.0.0.1:9222).
 Each handler opens a short-lived Playwright session, performs the action,
-then disconnects — keeping the Lightpanda server persistent across calls.
+then disconnects — keeping the browser server persistent across calls.
 
 Hardware Assumptions:
 - Network-bound; no GPU required.
 - Runs inside the isolated Sandbox FastAPI worker subprocess.
-- Lightpanda must be started *separately* (e.g. `lightpanda serve`);
+- The browser server must be started *separately* (e.g., via Docker);
   this module never spawns or manages the browser process itself.
 
 Available tools (registered in worker.py TOOL_REGISTRY):
@@ -46,8 +46,8 @@ from .models import ToolCallRequest, ToolCallResponse  # type: ignore
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _cdp_url() -> str:
-    """Return the Lightpanda (or generic CDP) WebSocket endpoint URL."""
-    return os.environ.get("LIGHTPANDA_CDP_URL", "ws://127.0.0.1:9222")
+    """Return the Generic CDP WebSocket endpoint URL."""
+    return os.environ.get("BROWSER_WS_URL", "ws://127.0.0.1:9222")
 
 
 def _unavailable() -> ToolCallResponse:

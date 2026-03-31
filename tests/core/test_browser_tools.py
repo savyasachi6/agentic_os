@@ -1,7 +1,7 @@
 """
 Unit tests for agent_sandbox/browser_tools.py
 
-All tests use mocked Playwright — no real browser or Lightpanda instance required.
+All tests use mocked Playwright — no real browser or Chrome instance required.
 Run with:  pytest tests/core/test_browser_tools.py -v
 """
 
