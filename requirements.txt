@@ -5,6 +5,7 @@ pydantic
 pydantic-settings
 psycopg2-binary
 pgvector
+sqlalchemy
 ollama
 httpx
 psutil

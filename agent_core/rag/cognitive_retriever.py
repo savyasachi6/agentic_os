@@ -1,6 +1,6 @@
 """
-rag/cognitive_retriever.py
-==========================
+agent_core/rag/cognitive_retriever.py
+====================================
 Intent-aware, session-grounded, relational-first retriever.
 Replaces HybridRetriever + RLRoutingClient with a single in-process component.
 
@@ -51,7 +51,7 @@ class CognitiveRetriever:
         if embedder:
             self.embedder = embedder
         else:
-            from agent_core.rag.embedder import Embedder
+            from .embedder import Embedder
             self.embedder = Embedder()
 
         if db_session:
@@ -209,8 +209,8 @@ class CognitiveRetriever:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
-                            SELECT content FROM chain_nodes
-                            WHERE chain_id = %s
+                            SELECT content FROM nodes
+                            WHERE chain_id = (SELECT id FROM chains WHERE session_id = %s LIMIT 1)
                               AND status = 'done'
                               AND agent_role IN ('rag', 'research')
                             ORDER BY created_at DESC
@@ -280,7 +280,7 @@ class CognitiveRetriever:
             return []
         try:
             from sqlalchemy import select
-            from agent_core.rag.schema import MemoryChunk
+            from .schema import MemoryChunk
 
             query_vec, _ = await self.embedder.generate_embedding_async(query)
             distance_expr = MemoryChunk.embedding.cosine_distance(query_vec)
@@ -291,7 +291,11 @@ class CognitiveRetriever:
                 .limit(top_k)
             )
             loop = asyncio.get_running_loop()
-            rows = (await loop.run_in_executor(None, self.db.execute, stmt)).all()
+            # Wrap execution in to_thread/executor for non-blocking
+            def _exec():
+                return self.db.execute(stmt).all()
+            
+            rows = await loop.run_in_executor(None, _exec)
             return [
                 {
                     "chunk_id": r.MemoryChunk.id,

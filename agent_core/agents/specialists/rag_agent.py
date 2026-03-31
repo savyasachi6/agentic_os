@@ -19,7 +19,7 @@ from db.models import Node
 from agent_core.graph.state import AgentState
 from agent_core.agent_types import NodeType, AgentRole, AgentResult, NodeStatus
 # RAG logic
-from rag.cognitive_retriever import CognitiveRetriever
+from agent_core.rag.cognitive_retriever import CognitiveRetriever
 from core.message_bus import A2ABus
 
 # Sandbox tools temporarily disabled until moved to core/sandbox
