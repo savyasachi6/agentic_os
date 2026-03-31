@@ -23,6 +23,12 @@ except ImportError:
 
 logger = logging.getLogger("agentos.llm.client")
 
+_TIER_MAX_TOKENS = {
+    ModelTier.NANO: 256,
+    ModelTier.FAST: 2048,
+    ModelTier.FULL: 8192,
+}
+
 class LLMClient:
     """
     Standard LLM client for all agentic_os components.
@@ -78,12 +84,19 @@ class LLMClient:
         """Asynchronously generate a response via the router."""
         try:
             norm_messages = self._normalize_messages(messages)
+            
+            # Tier logic: 
+            # 1. If tier != FULL, pass model=None so the router resolves it via tier.
+            # 2. If tier == FULL but caller didn't override model, pass None so router uses FULL default.
+            # 3. Only pass self.model_name explicitly if it was an override during init.
+            explicit_model = self.model_name if (self.model_name != settings.ollama_model and tier == ModelTier.FULL) else None
+            
             return await self.router.submit(
                 messages=norm_messages,
                 session_id=session_id,
-                model=self.model_name if self.model_name != settings.ollama_model else None,
+                model=explicit_model,
                 tier=tier,
-                max_tokens=max_tokens or self.max_tokens,
+                max_tokens=max_tokens or _TIER_MAX_TOKENS[tier],
                 temperature=self.temperature,
                 priority=priority,
                 stop=stop

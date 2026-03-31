@@ -119,6 +119,10 @@ class LLMRouter:
         # Lazy start the background loop if needed (Phase 9 Hardening)
         self.start()
         
+        # Priority elevation: NANO hits always jump the queue
+        if tier == ModelTier.NANO and priority == Priority.NORMAL:
+            priority = Priority.OBSERVER
+
         effective_model = model or self.resolve_model(tier)
         
         print(f"[LLMRouter DEBUG] submit called for session {session_id} tier={tier} model={effective_model}")

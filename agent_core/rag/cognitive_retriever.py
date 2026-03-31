@@ -63,6 +63,10 @@ class CognitiveRetriever:
                 self.db = SessionLocal()
             except Exception:
                 self.db = None
+        
+        # Optimized rewriter: share a client across calls
+        from agent_core.llm.client import LLMClient
+        self._rewrite_llm = LLMClient()
 
     # ------------------------------------------------------------------
     # Public API
@@ -174,10 +178,8 @@ class CognitiveRetriever:
             f"that incorporates relevant prior context. Return only the rewritten query, nothing else."
         )
         try:
-            from agent_core.llm.client import LLMClient
             from agent_core.llm.models import ModelTier
-            llm = LLMClient()
-            rewritten = await llm.generate_async(
+            rewritten = await self._rewrite_llm.generate_async(
                 [{"role": "user", "content": prompt}],
                 max_tokens=60,
                 tier=ModelTier.NANO
