@@ -819,3 +819,20 @@ CREATE TABLE IF NOT EXISTS speculative_metrics (
     escalation_action     TEXT,           -- accept / escalate / abort
     created_at            TIMESTAMPTZ DEFAULT NOW()
 );
+
+
+-- ============================================================
+-- RAG: Memory chunks (Interactive session memory)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS memory_chunks (
+    id             SERIAL PRIMARY KEY,
+    document_id    VARCHAR(255),
+    content        TEXT NOT NULL,
+    embedding      VECTOR(1024),
+    metadata_json  JSONB DEFAULT '{}',
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_chunks_hnsw
+    ON memory_chunks USING hnsw (embedding vector_cosine_ops);
+
