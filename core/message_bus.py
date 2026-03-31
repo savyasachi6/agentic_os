@@ -176,7 +176,7 @@ class A2ABus:
         except asyncio.TimeoutError:
             return None
         except Exception as e:
-            logger.warning(f"A2ABus wait_for_topic failed for {topic}: {e}")
+            logger.warning(f"A2ABus wait_for_topic failed for {topic} (Type: {type(e).__name__}): {e}")
             return None
         finally:
             if 'pubsub' in locals():

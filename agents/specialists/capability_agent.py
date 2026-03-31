@@ -105,8 +105,10 @@ class CapabilityAgentWorker(AgentWorker):
 
     async def _process_task(self, task: Node):
         import time
+        from core.utils.text import extract_text
         start_time = time.time()
-        query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
+        raw_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
+        query_goal = extract_text(raw_goal)
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
         # Restore selective static logic for specific project metadata (Phase 4 Maintenance)

@@ -110,15 +110,17 @@ class AgentWorker:
                 print(f"[{ts}] [AgentWorker] Processing Task {task.id} for {self.role.value} (Dispatch: {target_node_id is not None})")
                 
                 try:
-                    # Use polymorphic entry point (run, _process_task, or handle_task)
-                    # Phase 48: Capture results to ensure NodeStatus.DONE is pushed automatically.
+                    # Use polymorphic entry point (Phase 13 Fix B2: Prioritize Node-aware handlers)
                     result = None
-                    if hasattr(self.agent, "run"):
-                        await self.agent.run(task)
-                    elif hasattr(self.agent, "_process_task"):
+                    if hasattr(self.agent, "_process_task"):
                         result = await self.agent._process_task(task)
                     elif hasattr(self.agent, "handle_task"):
                         result = await self.agent.handle_task(task)
+                    elif hasattr(self.agent, "run"):
+                        # Only use run() as fallback; it may expect a string, not a Node (Fix B2)
+                        # Extract goal or content if the core specialist expects a string
+                        query = task.payload.get("query", task.payload.get("goal", task.content or ""))
+                        result = await self.agent.run(query=query, session_id=str(task.chain_id))
                     else:
                         # Fallback to old execute method if no specific handler is found
                         query = task.payload.get("query", task.payload.get("task", task.content))

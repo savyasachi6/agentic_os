@@ -38,11 +38,13 @@ class ResearchAgentWorker(AgentWorker):
 
     async def _process_task(self, task: Node):
         from core.reasoning import parse_react_action, strip_all_reasoning
+        from core.utils.text import extract_text
 
         import time
         start_time = time.time()
 
-        query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
+        raw_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
+        query_goal = extract_text(raw_goal)
         session_id = str(task.chain_id)
 
         logger.info(

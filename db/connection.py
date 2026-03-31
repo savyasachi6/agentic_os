@@ -8,21 +8,21 @@ Uses core/config.py for connection parameters and core/logging_config.py for sta
 import logging
 import os
 from contextlib import contextmanager
-from typing import Optional, Generator
+from typing import Optional, Generator, Any
 
 import time
 import psycopg2
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 from pgvector.psycopg2 import register_vector
-import redis.asyncio as redis
+
 
 from core.settings import settings
 from core.logging_config import setup_logging
 
 logger = logging.getLogger("agentos.db")
 
-_pool: Optional[SimpleConnectionPool] = None
-_redis: Optional[redis.Redis] = None
+_pool: Optional[ThreadedConnectionPool] = None
+_redis: Optional[Any] = None
 
 # psycopg2 errors that indicate a dropped / stale connection
 _TRANSIENT_DB_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
@@ -50,7 +50,7 @@ def init_db_pool(
     password = password or u.password or ""
 
     try:
-        _pool = SimpleConnectionPool(
+        _pool = ThreadedConnectionPool(
             min_conn,
             max_conn,
             host=host,
@@ -59,7 +59,7 @@ def init_db_pool(
             user=user,
             password=password,
         )
-        logger.info("DB pool initialized -> %s:%s/%s", host, port, dbname)
+        logger.info("DB pool initialized (Threaded) -> %s:%s/%s", host, port, dbname)
     except psycopg2.OperationalError as e:
         # Avoid useless localhost fallback in Docker where 'postgres' host is explicitly set
         logger.error("Failed to initialize DB pool for host %s: %s", host, e)
@@ -68,17 +68,18 @@ def init_db_pool(
         logger.error("Failed to initialize DB pool: %s", e)
         raise
 
-def get_pool() -> SimpleConnectionPool:
+def get_pool() -> ThreadedConnectionPool:
     """Get the connection pool, initializing if necessary."""
     global _pool
     if _pool is None:
         init_db_pool()
     return _pool
 
-async def get_redis() -> redis.Redis:
+async def get_redis() -> Any:
     """Get the async Redis client, initializing if necessary."""
     global _redis
     if _redis is None:
+        import redis.asyncio as redis
         from urllib.parse import urlparse
         u = urlparse(settings.redis_url)
         _redis = redis.Redis(

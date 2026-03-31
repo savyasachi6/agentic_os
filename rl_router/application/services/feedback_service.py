@@ -16,7 +16,11 @@ from rl_router.infrastructure.repositories import (
     ToolExecutionRepository,
 )
 from rl_router.schemas.api_models import FeedbackRequest, FeedbackResponse
+from concurrent.futures import ThreadPoolExecutor
 from rl_router.infrastructure.context_cache import context_registry
+
+# Global executor for background persistence (Phase 7 Hardening)
+_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 class FeedbackService:
@@ -113,33 +117,38 @@ class FeedbackService:
             hallucination_flag=request.hallucination_flag or (not reliable_pass and request.success),
         )
 
-        # 4. Persist Episode
-        episode_id = self._repo.log_episode(
-            query_hash=request.query_hash,
-            query_type=request.query_type,
-            depth_used=request.depth_used,
-            speculative_used=request.speculative_used,
-            latency_ms=request.latency_ms,
-            success=request.success,
-            hallucination_flag=request.hallucination_flag,
-            hallucination_score=request.hallucination_score,
-            auditor_score=request.auditor_score,
-            faithfulness_score=request.faithfulness_score,
-            coverage_score=request.coverage_score,
-            cost_tokens=request.cost_tokens,
-            reward=reward_vec,
-            arm_index=request.arm_index,
-            final_utility_score=final_utility,
-            reliable_pass_flag=reliable_pass,
-            context_vector=context.tolist() if isinstance(context, np.ndarray) else context,
-        )
+        # 4. Background Persistence (Phase 7 Hardening)
+        # We process the heavy DB I/O in the background to avoid endpoint timeouts
+        def _persist():
+            try:
+                episode_id = self._repo.log_episode(
+                    query_hash=request.query_hash,
+                    query_type=request.query_type,
+                    depth_used=request.depth_used,
+                    speculative_used=request.speculative_used,
+                    latency_ms=request.latency_ms,
+                    success=request.success,
+                    hallucination_flag=request.hallucination_flag,
+                    hallucination_score=request.hallucination_score,
+                    auditor_score=request.auditor_score,
+                    faithfulness_score=request.faithfulness_score,
+                    coverage_score=request.coverage_score,
+                    cost_tokens=request.cost_tokens,
+                    reward=reward_vec,
+                    arm_index=request.arm_index,
+                    final_utility_score=final_utility,
+                    reliable_pass_flag=reliable_pass,
+                    context_vector=context.tolist() if isinstance(context, np.ndarray) else context,
+                )
+                if domain_tool_calls:
+                    self._tool_repo.log_executions(episode_id, domain_tool_calls)
+            except Exception as e:
+                logger.error(f"Background persistence failed: {e}")
 
-        # 5. Persist Tool Executions
-        if domain_tool_calls:
-            self._tool_repo.log_executions(episode_id, domain_tool_calls)
+        _EXECUTOR.submit(_persist)
 
         return FeedbackResponse(
-            episode_id=episode_id,
+            episode_id="async_logged", # Client doesn't strictly need the UUID
             reward=reward_vec,
             final_utility_score=final_utility,
             reliable_pass_flag=reliable_pass,

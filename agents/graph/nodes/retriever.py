@@ -76,8 +76,18 @@ def retrieve_context(state: AgentState) -> dict:
         return {"relational_context": {}}
 
     last_msg = state["messages"][-1]
-    query = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
+    raw_content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
     
+    # Safe extraction for hash and RL routing (Fix B1)
+    if isinstance(raw_content, list):
+        # Extract text parts from multi-modal list
+        query = " ".join([
+            str(b.get("text", "")) if isinstance(b, dict) else str(b) 
+            for b in raw_content
+        ]).strip()
+    else:
+        query = str(raw_content)
+
     try:
         vs = VectorStore()
         
@@ -95,7 +105,6 @@ def retrieve_context(state: AgentState) -> dict:
             "chain_id": state.get("chain_id", 0)
         }
 
-        
         # Multi-fidelity resolution
         k_mapping = {0: 2, 1: 5, 2: 10, 3: 15}
         limit = k_mapping.get(depth, 5)
@@ -121,5 +130,10 @@ def retrieve_context(state: AgentState) -> dict:
         }
 
     except Exception as e:
-        print(f"[RetrieverNode] SQL-RAG failed: {e}")
-        return {"relational_context": {"error": str(e)}}
+        import logging
+        logger = logging.getLogger("agentos.retriever")
+        logger.warning(f"[RetrieverNode] SQL-RAG failed, falling back to empty context: {e}", exc_info=True)
+        return {
+            "relational_context": {"error": str(e)},
+            "rl_metadata": {}
+        }

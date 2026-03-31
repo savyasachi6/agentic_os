@@ -79,9 +79,10 @@ services:
       - redis_password
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$(cat /run/secrets/redis_password) ping | grep PONG"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -219,6 +220,7 @@ services:
     volumes:
       - ./rl_router:/app/rl_router
       - ./core:/app/core
+      - ./db:/app/db
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_DB: agent_os

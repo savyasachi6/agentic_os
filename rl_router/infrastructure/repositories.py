@@ -15,7 +15,7 @@ from uuid import uuid4
 import psycopg2.extras
 
 from rl_router.domain.models import RewardVector, ToolCallLog
-from rl_router.infrastructure.db import get_connection
+from db.connection import get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,7 @@ class EpisodeRepository:
             "overthinking_penalty": reward.overthinking_penalty,
         }
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (
                         episode_id, query_hash, query_type, depth_used,
@@ -79,7 +78,6 @@ class EpisodeRepository:
                         final_utility_score, reliable_pass_flag,
                         context_vector
                     ))
-            conn.close()
         except Exception:
             logger.exception("Failed to log retrieval episode %s", episode_id)
         return episode_id
@@ -90,11 +88,9 @@ class EpisodeRepository:
         """
         sql = "DELETE FROM retrieval_episodes WHERE session_id = %s"
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (session_id,))
-            conn.close()
         except Exception:
             logger.exception("Failed to delete episodes for session %s", session_id)
 
@@ -115,12 +111,10 @@ class EpisodeRepository:
         params.append(limit)
 
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute(sql, params)
                     rows = cur.fetchall()
-            conn.close()
             return [dict(r) for r in rows]
         except Exception:
             logger.exception("Failed to fetch episodes")
@@ -152,15 +146,13 @@ class SpeculativeMetricsRepository:
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (
                         metric_id, query_hash, n_clusters, n_drafts,
                         draft_disagreement, verifier_confidence, depth,
                         latency_ms, cache_hit, escalation_action,
                     ))
-            conn.close()
         except Exception:
             logger.exception("Failed to log speculative metrics %s", metric_id)
         return metric_id
@@ -193,11 +185,9 @@ class ToolExecutionRepository:
         ]
 
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     psycopg2.extras.execute_values(cur, sql, args)
-            conn.close()
         except Exception:
             logger.exception("Failed to log tool executions for episode %s", episode_id)
 
@@ -215,11 +205,9 @@ class BanditRepository:
                 updated_at = EXCLUDED.updated_at
         """
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (model_name, psycopg2.Binary(weights_bytes)))
-            conn.close()
             return True
         except Exception:
             logger.exception("Failed to save bandit weights for %s", model_name)
@@ -229,12 +217,10 @@ class BanditRepository:
         """Fetch serialized bandit weights from the database."""
         sql = "SELECT weights_bin FROM bandit_weights WHERE model_name = %s"
         try:
-            conn = get_connection()
-            with conn:
+            with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, (model_name,))
                     row = cur.fetchone()
-            conn.close()
             return bytes(row[0]) if row else None
         except Exception:
             logger.exception("Failed to load bandit weights for %s", model_name)

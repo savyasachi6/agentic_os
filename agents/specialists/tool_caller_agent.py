@@ -124,7 +124,9 @@ class ToolCallerAgentWorker(AgentWorker):
         super().__init__(role=AgentRole.TOOL_CALLER, agent=self._tool_agent, store=store or TreeStore())
 
     async def _process_task(self, task: Node):
-        query = task.payload.get("query") or task.payload.get("goal") or task.content or ""
+        from core.utils.text import extract_text
+        raw_query = task.payload.get("query") or task.payload.get("goal") or task.content or ""
+        query = extract_text(raw_query)
         session_id = getattr(task, "session_id", None) or str(task.chain_id)
 
         logger.info("[tool_caller] Processing node %s: %s", task.id, query[:80])

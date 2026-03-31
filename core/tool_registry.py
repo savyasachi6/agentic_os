@@ -59,9 +59,11 @@ class ToolRegistry:
         """
         Dynamically retrieve top-k candidate tools using robust fuzzy matching.
         Fixed in Phase 50: Handles spaces and fragments (e.g. 'log 10' matching 'log10').
+        Fixed in Phase 1.1 (Stabilization): Safe extraction for multi-modal queries.
         """
+        from core.utils.text import extract_text
         import re
-        q = query.lower()
+        q = extract_text(query).lower()
         query_words = re.findall(r'\w+', q)
         scored = []
         

@@ -26,6 +26,7 @@ from core.reasoning import parse_react_action, strip_all_reasoning
 from agents.intent.classifier import classify_intent
 from agents.intent.routing import route_action_to_agent
 from core.llm.client import LLMClient
+from core.utils.text import extract_text
 
 logger = logging.getLogger("agentos.coordinator_graph")
 
@@ -57,6 +58,9 @@ def _strip_react_internals(text: str) -> str:
     result = "\n".join(lines).strip()
     return result or text  # safety: never return empty
 
+    result = "\n".join(lines).strip()
+    return result or text  # safety: never return empty
+
 # ─────────────────────────────────────────────
 # Node functions
 # ─────────────────────────────────────────────
@@ -72,7 +76,7 @@ async def classify_node(state: AgentState) -> AgentState:
         return {**state, "intent": Intent.GREETING.value, "last_action_status": "pending"}
         
     last_human = next(
-        (m.content for m in reversed(messages) if isinstance(m, HumanMessage)),
+        (extract_text(m.content) for m in reversed(messages) if isinstance(m, HumanMessage)),
         "",
     )
     intent = classify_intent(last_human)
@@ -94,7 +98,7 @@ async def route_node(state: AgentState) -> AgentState:
     messages = state.get("messages", [])
     
     last_human = next(
-        (m.content for m in reversed(messages) if isinstance(m, HumanMessage)),
+        (extract_text(m.content) for m in reversed(messages) if isinstance(m, HumanMessage)),
         "",
     )
 
@@ -246,13 +250,19 @@ async def execute_node(state: AgentState) -> AgentState:
 
     guard.record(action_name, action_goal[:80])
     bridge = agents.get(action_name)
-
     if bridge:
         try:
-            # Bug 3: Add 45s timeout to specialist execution to prevent UI hangs
+            # Phase 13 Fix B4: Standardize payload keys so both 'goal' and 'query' exist.
+            # This ensures specialist worker compatibility regardless of version.
+            bridge_payload = {
+                "goal": action_goal,
+                "query": action_goal,
+                "session_id": str(chain_id),
+                "relational_context": state.get("relational_context", {})
+            }
             result = await asyncio.wait_for(
-                bridge.execute({"query": action_goal}, chain_id=chain_id),
-                timeout=45.0
+                bridge.execute(bridge_payload, chain_id=chain_id),
+                timeout=360.0
             )
         except asyncio.TimeoutError:
             return {
@@ -358,20 +368,17 @@ async def execute_node(state: AgentState) -> AgentState:
             obs = f"Observation: {json.dumps(result)}"
             status = "success"
     else:
-        obs = f"Observation Error: No agent registered for '{action_name}'."
-        status = "error"
-
-    new_messages = list(state["messages"]) + [HumanMessage(content=obs)]
-    return {
-        **state,
-        "messages": new_messages,
-        "guard": guard,
-        "last_action_status": status,
-        "next_node": "route",
-        "retry_count": state.get("retry_count", 0),
-        "step_count": state.get("step_count", 0) + 1,
-        "invalid_call_count": state.get("invalid_call_count", 0) + (1 if status == "error" else 0),
-    }
+        return {
+            **state,
+            "next_node": "respond",
+            "direct_response": (
+                f"I couldn't find a specialist agent for '{action_name}'. "
+                "Please try rephrasing your question or check the system capabilities."
+            ),
+            "last_action_status": "error",
+            "step_count": state.get("step_count", 0) + 1,
+            "invalid_call_count": state.get("invalid_call_count", 0) + 1,
+        }
 
 
 async def respond_node(state: AgentState) -> AgentState:
@@ -410,10 +417,13 @@ def decide_after_execute(state: AgentState) -> str:
     Circuit breaker: stop if too many retries OR too many errors,
     not just retry_count (which only increments on guard failures).
     """
-    retry = state.get("retry_count", 0)
+    retry   = state.get("retry_count", 0)
     invalid = state.get("invalid_call_count", 0)
-    # Stop if explicit retries exceeded OR accumulated errors are high
-    if retry >= 5 or invalid >= 3:
+    steps   = state.get("step_count", 0)
+    
+    # Circuit Breaker: Stop if budget exceeded, errors are high, OR too many graph steps
+    # Phase 13 Fix B3: Increase step limit to 20 to support complex multi-step specialists.
+    if retry >= 5 or invalid >= 3 or steps >= 20:
         return "respond"
     return state.get("next_node", "route")
 

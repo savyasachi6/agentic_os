@@ -38,7 +38,8 @@ ROLE_TIMEOUTS = {
     AgentRole.PLANNER: 360.0,
     AgentRole.PRODUCTIVITY: 360.0,
     AgentRole.EMAIL: 360.0,
-    AgentRole.TOOL_CALLER: 360.0
+    AgentRole.TOOL_CALLER: 360.0,
+    AgentRole.MEMORY: 120.0,
 }
 DEFAULT_TIMEOUT = 360.0
 
@@ -80,7 +81,7 @@ class BridgeAgent:
         start_t = time.time()
 
         # Wait for completion via A2A Bus (Phase 5 Hardening - Real-time notifications)
-        # Fallback to polling if bus is disconnected (Phase 44)
+        use_polling = True
         if self.bus and self.bus.is_connected():
             logger.info(f"[BridgeAgent] Waiting for node_done:{task_node.id} on A2A bus (timeout={timeout_sec}s)")
             # Phase 49: Update UI Status
@@ -94,8 +95,10 @@ class BridgeAgent:
             result_notif = await self.bus.wait_for_topic(f"node_done:{task_node.id}", timeout=timeout_sec)
             if result_notif:
                 logger.info(f"[BridgeAgent] Real-time completion received for node_id={task_node.id}")
-        else:
-            logger.info(f"[BridgeAgent] Bus offline. Falling back to traditional polling for node_id={task_node.id}")
+                use_polling = False
+
+        if use_polling:
+            logger.info(f"[BridgeAgent] Falling back to traditional polling for node_id={task_node.id}")
             # Manual polling fallback
             poll_start = time.time()
             while time.time() - poll_start < timeout_sec:
@@ -104,22 +107,29 @@ class BridgeAgent:
                     break
                 await asyncio.sleep(2.0)
         
-        # Final status check
+        # Final status check (Final attempt to see if it finished during wait/poll)
         updated = await self.tree_store.get_node_by_id_async(task_node.id)
         if updated and updated.status in (NodeStatus.DONE, NodeStatus.FAILED):
             res = updated.result or {}
             if updated.status == NodeStatus.FAILED:
-                logger.error(f"Specialist failed: role={self.role.value}, node_id={task_node.id}, result={res}")
+                logger.error(f"Specialist failed definitively: role={self.role.value}, node_id={task_node.id}, result={res}")
             return res
         
+        # If we reach here, neither the bus nor polling confirmed completion.
         elapsed = time.time() - start_t
         logger.warning(
-            f"Specialist timeout: role={self.role.value}, chain_id={chain_id}, "
-            f"node_id={task_node.id}, elapsed={elapsed:.2f}s"
+            f"Specialist timed out or failed to report: role={self.role.value}, chain_id={chain_id}, "
+            f"node_id={task_node.id}, elapsed={elapsed:.2f}s, timeout_sec={timeout_sec}"
         )
         
         # Mark node as FAILED due to timeout
-        timeout_res = {"error_type": "timeout", "error": f"Specialist agent ({self.role.value}) timeout after {elapsed:.2f}s", "role": self.role.value, "elapsed": elapsed}
+        timeout_res = {
+            "error_type": "timeout", 
+            "error": f"Specialist agent ({self.role.value}) timeout after {elapsed:.2f}s (Total allowed: {timeout_sec}s)", 
+            "role": self.role.value, 
+            "elapsed": elapsed,
+            "timeout_sec": timeout_sec
+        }
         await self.tree_store.update_node_status_async(task_node.id, NodeStatus.FAILED, result=timeout_res)
         
         return timeout_res
@@ -300,8 +310,11 @@ class OrchestratorAgent(BaseAgent):
         await thought_listener()
 
         try:
-            # Execute the graph flow
-            final_state = await self.graph.ainvoke(initial_state)
+            # Execute the graph flow (Fix B4: Higher recursion limit for complex tasks)
+            final_state = await self.graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": 40}
+            )
             
             # Cleanup all subscription tasks
             for t in subscription_tasks:

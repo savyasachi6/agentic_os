@@ -14,7 +14,7 @@ logger = logging.getLogger("rl_routing")
 
 # Separate timeouts: connect fast, allow more time for the route computation
 _CONNECT_TIMEOUT = 2.0   # fail fast if the service is down
-_READ_TIMEOUT    = 15.0  # embedding + bandit selection can take up to ~10s on cold GPU
+_READ_TIMEOUT    = 30.0  # Phase 7: Increased buffer for tail latencies
 
 
 class RLRoutingClient:

@@ -180,17 +180,20 @@ def load_sessions():
         print(f"Failed to load sessions: {e}")
     return []
 
-@st.cache_data(ttl=5) # Cache for 5s to avoid redundant hits, but Allow refresh
+@st.cache_data(ttl=10) # Phase 13: Fix B5 - Increase TTL and handle offline proxy
 def get_router_stats():
-    """Fetches bandit diagnostics directly from the mounted RL Router sub-app."""
+    """Fetches bandit diagnostics directly from the mounted RL Router sub-app via Gateway proxy."""
     try:
-        # Using a 20s timeout to allow for gateway diagnostic cold-starts
-        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=20)
+        # Increase timeout for the gateway diagnostic cold-starts (22s)
+        response = requests.get(f"{CORE_API_URL}/rl/bandit/stats", timeout=22)
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            # Ensure we only return truthy data and not the 'offline' error envelope
+            if "arm_stats" in data:
+                return data
     except Exception as e:
         # Log to browser console/stderr for debugging
-        print(f"Router stats fetch error (timeout=20s): {e}")
+        print(f"Router stats fetch error: {e}")
     return None
 
 def submit_feedback(query_hash_rl: str, arm_index: int, depth: int, feedback: int, chain_id: int = 0, metrics: dict = None):
@@ -306,7 +309,11 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                         st.session_state.chat_history.append({"role": "assistant", "content": current_thought, "type": "thought"})
 
                     # Store RL metadata with the message for feedback buttons
+                    # Fix B5: Fallback to embedded rl_metadata if the separate message didn't arrive
                     msg_metadata = st.session_state.get("last_rl_metadata", {})
+                    if not msg_metadata and data.get("rl_metadata"):
+                        msg_metadata = data.get("rl_metadata")
+                        
                     st.session_state.chat_history.append({
                         "role": "assistant", 
                         "content": current_response, 
@@ -460,13 +467,15 @@ with st.sidebar:
     elif page == "🎯 RL Strategy":
         st.subheader("Bandit Telemetry")
         stats = get_router_stats()
-        if stats and "arm_stats" in stats:
-            pulls = sum(a["pulls"] for a in stats["arm_stats"])
+        if stats and stats.get("status") != "offline" and stats.get("arm_stats"):
+            pulls = sum(a.get("pulls", 0) for a in stats["arm_stats"])
             st.metric("Total Decisions", pulls)
-            best_arm = max(stats["arm_stats"], key=lambda x: x["mean_reward"])
+            best_arm = max(stats["arm_stats"], key=lambda x: x.get("mean_reward", 0))
             st.metric("Winning Strategy", f"Arm {best_arm['arm']}")
-        else:
+        elif stats and stats.get("status") == "offline":
             st.caption("Router offline.")
+        else:
+            st.caption("No stats available.")
 
     st.markdown("---")
     st.caption("Permanent memory written to `pgvector`.")
@@ -601,7 +610,7 @@ elif page == "🎯 RL Strategy":
     
     stats = get_router_stats()
     
-    if stats and "arm_stats" in stats:
+    if stats and stats.get("status") != "offline" and stats.get("arm_stats"):
         # 1. Summary Metrics
         pull_counts = [a["pulls"] for a in stats["arm_stats"]]
         total_episodes = sum(pull_counts)
@@ -630,12 +639,13 @@ elif page == "🎯 RL Strategy":
         display_df = df_stats[["Action Name", "pulls", "mean_reward", "violation_rate", "theta_norm"]].copy()
         st.table(display_df.style.highlight_max(axis=0, subset=["mean_reward"], color="#2E7D32"))
         
-        # 3. Visualization
+        # 3. Visualization (Fix B6: Compatibility with older Streamlit)
         st.divider()
         st.subheader("Policy Confidence (Weight Gradients)")
         
-        # Simple bar chart for rewards
-        st.bar_chart(df_stats, x="Action Name", y="mean_reward", color="#FFD700")
+        # Format the dataframe specifically for st.bar_chart
+        chart_data = df_stats.set_index("Action Name")[["mean_reward"]]
+        st.bar_chart(chart_data)
         
         # 4. Recent Episodes (Audit Log)
         if "episodes" in stats and stats["episodes"]:

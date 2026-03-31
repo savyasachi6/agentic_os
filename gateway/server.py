@@ -1,6 +1,7 @@
 # server.py
 import os
 import sys
+import logging
 
 from core.settings import settings
 import json
@@ -26,6 +27,8 @@ from rag.vector_store import VectorStore
 from rag.indexer import SkillIndexer
 from core.llm.router import LLMRouter
 from db.queries.thoughts import log_thought, delete_session_data, store_memory_async
+
+logger = logging.getLogger("agentos.gateway")
 
 app = FastAPI(
     title="Agent OS",
@@ -60,11 +63,32 @@ async def startup():
     except Exception as e:
         print(f"[server] Failed to spawn MCP initialization: {e}")
 
-    print("[server] Agent OS ready (LLM Router started).")
+    # Phase 13: Integrated Specialist Worker Startup (Fix B1: 0.01s timeout)
+    from agents.specialists.tool_caller_agent import ToolCallerAgentWorker
+    
+    _workers = []
+    try:
+        tc_worker = ToolCallerAgentWorker()
+        tc_worker.start()   # starts daemon thread with its own event loop
+        _workers.append(tc_worker)
+        app.state.workers = _workers
+        print("[server] Integrated Specialist Workers started (tool_caller).")
+    except Exception as e:
+        print(f"[server] Failed to start integrated workers: {e}")
+        app.state.workers = []
+
+    print("[server] Agent OS ready (LLM Router and Workers started).")
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    # Phase 13: Stop integrated workers
+    for w in getattr(app.state, "workers", []):
+        try:
+            w.stop()
+        except Exception:
+            pass
+
     for task in _worker_tasks:
         task.cancel()
         try:
@@ -123,16 +147,21 @@ async def reindex_skills():
 @app.get("/rl/bandit/stats")
 async def get_rl_stats():
     import httpx
+    from fastapi import HTTPException
 
     print(f"[gateway] Proxying RL stats request to {settings.rl_router_url}/bandit/stats...")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        # Align timeout with UI expectations (Phase 13: Fix B5)
+        async with httpx.AsyncClient(timeout=18.0) as client:
             resp = await client.get(f"{settings.rl_router_url}/bandit/stats")
             resp.raise_for_status()
             return resp.json()
+    except httpx.ConnectError as e:
+        logger.error(f"[gateway] RL router unreachable: {e}")
+        raise HTTPException(status_code=503, detail=f"RL router unreachable: {e}")
     except Exception as e:
-        print(f"[gateway] RL router stats fetch failed (timeout=15s): {e}")
-        return {"status": "offline", "error": str(e), "url": settings.rl_router_url}
+        logger.error(f"[gateway] RL router stats fetch failed (url={settings.rl_router_url}): {e}")
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @app.post("/rl/bandit/train")
@@ -327,7 +356,14 @@ async def chat_ws(ws: WebSocket):
                 # Bug 4: Persist assistant message to vector memory
                 asyncio.create_task(_bg_store_memory(session_id, "assistant", response))
 
-                await ws.send_json({"type": "final", "content": response})
+                # Fix B5: Embed RL metadata directly in the final message to ensure 
+                # feedback buttons render even if the Redis bus is laggy or offline.
+                rl_meta = getattr(agent, "last_run_metrics", {}).get("rl_metadata", {})
+                await ws.send_json({
+                    "type": "final", 
+                    "content": response,
+                    "rl_metadata": rl_meta
+                })
             finally:
                 listener_task.cancel()
                 try:
