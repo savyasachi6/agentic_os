@@ -111,20 +111,25 @@ class ResearchAgentWorker:
 
                 # Check for session history compaction (Gap 5 Closure)
                 try:
-                    from db.queries.thoughts import get_session_history, store_session_summary
+                    from db.queries.thoughts import get_session_history, store_session_summary, get_last_compacted_turn
                     history = await loop.run_in_executor(None, get_session_history, session_id)
-                    if len(history) >= self.compaction_threshold:
-                        logger.info(f"Session {session_id} exceeds threshold ({len(history)}). Compacting...")
-                        # 1. Summarize
-                        summary_prompt = [
-                            {"role": "system", "content": "Summarize the key findings and progress of this research session so far. Focus on what was found and what is still needed."},
-                            {"role": "user", "content": str(history)}
-                        ]
-                        summary_text = await self.llm.generate_async(summary_prompt, tier=ModelTier.FAST)
-                        # 2. Embed and Store
-                        emb, _ = await self.retriever.embedder.generate_embedding_async(summary_text)
-                        await loop.run_in_executor(None, store_session_summary, session_id, summary_text, emb, 0, len(history))
-                        logger.info(f"Compaction complete for session {session_id}.")
+                    num_thoughts = len(history)
+                    if num_thoughts >= self.compaction_threshold:
+                        last_compacted_turn = await loop.run_in_executor(None, get_last_compacted_turn, session_id)
+                        if (num_thoughts - last_compacted_turn) >= 20:
+                            logger.info(f"Session {session_id} exceeds threshold ({num_thoughts}) and delta guard. Compacting...")
+                            # 1. Summarize
+                            summary_prompt = [
+                                {"role": "system", "content": "Summarize the key findings and progress of this research session so far. Focus on what was found and what is still needed."},
+                                {"role": "user", "content": str(history)}
+                            ]
+                            summary_text = await self.llm.generate_async(summary_prompt, tier=ModelTier.FAST)
+                            # 2. Embed and Store
+                            emb, _ = await self.retriever.embedder.generate_embedding_async(summary_text)
+                            await loop.run_in_executor(None, store_session_summary, session_id, summary_text, emb, 0, num_thoughts)
+                            logger.info(f"Compaction complete for session {session_id} at turn {num_thoughts}.")
+                        else:
+                            logger.debug(f"Session {session_id} has {num_thoughts} thoughts, but only {num_thoughts - last_compacted_turn} since last compaction. Skipping.")
                 except Exception as ce:
                     logger.error(f"Failed to compact session history: {ce}")
 

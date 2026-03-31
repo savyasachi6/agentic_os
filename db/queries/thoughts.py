@@ -91,3 +91,13 @@ def get_session_history(session_id: str) -> List[Dict[str, Any]]:
             )
             rows = cur.fetchall()
             return [{"role": r[0], "content": r[1], "timestamp": r[2].isoformat()} for r in rows]
+
+def get_last_compacted_turn(session_id: str) -> int:
+    """Return the highest turn_end ever compacted for this session."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(turn_end), 0) FROM session_summaries WHERE session_id = %s",
+                (session_id,)
+            )
+            return cur.fetchone()[0]
