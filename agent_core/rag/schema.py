@@ -8,6 +8,7 @@ class MemoryChunk(Base):
     __tablename__ = "memory_chunks"
     id             = Column(Integer, primary_key=True)
     document_id    = Column(String, nullable=True)
+    session_id     = Column(String, index=True)
     content        = Column(Text, nullable=False)
     embedding      = Column(Vector(1024))
     metadata_json  = Column(JSON, default={})

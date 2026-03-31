@@ -42,7 +42,7 @@ def search_skills_raw(
         FROM skill_chunks sc
         JOIN knowledge_skills s ON sc.skill_id = s.id
         WHERE 1=1 {type_clause}
-        ORDER BY score DESC
+        ORDER BY (sc.embedding <=> %(vec)s::vector) - (0.1 * COALESCE(s.eval_lift, 0.0)) ASC
         LIMIT %(limit)s;
     """
     params = {"vec": query_vec, "limit": limit}

@@ -377,6 +377,7 @@ class CognitiveRetriever:
             distance_expr = MemoryChunk.embedding.cosine_distance(query_vec)
             stmt = (
                 select(MemoryChunk, distance_expr.label("distance"))
+                .filter(MemoryChunk.session_id == session_id)
                 .filter(distance_expr < self.distance_threshold)
                 .order_by(distance_expr)
                 .limit(top_k)
@@ -434,8 +435,13 @@ class CognitiveRetriever:
                                 UNION ALL
                                 SELECT ks.id, ks.name, ks.description, sg.hop + 1
                                 FROM knowledge_skills ks
-                                JOIN skill_relations sr ON sr.target_skill_id = ks.id OR sr.source_skill_id = ks.id
-                                JOIN skill_graph sg ON sg.id = sr.source_skill_id OR sg.id = sr.target_skill_id
+                                JOIN (
+                                    SELECT source_skill_id AS src, target_skill_id AS tgt FROM skill_relations
+                                    UNION ALL
+                                    SELECT source_entity_id, target_entity_id FROM entity_relations 
+                                    WHERE source_entity_type = 'skill' AND target_entity_type = 'skill'
+                                ) edges ON edges.tgt = ks.id OR edges.src = ks.id
+                                JOIN skill_graph sg ON sg.id = edges.src OR sg.id = edges.tgt
                                 WHERE sg.hop < %s AND ks.id <> ALL(%s)
                             )
                             SELECT DISTINCT sg.id, sg.name, sg.description, sg.hop, sc.heading, sc.content, sc.id as chunk_id
