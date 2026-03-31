@@ -298,17 +298,21 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
 
                 elif msg_type == "token":
                     current_response += content
-                    response_placeholder.markdown(current_response + "▌")
+                    # Phase 15 Fix B5: Use non-breaking space to avoid breaking markdown highlighting
+                    response_placeholder.markdown(current_response + "\u00A0")
 
                 elif msg_type == "final":
                     if content:
                         current_response = content.strip()
                     
                     if not current_response:
-                        current_response = "*(The agent was unable to produce a response. Please check the 'Agent Reasoning' logs above for details.)*"
+                        current_response = (
+                            "> ℹ️ **The agent finished reasoning but produced no output.**\n\n"
+                            "Try asking with more context, or use a more specific query."
+                        )
 
                     status_placeholder.empty()
-                    response_placeholder.markdown(current_response)
+                    response_placeholder.markdown(current_response) # Final clean render
                     
                     # Store everything including thoughts in history at the end
                     if current_thought:
@@ -333,8 +337,20 @@ async def send_message_and_receive_stream(message: str, session_id: str, message
                     pass
 
                 elif msg_type == "error":
-                    error_msg = f"Agent Error: {content}"
-                    st.session_state.chat_history.append({"role": "assistant", "content": error_msg, "type": "message"})
+                    # Never expose raw internal error strings to the user (Phase 15 Fix B8)
+                    user_facing_error = (
+                        "> ⚠️ **The agent could not complete this request.**\n\n"
+                        "This can happen when the question requires live web access that is currently unavailable, "
+                        "or when the reasoning loop exceeded its turn limit. Try rephrasing your query, "
+                        "or check the **Agent Reasoning** expander above for details."
+                    )
+                    st.session_state.chat_history.append({
+                        "role": "assistant", 
+                        "content": user_facing_error, 
+                        "type": "message"
+                    })
+                    # Log the real error to terminal only
+                    print(f"[UI] Internal agent error: {content}")
                     break
                 
                 # After each streaming chunk, we force scroll if needed
@@ -633,7 +649,14 @@ elif page == "🎯 RL Strategy":
     
     stats = get_router_stats()
     
-    if stats and stats.get("status") != "offline" and stats.get("arm_stats"):
+    if not stats:
+        # Phase 15 Fix B5: Better "no-stats" handling with retry
+        err = st.session_state.get("rl_error", "Unknown error")
+        st.warning(f"RL Router unavailable — `{err}`")
+        if st.button("🔄 Retry Sync Strategy", key="main_rl_retry"):
+            get_router_stats.clear()
+            st.rerun()
+    elif stats.get("arm_stats"):
         # 1. Summary Metrics
         pull_counts = [a["pulls"] for a in stats["arm_stats"]]
         total_episodes = sum(pull_counts)

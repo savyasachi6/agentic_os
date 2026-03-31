@@ -33,7 +33,7 @@ class WebSearchAction(BaseAction):
         query   = kwargs.get("query", self.query)
         count   = kwargs.get("count", self.count)
         
-        # Pre-define URLs (Phase 15: Fix B2 - NameError prevention)
+        # Phase 15 Fix B2: Ensure ddg_url is defined early and correctly
         ddg_api_url = "https://api.duckduckgo.com/"
         ddg_url = f"https://duckduckgo.com/?q={query}&ia=web"
 
@@ -127,10 +127,13 @@ class WebScrapeAction(BaseAction):
         return "web_scrape requires run_async"
 
     async def run_async(self, **kwargs) -> ActionResult:
-        # Phase 15 Fix B4: Correct URL lookup reference
+        # Phase 15 Fix B4: Standardize URL resolution
         url = kwargs.get("url") or getattr(self, "url", "")
         if not url or url == "self": 
-            url = self.url
+            url = getattr(self, "url", "")
+        
+        if not url:
+            return ActionResult(success=False, error_trace="No URL provided for scraping.")
             
         browser_url = settings.browser_ws_url or "ws://lightpanda:9222"
         from markdownify import markdownify
@@ -139,8 +142,8 @@ class WebScrapeAction(BaseAction):
         try:
             import playwright.async_api as pw
             async with pw.async_playwright() as p:
-                logger.info(f"[web_scrape] Connecting via CDP to {browser_url} (Phase 15 Fix)")
-                # Use connect_over_cdp() for Lightpanda's CDP endpoint (Fix B3)
+                logger.info(f"[web_scrape] Connecting via CDP to {browser_url}")
+                # Phase 15 Fix B3: Use connect_over_cdp for Lightpanda/Browser compatibility
                 browser = await p.chromium.connect_over_cdp(browser_url)
                 page = await browser.new_page()
                 

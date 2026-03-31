@@ -43,18 +43,23 @@ async def periodic_save_weights(interval_seconds: int = 300):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic — initialize bandit in the background to avoid blocking /health
-    async def bootstrap_task():
-        try:
-            from starlette.concurrency import run_in_threadpool
-            bandit = await run_in_threadpool(get_bandit)
-            logger.info(f"[lifespan] Bandit initialized in background with {int(bandit._pull_counts.sum())} pulls.")
-        except Exception as e:
-            logger.error(f"[lifespan] Background bandit initialization failed: {e}")
+    # Block startup until bandit is fully loaded — this is preflight training.
+    # Docker Compose healthcheck already polls /health, so the gateway and workers
+    # will wait until the router is truly ready.
+    from starlette.concurrency import run_in_threadpool
+    try:
+        bandit = await run_in_threadpool(get_bandit)
+        logger.info(f"[preflight] Bandit ready with {int(bandit._pull_counts.sum())} pulls")
+        
+        # If zero pulls (fresh container/DB), warm-start synchronously before accepting traffic
+        if bandit._pull_counts.sum() == 0:
+            logger.info("[preflight] No prior episodes — running heuristic warm-start...")
+            from rl_router.api.dependencies import bootstrap_bandit
+            await run_in_threadpool(bootstrap_bandit, bandit)
+            logger.info("[preflight] Warm-start complete. Ready.")
+    except Exception as e:
+        logger.error(f"[preflight] Bandit initialization failed: {e}")
 
-    # Fire and forget the bootstrap
-    asyncio.create_task(bootstrap_task())
-    
     # Start periodic save task
     save_task = asyncio.create_task(periodic_save_weights())
     
