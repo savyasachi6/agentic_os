@@ -325,8 +325,8 @@ with st.sidebar:
         if st.button("🔄 Sync Skills", use_container_width=True):
             with st.spinner("Indexing..."):
                 import subprocess
-                # Run the indexer from core
-                result = subprocess.run([sys.executable, os.path.join(_ROOT, "main.py"), "index"], capture_output=True, text=True)
+                # Run the indexer from agent_core.rag
+                result = subprocess.run([sys.executable, "-m", "agent_core.rag.indexer"], capture_output=True, text=True)
                 if result.returncode == 0:
                     st.success("Synced!")
                     st.rerun()

@@ -14,8 +14,6 @@ import traceback
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from psycopg2.extras import RealDictCursor
-import re as _re
-
 from agent_core.llm.client import LLMClient
 from db.connection import get_db_connection
 from db.queries.commands import TreeStore
@@ -28,6 +26,8 @@ from agent_core.agents.core.a2a_bus import A2ABus
 from agent_core.utils.logging_utils import log_event
 from agent_core.utils.thought_utils import normalize_thought, should_publish
 from agent_core.config import get_links_markdown
+from agent_core.rag.embedder import Embedder
+from db.queries.skills import search_skills_raw
 
 logger = logging.getLogger("agentos.agents.capability")
 
@@ -40,22 +40,6 @@ def _extract_sql_fallback(text: str) -> Optional[str]:
     if match:
         return match.group(1).strip().rstrip(';')
     return None
-
-SELF_REF_TOKENS = ("your", "you", "agentic os", "system", "message processing", "how are we processing")
-CAPABILITY_TOKENS = ("capabilities", "what can you do", "what tools do you have", "available agents")
-
-def is_capability_fastpath(query: str) -> bool:
-    """Phase 101 Hardening: Only trigger fastpath for explicit system self-references."""
-    q = (query or "").lower().strip()
-    # Direct match on explicit capability questions
-    if any(c in q for c in CAPABILITY_TOKENS):
-        return True
-    
-    # Conditional match: generic terms MUST be accompanied by a self-reference
-    has_self_ref = any(s in q for s in SELF_REF_TOKENS)
-    has_generic_term = any(k in q for k in ("skills", "tools", "abilities", "functions", "inventory"))
-    
-    return has_self_ref and has_generic_term
 
 class CapabilityAgentWorker:
     """
@@ -128,23 +112,6 @@ class CapabilityAgentWorker:
         query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
-        # Restore selective static logic for specific project metadata (Phase 4 Maintenance)
-        # Stricter: Only trigger if the query is short AND contains an explicit metadata intent.
-        # This prevents hijacking complex "skills" questions that happen to mention documentation/github in context.
-        query_lower = query_goal.lower().strip()
-        is_metadata_ask = any(re.search(rf"\b{re.escape(p)}\b", query_lower) for p in ["links", "github", "repo", "documentation", "url"])
-        is_concise = len(query_lower) < 60
-        
-        if is_metadata_ask and is_concise and "skills" not in query_lower and "build" not in query_lower:
-            from agent_core.config import get_links_markdown
-            logger.info(f"Link query detected. Returning static project links. node_id={task.id}")
-            links_md = get_links_markdown()
-            assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": links_md})
-            return
-
-            return
-        
         # 0. Dynamic Date Injection (Phase 94)
         current_date_str = datetime.now().strftime("%B %d, %Y")
         system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
@@ -159,14 +126,19 @@ class CapabilityAgentWorker:
         
         session_id = str(task.chain_id)
         
-        # Phase 89/90: Capability Fast-Path
-        if is_capability_fastpath(query_goal):
-            log_event(logger, "info", "capability_fastpath_hit", 
-                      node_id=task.id, session_id=session_id)
-            manifest = self._build_capability_manifest()
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "fastpath"})
-            return
+        # Centralized reasoning loop: No static fast-paths (Phase 104)
+        # This ensures all queries reach the LLM for proper routing.
 
+        # 1. Intent Guard (Phase 108): Detect Manifest Hijacking early.
+        # If the query is domain-heavy and NOT an explicit capability request,
+        # we signal the coordinator to re-route rather than serving the manifest.
+        manifest_triggers = ["capabilities", "inventory", "tools", "agent registry", "what can you do"]
+        is_explicit = any(t in query_goal.lower() for t in manifest_triggers)
+        
+        # If it looks like a domain question (e.g. "security", "marketing", "code") and NOT explicit,
+        # we still let it reach the LLM to see if it finds a specific skill, 
+        # but the LLM is now instructed to YIELD in the prompt.
+        
         sql_failures = 0
 
         try:
@@ -194,10 +166,10 @@ class CapabilityAgentWorker:
                     response_text = ""
 
                 # Extract native model thinking tokens
-                thinking_match = _re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, _re.DOTALL)
+                thinking_match = re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, re.DOTALL)
                 if thinking_match:
                     thought_text = thinking_match.group(1).strip()
-                    response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
+                    response_text = re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=re.DOTALL).strip()
                 else:
                     from agent_core.reasoning import parse_thought
                     thought_text = parse_thought(response_text) if response_text else ""
@@ -268,20 +240,42 @@ class CapabilityAgentWorker:
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": final_res, "message": final_res})
                     return
 
-                if action_type == "sql_query":
-                    loop = asyncio.get_running_loop()
-                    query_result = await loop.run_in_executor(None, self._execute_query, action_payload)
-                    
-                    if not query_result.get("success"):
-                        sql_failures += 1
-                        if sql_failures >= 1:
-                            log_event(logger, "warning", "sql_guard_fallback", 
-                                      node_id=task.id, session_id=session_id, error=query_result.get("error"))
-                            manifest = self._build_capability_manifest()
-                            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": manifest, "source": "sql_guard"})
-                            return
-                            
-                    obs = f"Observation: {json.dumps(query_result, default=str)}"
+                if action_type == "skill_search":
+                    # Semantic Discovery (Phase 114): Use Vector Search instead of ILIKE SQL.
+                    try:
+                        embedder = Embedder()
+                        # action_payload is the search query
+                        query_vec, is_degraded = await embedder.generate_embedding_async(action_payload)
+                        if is_degraded:
+                            obs = "Error: Embedding engine offline. Cannot perform semantic search."
+                        else:
+                            skills = search_skills_raw(query_vec, limit=10)
+                            if not skills:
+                                obs = "Observation: No local skills found matching this domain. Use RAG for external knowledge."
+                            else:
+                                # Simplify for the specialist to format
+                                obs = f"Observation: Found {len(skills)} relevant skills:\n" + json.dumps(skills, default=str)
+                    except Exception as e:
+                        obs = f"Error: Semantic search failure: {e}"
+                        log_event(logger, "error", "semantic_search_failed", error=str(e))
+
+                elif action_type == "sql_query":
+                    # Enforcement: If not explicit manifest request, forbid FULL_INVENTORY_QUERY (Phase 108)
+                    if not is_explicit and "COUNT(*)" in action_payload and "GROUP BY ks.skill_type" in action_payload:
+                        obs = "Error: Full inventory manifest is only for explicit system-discovery requests. Use a FILTERED_QUERY for this topic or YIELD if no local skills apply."
+                        log_event(logger, "warning", "manifest_hijack_prevented", goal=query_goal)
+                    else:
+                        # Circuit Breaker (Phase 112): Prevent Timeout loops
+                        if sql_failures >= 2:
+                            obs = "Error: Repeated SQL failures. ABORT and return 'NOT_CAPABILITY: I have no local skills for this. Use RAG.' via Action: respond_direct."
+                        else:
+                            loop = asyncio.get_running_loop()
+                            query_result = await loop.run_in_executor(None, self._execute_query, action_payload)
+                            if not query_result.get("success"):
+                                sql_failures += 1
+                                obs = f"Error: {query_result.get('error')}"
+                            else:
+                                obs = f"Observation: {json.dumps(query_result, default=str)}"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
                 

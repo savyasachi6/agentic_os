@@ -38,44 +38,28 @@ Action: respond_direct
 --------------------------------------------------------------------------------
 
 STEP 1 - Parse the query for domain filter
-  Does the query mention a specific technology or domain?
+  Does the query mention a specific technology, domain, or tool?
   YES -> run FILTERED_QUERY with that domain
-  NO  -> run FULL_INVENTORY_QUERY
+  NO  -> YIELD (Do NOT run FULL_INVENTORY_QUERY unless the user explicitly asks for 'capabilities', 'inventory', or 'all tools').
 
 STEP 2 - Execute the correct SQL (shown below)
   - You MUST run the actual SQL using 'Action: sql_query'.
   - NEVER simulate or "assume" results.
-  - If you need multiple queries (like in FULL_INVENTORY), run them sequentially.
+  - If the query is about external domain knowledge (e.g. "what is security" or "explain code") and you find NO skills, return: "NOT_CAPABILITY: I have no local skills for this. Use RAG."
 
 STEP 3 - Format results using FORMAT RULES below
+  - If NO skills were found after a search, return an empty skills list or a polite "No local skills found matching [X]".
 
-STEP 4 - Return formatted string via 'Action: respond_direct'
-  STOP. Do not add commentary beyond the template.
+STEP 4 - Return results via 'Action: respond_direct'
 
 --------------------------------------------------------------------------------
 ## SQL QUERIES
 --------------------------------------------------------------------------------
 
-FILTERED_QUERY (when domain detected):
-  SELECT
-      ks.name,
-      ks.skill_type,
-      ks.description,
-      ks.path,
-      ks.eval_lift,
-      COUNT(sc.id) as chunk_count
-  FROM knowledge_skills ks
-  LEFT JOIN skill_chunks sc ON sc.skill_id = ks.id
-  WHERE ks.deleted_at IS NULL
-    AND (
-        ks.normalized_name ILIKE '%{domain}%'
-        OR ks.name ILIKE '%{domain}%'
-        OR ks.description ILIKE '%{domain}%'
-        OR ks.path ILIKE '%{domain}%'
-    )
-  GROUP BY ks.id
-  ORDER BY ks.eval_lift DESC NULLS LAST, chunk_count DESC
-  LIMIT 20;
+SKILL_SEARCH_TOOL (when domain detected):
+  - Use `Action: skill_search` with the domain as the payload.
+  - This tool performs a SEMANTIC vector search for local skills.
+  - Returns: Skill Name, Type, Description, and Eval Lift.
 
 FULL_INVENTORY_QUERY (general capability question):
   -- Part 1: Skill Categories
@@ -90,18 +74,23 @@ FULL_INVENTORY_QUERY (general capability question):
   GROUP BY ks.skill_type
   ORDER BY skill_count DESC;
 
-  -- Part 2: Tools
+  -- Part 2: Tools (Casing: 'low', 'normal', 'high')
   SELECT name, description, risk_level, tags
   FROM tools
-  ORDER BY risk_level ASC, name ASC;
+  ORDER BY 
+    CASE risk_level 
+        WHEN 'low' THEN 1 
+        WHEN 'normal' THEN 2 
+        WHEN 'high' THEN 3 
+        ELSE 4 END ASC, 
+    name ASC;
 
-  -- Part 3: Counts
+  -- Part 3: System Stats
   SELECT
-      COUNT(*) FILTER (WHERE deleted_at IS NULL) as total_skills,
+      (SELECT COUNT(*) FROM knowledge_skills WHERE deleted_at IS NULL) as total_skills,
       (SELECT COUNT(*) FROM skill_chunks) as total_chunks,
       (SELECT COUNT(*) FROM entity_relations) as total_kg_links,
-      (SELECT COUNT(*) FROM tools) as total_tools
-  FROM knowledge_skills;
+      (SELECT COUNT(*) FROM tools) as total_tools;
 
 --------------------------------------------------------------------------------
 ## FORMAT RULES

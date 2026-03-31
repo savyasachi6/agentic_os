@@ -178,7 +178,7 @@ def load_settings() -> Settings:
         keycloak_url     = os.getenv("KEYCLOAK_URL", "http://keycloak:8080"),
         keycloak_client_id = os.getenv("KEYCLOAK_CLIENT_ID", "agent-os"),
         keycloak_client_secret = resolve_secret("KEYCLOAK_CLIENT_SECRET", "change-me"),
-        skills_dir       = os.getenv("SKILLS_DIR", "skills"),
+        skills_dir       = os.getenv("SKILLS_DIR", "assets/skills/skills"),
         chunk_min_tokens = int(os.getenv("CHUNK_MIN_TOKENS", "100")),
         chunk_max_tokens = int(os.getenv("CHUNK_MAX_TOKENS", "250")),
         retrieval_top_k  = int(os.getenv("RETRIEVAL_TOP_K", "4")),

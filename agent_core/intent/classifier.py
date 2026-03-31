@@ -15,13 +15,18 @@ logger = logging.getLogger("agentos.intent.classifier")
 CAPABILITY_KEYWORDS = [
     "capabilities", "what can you do", "what are your capabilities", 
     "available tools", "inventory", "available agents", "how are we processing",
-    "help", "what are you", "how can you help", "what skills", "list skills", "show skills",
-    "abilities", "what is indexed", "what are some of the skills",
+    "what are you", "what skills", "list skills", "show skills",
+    "what is indexed", "what are some of the skills",
     "tell me about your skills", "list your skills", "project links", "github", "documentation",
     "repo", "where is the code", "links to this project", "github url", "repo url"
 ]
+# Strict patterns that require self-reference to trigger capability query
+SELF_DISCOVERY_PATTERNS = [
+    r"\b(help|how|abilities)\b.*\b(you|your|system|agentic os)\b",
+    r"\b(you|your|system|agentic os)\b.*\b(help|how|abilities)\b",
+]
 CAPABILITY_SINGLE_WORDS = {
-    "menu", "commands", "list"
+    "menu", "commands"
 }
 GREETING_WORDS = {"hi", "hello", "hey", "greetings", "yo", "sup", "hi there", "hello there"}
 
@@ -56,7 +61,9 @@ def classify_intent(message: str) -> Intent:
     msg = message.strip().lower()
     logger.debug("Classifying intent for msg: '%s'", msg)
     
-    if any(re.search(rf"\b{re.escape(kw)}\b", msg) for kw in CAPABILITY_KEYWORDS) or msg in CAPABILITY_SINGLE_WORDS:
+    if any(re.search(rf"\b{re.escape(kw)}\b", msg) for kw in CAPABILITY_KEYWORDS) or \
+       any(re.search(p, msg) for p in SELF_DISCOVERY_PATTERNS) or \
+       msg in CAPABILITY_SINGLE_WORDS:
         return Intent.CAPABILITY_QUERY
 
     if msg in GREETING_WORDS:

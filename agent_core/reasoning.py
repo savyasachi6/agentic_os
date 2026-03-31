@@ -16,7 +16,14 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     Parses a ReAct response block looking for `Action: <agent_type>(<goal>)`
     or a JSON block like `{"action": "...", "content": "..."}`.
     """
-    # 1. Try JSON parsing
+    # 1. Triple-quote respond_direct (Phase 102 Hardening)
+    # This is the highest priority for final results.
+    # Matches: Action: respond_direct(message="""\n...\n""")
+    tq_match = re.search(r"Action:\s*respond_direct\s*\(\s*message\s*=\s*\"\"\"(.*?)\"\"\"\s*\)", response_text, re.DOTALL)
+    if tq_match:
+        return "respond_direct", tq_match.group(1).strip()
+
+    # 2. Try JSON parsing
     try:
         if response_text.strip().startswith("{") and response_text.strip().endswith("}"):
             data = json.loads(response_text)

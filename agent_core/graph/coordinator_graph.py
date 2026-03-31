@@ -89,21 +89,12 @@ async def route_node(state: AgentState) -> AgentState:
         "",
     )
 
-    # Fast-path shortcuts — only on the first turn (no prior AI/Observation messages)
+    # Fast-path shortcuts — only for simple greetings
     if len(messages) <= 1:
         if intent_str == Intent.GREETING.value:
             return {**state, "next_node": "respond", "direct_response": "Hello! I'm the Agentic OS Coordinator. How can I help you today?"}
-
-        if intent_str == Intent.CAPABILITY_QUERY.value:
-            return {**state, "next_node": "execute", "action_name": "capability", "action_goal": last_human}
-
-        if intent_str == Intent.CODE_GEN.value:
-            return {**state, "next_node": "execute", "action_name": "code", "action_goal": last_human}
-
-        if intent_str == Intent.RAG_LOOKUP.value:
-            return {**state, "next_node": "execute", "action_name": "research", "action_goal": last_human}
-
-    # Complex tasks — let LLM decide action via ReAct
+    
+    # All other queries must flow through the ReAct reasoning loop (Phase 105)
     llm = state.get("llm") or LLMClient()
     system_prompt_raw = state.get("system_prompt", "You are the Coordinator. Route requests to specialists.")
 
@@ -210,6 +201,21 @@ async def execute_node(state: AgentState) -> AgentState:
                 or result.get("content")
                 or result.get("result")
             )
+            if clean_answer and "NOT_CAPABILITY" in str(clean_answer):
+                # Yield detected (Phase 113): Specialist signaled it can't handle this.
+                # Do NOT go to respond. Instead, go back to route so LLM can re-route.
+                obs = f"Observation: {clean_answer}"
+                new_messages = list(state["messages"]) + [HumanMessage(content=obs)]
+                log_event(logger, "info", "specialist_yield_intercepted", agent=action_name)
+                return {
+                    **state,
+                    "messages": new_messages,
+                    "guard": guard,
+                    "last_action_status": "success",
+                    "next_node": "route",
+                    "step_count": state.get("step_count", 0) + 1,
+                }
+                
             if result.get("error_type") or result.get("error"):
                 # Specialist returned an error — let the LLM route decide next step.
                 obs = f"Observation: {json.dumps(result)}"

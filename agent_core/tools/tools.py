@@ -14,6 +14,8 @@ from dev.projects.devops_auto import ci_runner, deploy, chat_bridge, pr_manager
 from productivity import briefing, todo_manager, notes, task_planner
 from agent_core.config import settings
 from datetime import datetime
+from agent_core.resilience import retry_async
+from sandbox.browser_tools import handle_browser_navigate, ToolCallRequest
 
 
 from .base import BaseAction, ActionResult
@@ -185,6 +187,59 @@ class RagQueryAction(BaseAction):
         return "\n".join(lines)
 
 
+class WebSearchAction(BaseAction):
+    name: str = "web_search"
+    description: str = (
+        "Search the live web (via Browserless). Returns a concise list of "
+        "titles and snippets for the query."
+    )
+    parameters: str = "query: str, max_results: int (default: 5)"
+
+    query: str = Field(default="", description="Search query")
+    max_results: int = Field(default=5, description="Max results to return")
+
+    async def _do_search(self) -> str:
+        # Phase 104: Construct valid Google Search URL
+        query_encoded = self.query.replace(" ", "+")
+        search_url = f"https://www.google.com/search?q={query_encoded}"
+        
+        req = ToolCallRequest(path=search_url, args={"query": self.query, "max_results": self.max_results})
+        # handle_browser_navigate now receives a valid URL
+        response = await handle_browser_navigate(req)
+        
+        if not response.success:
+            raise RuntimeError(response.error or "Unknown browser error")
+            
+        res = response.result
+        content = res.get("content", "")
+        if not content or "no results" in content.lower():
+             return "WEB_SEARCH_EMPTY\nNo results returned for this query."
+
+        return f"WEB_SEARCH_RESULTS\n{content}"
+
+    async def run_async(self) -> str:
+        """Phase 103: First-class async tool with resilience."""
+        try:
+            return await retry_async(
+                self._do_search,
+                max_attempts=3,
+                base_delay=1.0,
+                cap_delay=10.0,
+                label="browserless_web_search",
+            )
+        except Exception as exc:
+            # Normalize failures to structured observations
+            return (
+                "WEB_SEARCH_ERROR\n"
+                f"type=browserless_failure\n"
+                f"detail={type(exc).__name__}: {exc}"
+            )
+
+    def run(self) -> str:
+        # Sync fallback for non-async loops (not used in Agentic OS workers)
+        return asyncio.run(self.run_async())
+
+
 # ---------------------------------------------------------------------------
 # General Fallback Action Wrapper (for existing functions like deploy)
 # ---------------------------------------------------------------------------
@@ -214,7 +269,7 @@ def build_tool_registry():
 # Registration
 tools_to_register = [
     ReadFileAction(), WriteFileAction(), ListDirAction(), RunShellAction(),
-    SkillSearchAction(), RagQueryAction()
+    SkillSearchAction(), RagQueryAction(), WebSearchAction()
 ]
 for t in tools_to_register:
     registry.register(t)

@@ -339,37 +339,19 @@ class ResearchAgentWorker:
                     except Exception as e:
                         obs = f"Observation: Search error: {e}"
                 elif action_type == "web_search":
-                    if not PLAYWRIGHT_AVAILABLE:
-                        obs = "Observation: web_search unavailable (playwright missing)."
+                    query = p.get("query")
+                    if not query:
+                        obs = "Observation: Error: No query provided for web_search."
                     else:
-                        query = p.get("query")
-                        if not query:
-                            obs = "Observation: Error: No query provided for web_search."
-                        else:
-                            try:
-                                log_event(logger, "info", "browser_search_start", 
-                                          node_id=task.id, session_id=session_id, query=query)
-                                # Search mapping
-                                search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-                                req = ToolCallRequest(path=search_url, args={})
-                                # Phase 98: handle_browser_navigate is now async
-                                response = await handle_browser_navigate(req)
-                                if response.success:
-                                    res = response.result
-                                    content = res.get("content", "")
-                                    # Phase 101 Terminal Failures:
-                                    # If it's a search page and we got very little or generic blocked content
-                                    if "google.com/search" in search_url and ("unusual traffic" in content.lower() or "blocked" in content.lower()):
-                                         await self.tree_store.update_node_status_async(
-                                             task.id, NodeStatus.DONE, 
-                                             result={"message": "I attempted a live web search, but the provider is currently blocking automated access. I'll provide what I can from my existing knowledge."}
-                                         )
-                                         return
-                                    obs = f"Observation: Success [Search: {query}]\nResults: {content}"
-                                else:
-                                    obs = f"Observation: web_search failed: {response.error}"
-                            except Exception as e:
-                                obs = f"Observation: web_search error: {e}"
+                        try:
+                            log_event(logger, "info", "browser_search_start", 
+                                      node_id=task.id, session_id=session_id, query=query)
+                            # Phase 103: Use the First-Class WebSearchAction tool
+                            from agent_core.tools.tools import WebSearchAction
+                            tool = WebSearchAction(query=query, max_results=5)
+                            obs = await tool.run_async()
+                        except Exception as e:
+                            obs = f"Observation: web_search error: {e}"
                 elif action_type == "web_fetch":
                     if not PLAYWRIGHT_AVAILABLE:
                         obs = "Observation: web_fetch unavailable (playwright missing)."
