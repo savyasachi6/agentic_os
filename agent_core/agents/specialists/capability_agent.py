@@ -172,7 +172,7 @@ class CapabilityAgentWorker:
         sql_failures = 0
 
         try:
-            max_iterations = task.payload.get("max_turns", 5)
+            max_iterations = task.payload.get("max_turns", 8)
             for i in range(max_iterations):
                 # Check for abandonment (Phase 9 Hardening)
                 current = await self.tree_store.get_node_by_id_async(task.id)
@@ -221,11 +221,11 @@ class CapabilityAgentWorker:
                     log_event(logger, "debug", "thought_skipped", 
                               node_id=task.id, turn=i+1)
 
-                # Explicit Last Turn Nudge (Phase 87 Alignment)
-                if i == max_iterations - 1:
+                # Explicit Last Turn Nudge — fire 2 turns before end so the LLM has a turn to act on it
+                if i == max_iterations - 2:
                     messages.append({
                         "role": "user", 
-                        "content": "CRITICAL: This is your LAST TURN. Based on the findings so far, provide a final BEST-EFFORT response to the goal. Do not call any more tools."
+                        "content": "CRITICAL: You have ONE turn remaining. You MUST call Action: respond_direct(message=\"\"\"[your formatted answer]\"\"\") on your next turn. Do not call any more queries."
                     })
 
                 if not response_text or response_text.strip() == "":
@@ -357,8 +357,16 @@ class CapabilityAgentWorker:
             log_event(logger, "warning", "max_turns", 
                       node_id=task.id, session_id=session_id, duration_ms=duration_ms)
             assert task.id is not None
-            # Provide the last response as a partial success instead of a hard FAILED
-            last_resp = messages[-1]["content"] if messages[-1]["role"] == "assistant" else "Max turns reached."
+            # Provide the last response as a partial success — strip reasoning markers for clean output
+            last_resp = ""
+            for m in reversed(messages):
+                if m["role"] == "assistant" and m["content"].strip():
+                    last_resp = m["content"]
+                    break
+            if not last_resp:
+                last_resp = "Max turns reached."
+            from agent_core.reasoning import strip_reasoning_markers
+            last_resp = strip_reasoning_markers(last_resp)
             await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": last_resp, "message": last_resp, "status": "partial_success"})
 
         except Exception as e:

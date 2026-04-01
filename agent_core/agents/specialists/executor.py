@@ -84,7 +84,7 @@ class ExecutorAgentWorker:
                 action_type, action_payload = action_data
                 logger.info(f"Turn {i+1}: Action parsed: {action_type}")
                 
-                if action_type in ["respond", "done", "complete", "finish"]:
+                if action_type in ["respond", "done", "complete", "finish", "respond_direct", "complete_task"]:
                     duration = time.time() - start_time
                     logger.info(f"Action: {action_type}. Updating DB. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
@@ -125,7 +125,15 @@ class ExecutorAgentWorker:
             duration = time.time() - start_time
             logger.warning(f"Max iterations ({max_iterations}) reached. node_id={task.id}, duration={duration:.2f}s")
             assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "max_turns", "error": "Max iterations reached without completing."})
+            # Return DONE with partial result instead of FAILED — user sees the last answer
+            last_response = ""
+            for m in reversed(messages):
+                if m["role"] == "assistant" and m["content"].strip():
+                    last_response = m["content"]
+                    break
+            from agent_core.reasoning import strip_reasoning_markers
+            clean = strip_reasoning_markers(last_response) if last_response else "The task could not be completed within the turn limit."
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": clean, "status": "partial"})
 
         except Exception as e:
             duration = time.time() - start_time

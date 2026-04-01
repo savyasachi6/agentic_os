@@ -38,9 +38,13 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     except Exception:
         pass
 
-    # 2. Traditional ReAct parsing
+    # 3. Traditional ReAct parsing
     header_match = re.search(r"Action:\s*([a-zA-Z0-9_]+)", response_text)
     if not header_match:
+        # No Action: line found. Try "Final Answer:" as a last resort.
+        fb = re.search(r'(?:Final Answer:)\s*(.*)', response_text, re.IGNORECASE | re.DOTALL)
+        if fb:
+            return "respond", fb.group(1).strip()
         return None
     
     action_type = header_match.group(1).strip()
@@ -76,9 +80,9 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
         
     payload = remaining[m_bracket.start() + 1 : end_pos].strip()
     
-    # 3. Cleanup: Strip common prefixes like message="..." or content="..."
+    # 4. Cleanup: Strip common prefixes like message="..." or content="..."
     # This ensures respond_direct(message="Hello") returns "Hello" instead of 'message="Hello"'
-    prefixes = ['message=', 'content=', 'payload=', 'goal=', 'task=', 'query=', 'command=']
+    prefixes = ['message=', 'content=', 'payload=', 'goal=', 'task=', 'query=', 'command=', 'answer=']
     for prefix in prefixes:
         if payload.lower().startswith(prefix):
             inner = payload[len(prefix):].strip()
@@ -88,12 +92,6 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
             else:
                 payload = inner
             break
-
-    # 4. Phase 11 Fallback: Regex for 'Final Answer' or 'answer='
-    # If the LLM just gave a direct answer without formal ReAct tokens
-    fb_match = re.search(r"(?:Final Answer:|answer=)\s*[:\"']*(.*?)(?:[\"']|$)", response_text, re.IGNORECASE | re.DOTALL)
-    if fb_match:
-        return "respond", fb_match.group(1).strip()
 
     return action_type, payload
 
@@ -134,9 +132,10 @@ def strip_reasoning_markers(text: str) -> str:
     # Remove Thought: prefix lines
     text = re.sub(r'(?m)^Thought:\s*', '', text)
     return text.strip()
+
 def normalize_thought(thought_text: Optional[str]) -> str:
     """
-    Phase 89/103: Robustly clean internal model turn markers and normalize whitespace.
+    Robustly clean internal model turn markers and normalize whitespace.
     Strips variants like **[Turn 1/4]**, [Turn 1 / 4], Thought: [Turn 1/4], etc.
     """
     if not thought_text:
@@ -148,7 +147,7 @@ def normalize_thought(thought_text: Optional[str]) -> str:
     # 1. Multi-line/Inline repeated turn marker stripping (Power Regex)
     # Handles: bolding, spacing, brackets, and case-insensitivity any location (Global)
     # Matches: [Turn 1/5], [Iteration 2 / 10], **Step 1/3**, etc.
-    text = _re.sub(r"(?i)(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*", "", text)
+    text = _re.sub(r"(?i)(?:\*\*)?\\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\\]?(?:\*\*)?:?\s*", "", text)
     
     # 2. Normalize whitespace (Max two newlines, max one space)
     text = _re.sub(r"\n{3,}", "\n\n", text)

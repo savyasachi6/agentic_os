@@ -35,12 +35,20 @@ class WorkspaceManager:
     
     @classmethod
     def sanitize_path(cls, path: str) -> str:
-        """Prevents directory traversal and symlink attacks"""
+        """Prevents directory traversal and symlink attacks.
+        Raises PermissionError for URLs — use web_fetch for those.
+        """
+        if path.startswith(("http://", "https://", "ftp://")):
+            raise PermissionError(
+                f"read_file does not accept URLs. Use web_fetch(url='{path}') instead."
+            )
         try:
             target_path = pathlib.Path(cls.BASE_DIR, path).resolve(strict=False)
             if not target_path.is_relative_to(cls.BASE_DIR):
                 raise PermissionError(f"Agent attempted to access forbidden path: {path}")
             return str(target_path)
+        except PermissionError:
+            raise
         except Exception as e:
             raise PermissionError(f"Path resolution failed: {e}")
 
@@ -53,10 +61,13 @@ class WorkspaceManager:
 # ---------------------------------------------------------------------------
 class ReadFileAction(BaseAction):
     name: str = "read_file"
-    description: str = "Read the contents of a file within the secure workspace."
+    description: str = (
+        "Read the contents of a LOCAL file within the secure workspace. "
+        "Do NOT pass URLs here — use web_fetch(url=...) for any http/https address."
+    )
     parameters: str = "path: str"
     
-    path: str = Field(default="", description="The relative path to the file you want to read.")
+    path: str = Field(default="", description="The relative path to the file you want to read. Must be a local path, not a URL.")
 
     def run(self) -> str:
         safe_path = WorkspaceManager.sanitize_path(self.path)
@@ -192,24 +203,51 @@ class RagQueryAction(BaseAction):
 class WebSearchAction(BaseAction):
     name: str = "web_search"
     description: str = (
-        "Search the live web (via DuckDuckGo). Returns a concise list of "
-        "titles and snippets for the query."
+        "Search the live web (via DuckDuckGo). Returns titles and snippets. "
+        "Automatically uses the news search endpoint for queries about current events, news, or today's headlines."
     )
     parameters: str = "query: str, max_results: int (default: 5)"
 
     query: str = Field(default="", description="Search query")
     max_results: int = Field(default=5, description="Max results to return")
 
+    # Keywords that route to ddgs.news() (real datestamped headlines) instead of ddgs.text()
+    _NEWS_KW = [
+        "news", "today", "latest", "current", "breaking", "headlines",
+        "happening", "update", "this week", "this month", "recently",
+    ]
+
+    def _is_news_query(self) -> bool:
+        q = self.query.lower()
+        return any(kw in q for kw in self._NEWS_KW)
+
     def _do_search_sync(self) -> list:
         """
-        Run DDGS.text() synchronously.
-        MUST be called via run_in_executor — never called directly from async code,
-        as DDGS is a blocking generator that will stall the event loop.
+        Run DDGS search synchronously in a thread (never call from async directly).
+
+        Strategy:
+          - News-intent queries  -> ddgs.news()  (datestamped headlines from real outlets)
+          - General queries      -> ddgs.text()  (web pages)
+          - If primary returns nothing, falls back to the other method.
         """
         results = []
         with DDGS() as ddgs:
-            for r in ddgs.text(self.query, max_results=self.max_results):
-                results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
+            if self._is_news_query():
+                # ddgs.news() returns {title, url, body, date, source}
+                for r in ddgs.news(self.query, max_results=self.max_results):
+                    date = r.get("date", "")
+                    source = r.get("source", "")
+                    meta = f" [{source}, {date}]" if (source or date) else ""
+                    results.append(
+                        f"### {r['title']}{meta}\nURL: {r['url']}\n{r.get('body', '')}"
+                    )
+                # Fallback: text() if news() returned nothing
+                if not results:
+                    for r in ddgs.text(self.query, max_results=self.max_results):
+                        results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
+            else:
+                for r in ddgs.text(self.query, max_results=self.max_results):
+                    results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
         return results
 
     async def run_async(self) -> str:
@@ -219,7 +257,6 @@ class WebSearchAction(BaseAction):
         """
         try:
             loop = asyncio.get_event_loop()
-            # Run blocking DDGS call in a thread pool with a 20s hard timeout
             results: list = await asyncio.wait_for(
                 loop.run_in_executor(None, self._do_search_sync),
                 timeout=20.0,
