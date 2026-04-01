@@ -14,6 +14,7 @@ from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.graph.state import AgentState
 from agent_core.agent_types import Intent, AgentRole, NodeStatus
+from agent_core.agents.core.a2a_bus import A2ABus
 
 logger = logging.getLogger("agentos.agents.email")
 
@@ -24,6 +25,7 @@ class EmailAgent:
     def __init__(self):
         self.tree_store = TreeStore()
         self.connector = EmailConnector()
+        self.bus = A2ABus()
         self._running = False
 
     async def _process_task(self, task_node: Node) -> Dict[str, Any]:

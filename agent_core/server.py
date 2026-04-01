@@ -14,6 +14,9 @@ import json
 import asyncio
 from typing import Optional
 import sys
+import logging
+
+logger = logging.getLogger("agentos.server")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +28,14 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
+
+from agent_core.utils.logging_utils import configure_logging
+configure_logging()
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 # Load root .env
 load_dotenv(os.path.join(root_dir, ".env"))
@@ -66,21 +77,22 @@ _worker_tasks: list[asyncio.Task] = []
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
+    from agent_core.logging_config import setup_logging
+    setup_logging(level=settings.log_level)
+    
     init_db_pool()
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
     
     # Start specialist agent workers as background tasks.
-    # Note: CodeAgentWorker and others should be imported from agent_core.agents/
-    # For now, starting the ones we have refactored.
     rag_worker = ResearchAgentWorker()
     _worker_tasks.append(asyncio.create_task(rag_worker.run_forever(), name="rag_agent_worker"))
     
     capability_worker = CapabilityAgentWorker()
     _worker_tasks.append(asyncio.create_task(capability_worker.run_forever(), name="capability_agent_worker"))
     
-    print("[server] Agent OS ready (LLM Router started, workers running).")
+    logger.info("Agent OS ready", extra={"event": "startup", "router": "started", "workers": len(_worker_tasks)})
 
 
 @app.on_event("shutdown")
@@ -152,19 +164,44 @@ async def reindex_skills():
 
 
 # ---------------------------------------------------------------------------
-# Chat History Endpoint
+# Chat History & Session Management
 # ---------------------------------------------------------------------------
+@app.get("/chat/sessions")
+async def get_all_sessions():
+    """Retrieve a list of all historical session IDs and their first messages."""
+    try:
+        vs = VectorStore()
+        sessions = await vs.get_all_sessions_async()
+        # Format for UI stability
+        return {"status": "success", "sessions": sessions}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/chat/{session_id}/history")
 async def get_chat_history(session_id: str):
     """Retrieve the chronological chat and reasoning history from pgvector."""
     try:
         vs = VectorStore()
-        history = vs.get_session_history(session_id)
+        history = await vs.get_session_history_async(session_id)
         # Convert datetime objects to ISO format strings for JSON serialization
         for entry in history:
             if 'created_at' in entry and hasattr(entry['created_at'], 'isoformat'):
                 entry['created_at'] = entry['created_at'].isoformat()
         return {"status": "success", "session_id": session_id, "history": history}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.delete("/chat/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Permanently delete a chat session and its history from pgvector."""
+    try:
+        vs = VectorStore()
+        await vs.delete_session_async(session_id)
+        # Clear from memory cache if present
+        if session_id in _sessions:
+            del _sessions[session_id]
+        return {"status": "success", "message": f"Session {session_id} deleted."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -227,10 +264,14 @@ async def chat_ws(ws: WebSocket):
             await ws.send_json({"type": "final", "content": response})
 
     except WebSocketDisconnect:
-        print(f"[server] WebSocket disconnected (session: {session_id})")
+        logger.info("WebSocket disconnected", extra={"event": "ws_disconnect", "session_id": session_id})
     except Exception as e:
+        logger.error("WebSocket error", extra={
+            "event": "ws_error",
+            "session_id": session_id,
+            "error_type": type(e).__name__
+        }, exc_info=True)
         try:
             await ws.send_json({"type": "error", "content": str(e)})
         except Exception:
             pass
-        print(f"[server] WebSocket error: {e}")

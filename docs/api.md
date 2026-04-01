@@ -2,47 +2,90 @@
 
 ## Entry Points
 
-### 1. WebSocket Interface (`/chat`)
+### 1. WebSocket Interface — `gateway/server.py`
 
-The primary real-time interaction layer for agents.
+The primary real-time interaction layer.
 
 - **Endpoint**: `ws://<host>:<port>/chat`
 - **Protocol**: JSON Streaming
-- **Message Types**:
-  - `user_message`: Submit text/intent.
-  - `agent_thought`: Internal reasoning step (Thought/Action).
-  - `tool_result`: Observation from a tool call.
-  - `final_answer`: Final text response to user.
+- **Message Types** (server → client):
+  - `status`: Short status text (e.g., `"Classifying intent..."`, `"Polling specialist..."`)
+  - `thought`: An internal reasoning step from a specialist's ReAct loop (streamed live).
+  - `final_answer`: The complete final text response to the user.
+  - `error`: Error payload if the coordinator or specialist fails.
 
-### 2. REST API
+### 2. REST Endpoints — `gateway/server.py`
 
-- **`POST /v1/agent/task`**: Submit a long-running background task to the `lane_queue`.
-- **`GET /v1/sessions/{id}/history`**: Retrieve the full reasoning trace for a session.
-- **`POST /v1/skills/index`**: Trigger a re-indexing of the `skills/` directory.
+> **Note**: The exact routes are defined in `gateway/server.py`. The endpoints below reflect the current implementation.
+
+- **`POST /chat`**: Submit a synchronous task and receive a response (REST alternative to WebSocket).
+- **`GET /v1/sessions/{id}/history`**: Retrieve the reasoning trace (chain + nodes) for a session.
+- **`POST /v1/skills/index`**: Trigger re-indexing of the skills registry.
+
+### 3. RL Router — `rl_router/server.py`
+
+The standalone RL router runs as a separate service (port 8001 in Docker):
+
+- **`POST /predict`**: Receive a query + context vector, return a bandit arm decision `{arm_index, depth, speculative}`.
+- **`POST /reward`**: Submit a reward signal to update the bandit weights.
+
+> **Current status**: These endpoints are not called by the main agent pipeline. The bandit is embedded in-process inside `CognitiveRetriever`.
+
+---
 
 ## Orchestration Protocols
 
 ### ReAct (Reasoning and Acting)
 
-Agent OS components communicate via a standardized ReAct protocol:
+All specialist workers use a strict ReAct format for every LLM turn:
 
-1. **Thought**: The Core describes its plan.
-2. **Action**: The Core requests a tool execution targeting a `sandbox`.
-3. **Observation**: The `sandbox` returns the result to the Core.
-4. **Repeat**: The loop continues until a `Final Answer` is reached.
+```
+Thought: <internal reasoning>
+Action: <tool_name>(<arguments>)
+```
 
-### Batch Inference (Router Protocol)
+The loop terminates when the agent calls:
 
-The `LLM Router` implement an internal "collect-and-dispatch" protocol:
+```
+Action: respond_direct(message="""<final answer>""")
+```
 
-- **Submit**: Agents submit `LLMRequest` (messages, params) to the router's async queue.
-- **Batch**: The router groups pending requests by model and hyperparameters every 50ms.
-- **Mux/Demux**: The router dispatches a single batch request to the backend and maps individual results back to the originating agent's `Future`.
+#### Recovery Mechanisms
+- **No-Action Nudge**: If no `Action:` line is parsed, a correction observation is injected.
+- **Last-Turn Nudge**: On the second-to-last turn, the worker injects a forced `respond_direct` instruction.
+- **Empty-Turn Skip**: An empty LLM response is skipped (not appended) to avoid context poisoning.
 
-### Secure Tool Execution
+### A2A Bus Protocol (Redis)
 
-Tools are invoked via a signed HTTP POST:
+The coordinator and specialist workers communicate via Redis pub/sub channels keyed by `AgentRole` value:
 
-- **Target**: `http://sandbox:<port>/tools/{tool_name}`
-- **Payload**: JSON arguments.
-- **Response**: Standardized `ToolResponse` (stdout, stderr, exit_code, result).
+```
+Coordinator  →  bus.send("rag", {node_id, payload})   # Dispatch
+Specialist   →  bus.publish("rag", {type:"thought", content, session_id})  # Stream thoughts
+Coordinator  ←  bus.subscribe("rag", handler)         # Receive thoughts
+```
+
+Heartbeats are published by workers to a separate Redis key and checked by `BridgeAgent` before each dispatch.
+
+### Batch Inference (LLM Router Protocol)
+
+The `LLMRouter` implements a collect-and-dispatch protocol:
+
+1. **Submit**: Agents call `LLMClient.generate_async()` → `LLMRouter.submit()`, which enqueues an `LLMRequest`.
+2. **Batch**: The background `_batch_loop()` groups pending requests by `(model, max_tokens, temperature, stop_sequences)`.
+3. **Dispatch**: Grouped requests are sent as a single batch to the active backend.
+4. **Demux**: Individual results are matched back to their originating agent `asyncio.Future` by `request_id`.
+
+### TreeStore Node Lifecycle
+
+Every task dispatched through `BridgeAgent` is persisted as a database `Node`:
+
+```
+PENDING → (worker picks up) → RUNNING → DONE
+                                       ↘ FAILED
+```
+
+The coordinator polls node status every 0.5s until terminal status or role-based timeout.
+
+> Last updated: arc_change branch — verified against source
+

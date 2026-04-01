@@ -142,7 +142,6 @@ class CoordinatorAgent:
         ]
         
         # MCP Client (Optional - Phase 3 Cleanup)
-        self.bus = A2ABus()
         try:
             # Updated path for consolidated MCP server
             mcp_path = os.path.join(os.getcwd(), "tools", "mcp", "server", "McpServer")

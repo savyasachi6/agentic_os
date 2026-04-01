@@ -52,6 +52,7 @@ class Document(BaseModel):
     created_at: Optional[datetime] = None
     ingested_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 class Chunk(BaseModel):
     id: Optional[str] = None  # UUID as string
@@ -64,8 +65,10 @@ class Chunk(BaseModel):
     llm_summary: Optional[str] = None
     llm_tags: List[str] = Field(default_factory=list)
     chunk_metadata: Dict[str, Any] = Field(default_factory=dict)
-    parent_chunk_id: Optional[str] = None
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    parent_chunk_id: Optional[str] = None
 
 class ChunkEmbedding(BaseModel):
     chunk_id: str
@@ -87,6 +90,8 @@ class KnowledgeSkill(BaseModel):
     usage_count: int = 0
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 class Entity(BaseModel):
     id: Optional[int] = None
@@ -96,6 +101,8 @@ class Entity(BaseModel):
     description: Optional[str] = None
     metadata_json: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
 class EntityRelation(BaseModel):
     id: Optional[int] = None

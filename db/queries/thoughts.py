@@ -28,15 +28,22 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
                 cur.execute(
                     """
                     SELECT role, content, 1 - (embedding <=> %s::vector) AS score
-                    FROM thoughts WHERE session_id = %s
+                    FROM thoughts 
+                    WHERE session_id = %s
+                      AND 1 - (embedding <=> %s::vector) > 0.55
                     ORDER BY score DESC LIMIT %s
                     """,
-                    (query_vec, session_id, limit)
+                    (query_vec, session_id, query_vec, limit)
                 )
             else:
                 cur.execute(
-                    "SELECT role, content, 1 - (embedding <=> %s::vector) AS score FROM thoughts ORDER BY score DESC LIMIT %s",
-                    (query_vec, limit)
+                    """
+                    SELECT role, content, 1 - (embedding <=> %s::vector) AS score 
+                    FROM thoughts 
+                    WHERE 1 - (embedding <=> %s::vector) > 0.55
+                    ORDER BY score DESC LIMIT %s
+                    """,
+                    (query_vec, query_vec, limit)
                 )
             rows = cur.fetchall()
             return [{"role": r[0], "content": r[1], "score": r[2]} for r in rows]
@@ -66,13 +73,24 @@ def retrieve_session_context(query_vec: List[float], session_id: str, limit: int
             rows = cur.fetchall()
             return [{"summary": r[0], "turn_start": r[1], "turn_end": r[2], "score": r[3]} for r in rows]
  
-def get_all_sessions() -> List[str]:
-    """Retrieve unique session IDs from thoughts and summaries."""
+def get_all_sessions() -> List[Dict[str, Any]]:
+    """Retrieve unique session IDs with a preview and creation timestamp."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT session_id FROM thoughts UNION SELECT DISTINCT session_id FROM session_summaries")
+            # Efficiently grab the earliest message for each session to provide a preview
+            cur.execute("""
+                SELECT DISTINCT ON (session_id) 
+                    session_id, 
+                    content as first_message, 
+                    created_at
+                FROM thoughts
+                ORDER BY session_id, created_at ASC
+            """)
             rows = cur.fetchall()
-            return [r[0] for r in rows]
+            return [
+                {"session_id": r[0], "first_message": r[1], "created_at": r[2]} 
+                for r in rows
+            ]
 
 def get_session_history(session_id: str) -> List[Dict[str, Any]]:
     """Retrieve full history for a session, ordered by time."""
@@ -84,3 +102,21 @@ def get_session_history(session_id: str) -> List[Dict[str, Any]]:
             )
             rows = cur.fetchall()
             return [{"role": r[0], "content": r[1], "timestamp": r[2].isoformat()} for r in rows]
+
+def get_last_compacted_turn(session_id: str) -> int:
+    """Return the highest turn_end ever compacted for this session."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(MAX(turn_end), 0) FROM session_summaries WHERE session_id = %s",
+                (session_id,)
+            )
+            return cur.fetchone()[0]
+
+def delete_session(session_id: str):
+    """Permanently delete all thoughts and summaries for a session."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM thoughts WHERE session_id = %s", (session_id,))
+            cur.execute("DELETE FROM session_summaries WHERE session_id = %s", (session_id,))
+        conn.commit()

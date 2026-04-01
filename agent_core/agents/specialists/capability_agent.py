@@ -11,9 +11,9 @@ import re
 import json
 import logging
 import traceback
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from psycopg2.extras import RealDictCursor
-
 from agent_core.llm.client import LLMClient
 from db.connection import get_db_connection
 from db.queries.commands import TreeStore
@@ -23,7 +23,12 @@ from agent_core.agent_types import Intent, AgentRole, NodeStatus
 # Capability logic
 from agent_core.reasoning import parse_react_action
 from agent_core.agents.core.a2a_bus import A2ABus
+from agent_core.utils.logging_utils import log_event
+from agent_core.utils.thought_utils import normalize_thought, should_publish
 from agent_core.config import get_links_markdown
+from agent_core.rag.embedder import Embedder
+from db.queries.skills import search_skills_raw
+from db.query_registry import QueryRegistry, RetrievalRole
 
 logger = logging.getLogger("agentos.agents.capability")
 
@@ -43,15 +48,17 @@ class CapabilityAgentWorker:
     Queries the DB schema and available tools.
     """
     def __init__(self, model_name: Optional[str] = None):
-        self.llm = LLMClient(model_name=model_name)
-        self.tree_store = TreeStore()
-        self.system_prompt = ""
-        self._load_prompt()
-        self.bus = A2ABus()
+        """Initialize the capability agent with a registry audit (Phase 6)."""
         self.role = AgentRole.SCHEMA
-        self._running = False
-
-    def _load_prompt(self):
+        from agent_core.llm.client import LLMClient
+        self.llm = LLMClient(model_name) # Uses default from settings if None
+        self.bus = A2ABus()
+        self.tree_store = TreeStore()
+        
+        # Phase 6: Ensure registry is populated in this process
+        QueryRegistry.audit_all()
+        logger.info(f"CapabilityAgent initialized with {len(QueryRegistry._queries)} registered queries.")
+        
         from agent_core.prompts import load_prompt
         try:
             self.system_prompt = load_prompt("agents", "capability")
@@ -60,7 +67,7 @@ class CapabilityAgentWorker:
             self.system_prompt = "You are the CapabilityAgent (SQL). Discover tools and schema."
 
     def _execute_query(self, query: str) -> Dict[str, Any]:
-        """Raw driver code to run the query safely."""
+        """Raw driver code to run the query safely. Should be called via run_in_executor."""
         try:
             with get_db_connection() as conn:
                 try:
@@ -78,6 +85,56 @@ class CapabilityAgentWorker:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def _execute_registered_query(self, name: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a query defined in the QueryRegistry with Phase 6 validation."""
+        spec = QueryRegistry.get(name)
+        if not spec:
+            return {"success": False, "error": f"Query '{name}' not found in registry."}
+        
+        try:
+            # Runtime Validation Layer (Blueprint Phase 6)
+            validated_params = spec.validate_params(params or {})
+            
+            with get_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Execute with named parameters (psycopg2 style :param or %(param)s)
+                    # We convert Pydantic/Dict to psycopg2 format
+                    cur.execute(spec.sql, validated_params)
+                    if cur.description:
+                        rows = cur.fetchmany(100)
+                        return {"success": True, "rows": [dict(r) for r in rows]}
+                    else:
+                        conn.commit()
+                        return {"success": True, "message": "Executed successfully."}
+        except Exception as e:
+            return {"success": False, "error": f"Validation/Execution error for '{name}': {e}"}
+
+    def _build_capability_manifest(self) -> str:
+        """Return a factual manifest based on real DB counts. No invented numbers."""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT COUNT(*) as count FROM knowledge_skills WHERE deleted_at IS NULL")
+                    skill_count = cur.fetchone()['count']
+                    cur.execute("SELECT COUNT(DISTINCT skill_type) as count FROM knowledge_skills WHERE deleted_at IS NULL")
+                    cat_count = cur.fetchone()['count']
+            
+            if skill_count == 0:
+                return (
+                    "The knowledge base currently has **0 indexed skills**.\n"
+                    "Use 'Sync Skills' in the UI to index your documents.\n\n"
+                    "Built-in tools: `hybrid_search`, `web_search`, `web_fetch`, `respond_direct`."
+                )
+            
+            return (
+                f"The knowledge base has **{skill_count} indexed skills** across **{cat_count} skill type(s)**.\n"
+                "Use `Action: run_query(FULL_INVENTORY_QUERY)` to see the breakdown by type.\n"
+                "Use `Action: run_query(TOOL_INVENTORY_QUERY)` to list registered tools."
+            )
+        except Exception as e:
+            log_event(logger, "warning", "manifest_failure", error=str(e))
+            return f"Capability manifest unavailable — DB error: {e}. Cannot report skill counts."
+
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action
         import time
@@ -85,30 +142,37 @@ class CapabilityAgentWorker:
         query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
-        # Restore selective static logic for specific project metadata (Phase 4 Maintenance)
-        # Stricter: Only trigger if the query is short AND contains an explicit metadata intent.
-        # This prevents hijacking complex "skills" questions that happen to mention documentation/github in context.
-        query_lower = query_goal.lower().strip()
-        is_metadata_ask = any(re.search(rf"\b{re.escape(p)}\b", query_lower) for p in ["links", "github", "repo", "documentation", "url"])
-        is_concise = len(query_lower) < 60
+        # 0. Dynamic Date Injection (Phase 94)
+        current_date_str = datetime.now().strftime("%B %d, %Y")
+        system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
         
-        if is_metadata_ask and is_concise and "skills" not in query_lower and "build" not in query_lower:
-            from agent_core.config import get_links_markdown
-            logger.info(f"Link query detected. Returning static project links. node_id={task.id}")
-            links_md = get_links_markdown()
-            assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": links_md})
-            return
-
-        clean_goal = query_goal.lower().replace("?", "").replace(".", "").strip()
-
+        # SQL Column Guard: explicit prompt injection
+        guarded_prompt = system_prompt + "\n\nCRITICAL: The table 'knowledge_skills' does NOT have a 'category' column. Use 'skill_type' instead."
+        
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": guarded_prompt},
             {"role": "user", "content": f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
         ]
+        
+        session_id = str(task.chain_id)
+        
+        # Centralized reasoning loop: No static fast-paths (Phase 104)
+        # This ensures all queries reach the LLM for proper routing.
+
+        # 1. Intent Guard (Phase 108): Detect Manifest Hijacking early.
+        # If the query is domain-heavy and NOT an explicit capability request,
+        # we signal the coordinator to re-route rather than serving the manifest.
+        manifest_triggers = ["capabilities", "inventory", "tools", "agent registry", "what can you do"]
+        is_explicit = any(t in query_goal.lower() for t in manifest_triggers)
+        
+        # If it looks like a domain question (e.g. "security", "marketing", "code") and NOT explicit,
+        # we still let it reach the LLM to see if it finds a specific skill, 
+        # but the LLM is now instructed to YIELD in the prompt.
+        
+        sql_failures = 0
 
         try:
-            max_iterations = task.payload.get("max_turns", 5)
+            max_iterations = task.payload.get("max_turns", 8)
             for i in range(max_iterations):
                 # Check for abandonment (Phase 9 Hardening)
                 current = await self.tree_store.get_node_by_id_async(task.id)
@@ -117,26 +181,51 @@ class CapabilityAgentWorker:
                     return
 
                 # Update status for UI visibility
-                logger.info(f"Turn {i+1}/{max_iterations}: Starting LLM generation...")
-                response_text = await self.llm.generate_async(messages)
+                log_event(logger, "info", "capability_turn_start", 
+                          node_id=task.id, session_id=session_id, turn=i+1, max_turns=max_iterations)
                 
-                # Extract native model thinking tokens if present (qwen3-vl:8b / thinking models)
-                # Harden: handle unclosed tags due to truncation
-                import re as _re
-                thinking_match = _re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, _re.DOTALL)
+                # Phase 90: Explicit initialization to prevent UnboundLocalError
+                thought_text: str = ""
+                response_text: str = ""
+                
+                try:
+                    response_text = await self.llm.generate_async(messages, session_id=session_id)
+                except Exception as exc:
+                    log_event(logger, "error", "llm_generation_failed", 
+                              node_id=task.id, session_id=session_id, error=str(exc))
+                    response_text = ""
+
+                # Extract native model thinking tokens
+                thinking_match = re.search(r"<\|thinking\|>(.*?)(?:<\|/thinking\|>|$)", response_text, re.DOTALL)
                 if thinking_match:
-                    native_thinking = thinking_match.group(1).strip()
-                    # Remove the thinking block from the response for downstream parsing
-                    response_text = _re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=_re.DOTALL).strip()
-                    thought_text = native_thinking
+                    thought_text = thinking_match.group(1).strip()
+                    response_text = re.sub(r"<\|thinking\|>.*?(?:<\|/thinking\|>|$)", "", response_text, flags=re.DOTALL).strip()
                 else:
                     from agent_core.reasoning import parse_thought
                     thought_text = parse_thought(response_text) if response_text else ""
                 
-                if thought_text:
+                # Cleanup and Publish using Shared Utilities
+                if not hasattr(self, "_last_published_thought"):
+                    self._last_published_thought = ""
+
+                if thought_text and should_publish(thought_text, self._last_published_thought):
+                    clean_thought = normalize_thought(thought_text)
+                    turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
                     await self.bus.publish(self.role.value, {
                         "type": "thought",
-                        "content": f"**[Turn {i+1}/{max_iterations}]** {thought_text}"
+                        "content": turn_label + clean_thought,
+                        "session_id": session_id
+                    })
+                    self._last_published_thought = clean_thought
+                elif thought_text:
+                    log_event(logger, "debug", "thought_skipped", 
+                              node_id=task.id, turn=i+1)
+
+                # Explicit Last Turn Nudge — fire 2 turns before end so the LLM has a turn to act on it
+                if i == max_iterations - 2:
+                    messages.append({
+                        "role": "user", 
+                        "content": "CRITICAL: You have ONE turn remaining. You MUST call Action: respond_direct(message=\"\"\"[your formatted answer]\"\"\") on your next turn. Do not call any more queries."
                     })
 
                 if not response_text or response_text.strip() == "":
@@ -157,15 +246,25 @@ class CapabilityAgentWorker:
                     if sql:
                         action_data = ("sql_query", sql)
                     else:
-                        # Harden: Fallback to direct response if no Action was found
+                        # Recovery Nudge for Capability Agent
+                        if i < max_iterations - 1:
+                            logger.warning(f"No action parsed on turn {i+1}. Injecting ReAct format nudge. node_id={task.id}")
+                            messages.append({
+                                "role": "user", 
+                                "content": "Observation: I didn't see an 'Action:' line in your last response. Remember to follow the Thought/Action format exactly for every turn."
+                            })
+                            continue
+                            
+                        # Harden: Fallback to direct response if no Action was found and max turns reached
                         from agent_core.reasoning import strip_reasoning_markers
-                        logger.info(f"No Action block found for capability query. Using direct response. node_id={task.id}")
+                        logger.info(f"No Action block found for capability query after retries. Using direct response. node_id={task.id}")
                         cleaned = strip_reasoning_markers(response_text)
                         await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": cleaned, "message": cleaned})
                         return
                 
                 action_type, action_payload = action_data
-                logger.info(f"Turn {i+1}: Action parsed: {action_type}")
+                log_event(logger, "info", "capability_action_parsed", 
+                          node_id=task.id, session_id=session_id, turn=i+1, action_type=action_type)
                 
                 if action_type in ["complete", "done", "respond", "finish", "complete_task", "respond_direct"]:
                     try:
@@ -173,29 +272,108 @@ class CapabilityAgentWorker:
                     except Exception:
                         final_res = action_payload
 
-                    duration = time.time() - start_time
-                    logger.info(f"Task completed. node_id={task.id}, duration={duration:.2f}s")
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    log_event(logger, "info", "capability_task_done", 
+                              node_id=task.id, session_id=session_id, duration_ms=duration_ms)
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": final_res, "message": final_res})
                     return
 
-                if action_type == "sql_query":
-                    loop = asyncio.get_running_loop()
-                    query_result = await loop.run_in_executor(None, self._execute_query, action_payload)
-                    obs = f"Observation: {json.dumps(query_result, default=str)}"
+                if action_type == "skill_search":
+                    # Semantic Discovery (Phase 114): Use Vector Search instead of ILIKE SQL.
+                    try:
+                        embedder = Embedder()
+                        # action_payload is the search query
+                        query_vec, is_degraded = await embedder.generate_embedding_async(action_payload)
+                        if is_degraded:
+                            obs = "Error: Embedding engine offline. Cannot perform semantic search."
+                        else:
+                            loop = asyncio.get_running_loop()
+                            skills = await loop.run_in_executor(None, search_skills_raw, query_vec, 10)
+                            if not skills:
+                                obs = "Observation: No local skills found matching this domain. Use RAG for external knowledge."
+                            else:
+                                # Simplify for the specialist to format
+                                obs = f"Observation: Found {len(skills)} relevant skills:\n" + json.dumps(skills, default=str)
+                    except Exception as e:
+                        obs = f"Error: Semantic search failure: {e}"
+                        log_event(logger, "error", "semantic_search_failed", error=str(e))
+
+                elif action_type == "run_query":
+                    # New registered query execution (Phase 6 Blueprint Alignment)
+                    try:
+                        # Payload could be a string (name) or a JSON object {name, params}
+                        if isinstance(action_payload, str):
+                            if action_payload.strip().startswith("{"):
+                                payload_data = json.loads(action_payload)
+                                query_name = payload_data.get("name")
+                                query_params = payload_data.get("params", {})
+                            else:
+                                query_name = action_payload
+                                query_params = {}
+                        else:
+                            query_name = action_payload.get("name")
+                            query_params = action_payload.get("params", {})
+                        
+                        loop = asyncio.get_running_loop()
+                        query_result = await loop.run_in_executor(None, self._execute_registered_query, query_name, query_params)
+                        
+                        if not query_result.get("success"):
+                            # Error is injected back for self-correction (Blueprint Phase 6)
+                            obs = f"Observation: Query '{query_name}' failed — {query_result.get('error')}. Do NOT invent results. Report the error to the user."
+                        else:
+                            rows = query_result.get("rows", [])
+                            if not rows:
+                                obs = f"Observation: Query '{query_name}' returned 0 rows. The database table is empty or no data matches the criteria. Do NOT invent data."
+                            else:
+                                obs = f"Observation: Query '{query_name}' returned {len(rows)} row(s):\n{json.dumps(rows, default=str)}"
+                    except Exception as pe:
+                        obs = f"Error: Failed to parse action_payload for run_query: {pe}"
+
+                elif action_type == "sql_query":
+                    # Enforcement: If not explicit manifest request, forbid FULL_INVENTORY_QUERY or aggregates (Phase 108)
+                    forbidden_patterns = ["COUNT(*)", "GROUP BY", "knowledge_skills", "skill_type"]
+                    if not is_explicit and any(p in action_payload.upper() for p in forbidden_patterns):
+                        obs = "Error: This query hits restricted tables or uses intensive aggregation. Use the registered 'run_query' instead, or refine your search."
+                        log_event(logger, "warning", "query_restricted_prevented", goal=query_goal)
+                    else:
+                        # Circuit Breaker: Prevent Timeout loops
+                        if sql_failures >= 2:
+                            obs = "Error: Repeated SQL failures. ABORT and return 'NOT_CAPABILITY: I have no local skills for this. Use RAG.' via Action: respond_direct."
+                        else:
+                            loop = asyncio.get_running_loop()
+                            query_result = await loop.run_in_executor(None, self._execute_query, action_payload)
+                            if not query_result.get("success"):
+                                sql_failures += 1
+                                obs = f"Error: {query_result.get('error')}"
+                            else:
+                                obs = f"Observation: {json.dumps(query_result, default=str)}"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
                 
                 messages.append({"role": "user", "content": obs})
                 
-            duration = time.time() - start_time
-            logger.warning(f"Max iterations reached. node_id={task.id}, duration={duration:.2f}s")
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "warning", "max_turns", 
+                      node_id=task.id, session_id=session_id, duration_ms=duration_ms)
             assert task.id is not None
-            await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "max_turns", "error": "Max iterations reached without completing."})
+            # Provide the last response as a partial success — strip reasoning markers for clean output
+            last_resp = ""
+            for m in reversed(messages):
+                if m["role"] == "assistant" and m["content"].strip():
+                    last_resp = m["content"]
+                    break
+            if not last_resp:
+                last_resp = "Max turns reached."
+            from agent_core.reasoning import strip_reasoning_markers
+            last_resp = strip_reasoning_markers(last_resp)
+            await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": last_resp, "message": last_resp, "status": "partial_success"})
 
         except Exception as e:
-            duration = time.time() - start_time
-            logger.exception(f"Critical error in execution loop: {e}. node_id={task.id}, duration={duration:.2f}s")
+            duration_ms = int((time.time() - start_time) * 1000)
+            log_event(logger, "error", "worker_error", 
+                      node_id=task.id, session_id=session_id, 
+                      error_type=type(e).__name__, duration_ms=duration_ms, exc_info=True)
             assert task.id is not None
             await self.tree_store.update_node_status_async(task.id, NodeStatus.FAILED, result={"error_type": "critical_failure", "error": str(e)})
 
@@ -203,14 +381,19 @@ class CapabilityAgentWorker:
         self._running = True
         logger.info(f"CapabilityAgentWorker started (listening on A2A bus topic: {AgentRole.SCHEMA.value})")
         
-        async for msg in self.bus.listen(AgentRole.SCHEMA.value):
-            if not self._running:
-                break
+        while self._running:
             try:
-                node_id = msg.get("node_id")
-                if node_id:
-                    task = self.tree_store.get_node_by_id(node_id)
-                    if task:
-                        await self._process_task(task)
+                async for msg in self.bus.listen(AgentRole.SCHEMA.value):
+                    if not self._running:
+                        break
+                    try:
+                        node_id = msg.get("node_id")
+                        if node_id:
+                            task = self.tree_store.get_node_by_id(node_id)
+                            if task:
+                                await self._process_task(task)
+                    except Exception as e:
+                        logger.error(f"Error processing A2A message: {e}")
             except Exception as e:
-                logger.error(f"Error processing A2A message: {e}")
+                logger.warning(f"CapabilityAgentWorker listener dropped: {e}. Retrying in 5s...")
+                await asyncio.sleep(5)

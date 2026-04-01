@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 from langchain_core.messages import HumanMessage, AIMessage
 
 from agent_core.agents.core.coordinator import CoordinatorAgent, BridgeAgent
-from agent_core.agents.a2a_bus import A2ABus
+from db.queries.commands import TreeStore
+from core.message_bus import A2ABus
 from agent_core.agent_types import AgentRole, Intent
 
 @pytest.mark.asyncio
@@ -46,7 +47,16 @@ async def test_coordinator_graph_execution_mocked():
     mock_llm = MagicMock()
     mock_llm.generate_async = AsyncMock(return_value="Thought: I should use the research agent. Action: research(\"test query\")")
     
-    coordinator = CoordinatorAgent(llm_client=mock_llm)
+    # Mock TreeStore before we init the coordinator
+    with pytest.MonkeyPatch.context() as mp:
+        mock_store = MagicMock(spec=TreeStore)
+        mock_store.get_chain_by_session_id_async = AsyncMock(return_value=MagicMock(id=123))
+        mock_store.add_node_async = AsyncMock(return_value=MagicMock(id=456))
+        
+        mp.setattr("agent_core.agents.core.coordinator.TreeStore", lambda: mock_store)
+        coordinator = CoordinatorAgent(llm_client=mock_llm)
+        coordinator.tree_store = mock_store # ensure it's the one we want to track
+
     mock_llm.generate_async.side_effect = [
         "Thought: I should use the research agent. Action: research(\"test query\")",
         "Final Response: Reasearch shows the project is on track."
@@ -59,13 +69,13 @@ async def test_coordinator_graph_execution_mocked():
     
     # We also need to mock the classify_intent call in both places where it is imported
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("agents.coordinator.classify_intent", lambda x: Intent.RAG_LOOKUP)
+        mp.setattr("agent_core.agents.core.coordinator.classify_intent", lambda x: Intent.RAG_LOOKUP)
         mp.setattr("agent_core.graph.coordinator_graph.classify_intent", lambda x: Intent.RAG_LOOKUP)
         
-        response = await coordinator.run_turn("Tell me about the project.")
+        response = await coordinator.run_turn_async("Tell me about the project.")
         
-        # Verify result
-        assert "Reasearch shows" in str(response)
+        # Verify result - New architecture returns specialist result directly if clean
+        assert "Research result" in str(response)
         # Note: Depending on the prompt and parse_react_action, it might continue or finish.
         # But here we verify it didn't crash and called the bridge.
         mock_bridge.execute.assert_called()

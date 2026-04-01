@@ -48,6 +48,12 @@ def init_db_pool(
     user = user or u.username or "agent"
     password = password or u.password or ""
 
+    # Diagnostic logging (sanitized)
+    logger.info(
+        "[db] Initializing pool: host=%s, port=%s, dbname=%s, user=%s, password=***",
+        host, port, dbname, user
+    )
+
     try:
         _pool = SimpleConnectionPool(
             min_conn,
@@ -58,10 +64,22 @@ def init_db_pool(
             user=user,
             password=password,
         )
-        logger.info("DB pool initialized -> %s:%s/%s", host, port, dbname)
+        
+        # Immediate connectivity check
+        conn = _pool.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+            logger.info("DB pool connection verified.")
+        finally:
+            _pool.putconn(conn)
+            
     except Exception as e:
         logger.error("Failed to initialize DB pool: %s", e)
-        raise
+        raise RuntimeError(
+            f"Database connection failed for user '{user}' at {host}:{port}/{dbname}. "
+            "Verify POSTGRES_PASSWORD_FILE or DATABASE_URL."
+        ) from e
 
 def get_pool() -> SimpleConnectionPool:
     """Get the connection pool, initializing if necessary."""

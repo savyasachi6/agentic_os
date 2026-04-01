@@ -1,121 +1,145 @@
 # Agentic OS: The System of Systems
 
-Welcome to the **Agentic OS** ecosystem. This project provides a production-grade, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
+Welcome to **Agentic OS** — a production-grade, modular AI operating system designed for local execution with high concurrency, strong security, and resilient reasoning.
 
 ## Monitoring & Health
 
-Agentic OS includes a Redis-based heartbeat system to ensure specialists are online.
+Agentic OS includes a Redis-based heartbeat system to ensure specialists are online before dispatch.
 
-- **Check Status**: `python dev/scripts/manage_workers.py status`
-- **Docker Health**: Individual services in `docker-compose.yml` automatically use this check.
-- **Fail-Fast**: The Coordinator will immediately reject tasks for offline roles, preventing 60s timeouts.
+- **Check Heartbeat**: The `BridgeAgent` (`agent_core/agents/core/coordinator.py`) calls `bus.get_heartbeat(role)` before every task dispatch — offline specialists are rejected immediately, not after a 600s timeout.
+- **Docker Health**: Individual services use this same check in `docker-compose.yml`.
 
-## 🏛️ Architecture Overview
-
-Agentic OS is structured as a "System of Systems," decoupling core reasoning from memory and capability management.
-
-**End-to-End Flow**: User query → `intent/` classifier → `agent_core` CoordinatorAgent → specialists in `agents/` (RAG, code, planner, executor) → RAG retrieval via `rag/` → optional RL-routed refinement via `rl_router/`.
+## Architecture Overview
 
 ```mermaid
 graph TD
-    User([User/Client]) <-->|API/CLI| Core[Agent OS Core]
-    
+    User([User/Client]) <-->|WebSocket/REST| GW[Gateway\ngateway/server.py]
+    GW --> Core[CoordinatorAgent\nagent_core/agents/core/coordinator.py]
+
     subgraph "Core Intelligence"
-        Core <-->|Intent Classification| IC[Intent Classifier]
-        Core <-->|Coordinator Turn| C[CoordinatorAgent]
-        C <-->|DAG Execution| P[PlannerAgent]
+        Core -->|LangGraph| CG[coordinator_graph.py]
+        Core -->|Intent| IC[IntentClassifier\nagent_core/intent/classifier.py]
     end
 
-    subgraph "Agent Registry"
-        C <-->|Research| RAG[RAGAgent]
-        C <-->|Search| WS[WebSearchAgent]
-        C <-->|Execute| EX[ExecutorAgent]
-        C <-->|Capabilities| CAP[CapabilityAgentWorker]
-        C <-->|Audit| AD[AuditorAgent]
+    subgraph "Specialist Workers (agent_core/agents/specialists/)"
+        Core -->|BridgeAgent + A2A Bus| RAG[ResearchAgentWorker\nrag_agent.py]
+        Core --> Code[CodeAgentWorker\ncode_agent.py]
+        Core --> Plan[PlannerAgentWorker\nplanner.py]
+        Core --> Exec[ExecutorAgentWorker\nexecutor.py]
+        Core --> Cap[CapabilityAgentWorker\ncapability_agent.py]
+        Core --> Email[EmailAgent\nemail_agent.py]
     end
 
     subgraph "Storage Layer"
-        RAG <-->|pgvector| AM[Agent Memory]
-        AM <-->|Postgres| DB[(Session DB)]
+        RAG -->|CognitiveRetriever| CR[MSR Retrieval\nagent_core/rag/]
+        CR -->|pgvector| DB[(Postgres + pgvector)]
+        Core -->|TreeStore| DB
     end
+
+    subgraph "LLM Layer"
+        RAG --> Router[LLMRouter\nagent_core/llm/router.py]
+        Router -->|Primary| LLM[Ollama / LlamaCPP / OpenRouter]
+        Router -->|Fallback| FLLM[Ollama Fallback]
+    end
+
+    UI[Streamlit UI\nui/app.py] --> GW
 ```
 
 ### Main Components
 
-- **[Core & Coordinator](agent_core/)**: The primary entry point and reasoning engine. Handles intent classification and agent routing.
-- **[Agent Core](agents/core/)**: The primary orchestrator (CoordinatorAgent), base worker, and message bus (A2ABus).
-- **[Agent Specialists](agents/specialists/)**: Specialized modular agents (RAG, Code, Planner, Capability, etc.) with heartbeat-based health monitoring.
-- **[Agent Memory](agent_memory/)**: The semantic storage layer. Managed `pgvector` RAG, semantic caching, and tree-store persistence.
-- **[Database Layer](db/)**: Clean SQL-based command and query interfaces for all system state.
-- **[System Prompts](prompts/)**: Standardized system instructions for all active agents.
+| Component | Path | Role |
+|---|---|---|
+| **Gateway** | `gateway/server.py` | FastAPI WebSocket + REST entry point |
+| **CoordinatorAgent** | `agent_core/agents/core/coordinator.py` | LangGraph orchestrator + BridgeAgent dispatcher |
+| **Specialist Workers** | `agent_core/agents/specialists/` | RAG, Code, Email, Planner, Executor, Capability, Productivity |
+| **CognitiveRetriever** | `agent_core/rag/cognitive_retriever.py` | Bandit-driven MSR retrieval (Memory + Skills + Relational) |
+| **LLMRouter** | `agent_core/llm/router.py` | Micro-batching LLM client with fallback |
+| **A2A Bus** | `agent_core/agents/core/a2a_bus.py` | Redis pub/sub for task dispatch and thought streaming |
+| **TreeStore** | `db/queries/commands.py` | Postgres-backed durable execution tree |
+| **RL Router** | `rl_router/domain/bandit.py` | LinUCB bandit (embedded in CognitiveRetriever) |
 
 ---
 
-## 🌟 Key Features
+## Key Features
 
-- **Intent-Driven Routing**: Microsecond classification of user intent (Capability, RAG, Web, Code, etc.) bypasses unnecessary planning.
-- **Adaptive RAG Depth**: Powered by an RL router (`rl_router/` + `rag/retrieval/rl_client.py`), a LinUCB contextual bandit learns which retrieval arm (shallow vs fractal tree) to use based on latency, steps, and tool-call telemetry.
-- **Risk-Gated Execution**: LOW risk commands execute directly; HIGH risk commands are blocked for explicit human approval.
-- **Resilient RAG**: 3-layer retrieval (Cache -> Vector -> Web Fallback) with a strict "single-search" circuit breaker.
-- **Strict Architecture**: Zero-knowledge separation between agents ensures no recursive loops or uncontrolled reasoning depth.
-- **Local-First**: Optimized for local inference using Ollama or LlamaCPP backends via the LLM router.
+- **Intent-Driven Routing**: Fast intent classification (`agent_core/intent/classifier.py`) routes requests to the right specialist without unnecessary planning overhead.
+- **Adaptive RAG Depth**: An embedded `LinUCBBandit` (`rl_router/domain/bandit.py`) learns the optimal retrieval strategy (8 arms from shallow to deep) per query, driven by intent + session features.
+- **Fail-Fast Dispatch**: Redis heartbeat check before every specialist dispatch — no silent hangs.
+- **Multi-Layer Retrieval**: `CognitiveRetriever` runs Memory + Skills + Relational layers in parallel, fused with RRF.
+- **ReAct Loop Hardening**: Last-turn nudges, empty-response guards, and no-action recovery nudges prevent reasoning loops from stalling.
+- **Cloud + Local Failover**: `LLMRouter` automatically fails over from OpenRouter/OpenAI to local Ollama on 401/429 errors.
+- **Local-First Privacy**: All inference, embeddings, and storage are local by default.
 
 ---
 
 ## Repository Layout
 
-Organized for clarity and runtime stability:
+| Directory | Description |
+|---|---|
+| `agent_core/` | Primary package — orchestration, RAG, LLM, intent, graph, tools, security |
+| `agent_core/agents/core/` | Coordinator, BridgeAgent, A2ABus, AgentWorker |
+| `agent_core/agents/specialists/` | All specialist worker implementations |
+| `agent_core/rag/` | CognitiveRetriever, Embedder, VectorStore, RAGStore, RetrievalPolicy |
+| `agent_core/llm/` | LLMRouter, LLMClient, Model tiers, Backends |
+| `gateway/` | FastAPI entry point |
+| `db/` | TreeStore, models, queries |
+| `rl_router/` | Standalone RL service (LinUCB, rewards, drift, refinement) |
+| `ui/` | Streamlit frontend |
+| `prompts/` | System prompts for all agents |
+| `infra/` | Docker, `.env` templates |
+| `tests/` | Unit and integration tests |
 
-- **Core Packages**: `agent_core`, `agents/core`, `agents/specialists`, `gateway`, `intent`, `db`, `llm`, `rag`, `rl_router`, `llm_router`, `tools`, `ui`, `productivity`, `sandbox`, `voice`
-- **assets/**: Specialist assets (`prompts/`, `skills/`, `training/`)
-- **infra/**: DevOps and infrastructure (`docker/`, `devops_auto/`, `.env` templates)
-- **dev/**: Development and scripts (`scripts/`, `projects/`, `experiments/`, `tests/`)
+For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md) and [docs/canonical-package-map.md](docs/canonical-package-map.md).
 
-For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md).
+---
 
 ## Getting Started
 
 1. **Environment Setup**:
-
    ```bash
-
    cp .env.example .env
-   # Configure LLM_MODEL, OLLAMA_URL, and POSTGRES_URL
+   # Configure: LLM_MODEL, OLLAMA_URL, POSTGRES_URL, REDIS_URL
    ```
 
-2. **Start Infrastructure**:
-   
+2. **Start Infrastructure** (Postgres + Redis + Ollama):
    ```bash
    docker-compose up -d
    ```
 
-3. **Run the OS (Backend)**:
-   
+3. **Run the Backend**:
    ```bash
-   git clone https://github.com/agentic-os/agentic-os.git
-   cd agentic-os
-   python gateway/main.py serve
+   uvicorn gateway.server:app --host 0.0.0.0 --port 8000
    ```
 
-4. **Run the UI (Optional)**:
-   
+4. **Run the UI** (optional):
    ```bash
-   python ui/app.py
+   streamlit run ui/app.py
+   ```
+
+5. **Start Specialist Workers** (each in a separate terminal or via Docker):
+   ```bash
+   python -m agent_core.agents.specialists.rag_agent
+   python -m agent_core.agents.specialists.code_agent
+   # ... etc
    ```
 
 ---
 
-## 📚 Navigation & Docs
+## Documentation Index
 
-- **[Agent Guidelines](AGENTS.md)**: Coding standards and boundaries for system development.
-- **[Database Schema](db/schema.sql)**: The underlying data model for chains, nodes, and memory.
-- **[Technical Specification](docs/architecture.md)**: Deep dive into the system-of-systems design.
-
----
-
-## 🛠️ Development
-
-See [development setup](docs/architecture.md#development-setup) for details on testing, linting, and local debugging.
-For a detailed overview of the system structure, see the [Canonical Package Map](docs/canonical-package-map.md).
+| Doc | Description |
+|---|---|
+| [01 — Vision & Use Cases](docs/01-vision-use-cases.md) | Goals and use-case examples |
+| [02 — Architecture](docs/02-architecture.md) | Component diagram and interaction flow |
+| [03 — Data Model & RAG](docs/03-data-model-and-rag.md) | DB schema, CognitiveRetriever pipeline |
+| [04 — Security](docs/04-security-and-sandboxing.md) | Auth, risk tiers, fail-fast, circuit breaker |
+| [05 — LLM & Skills](docs/05-llm-and-skills.md) | LLMRouter, backends, ReAct loop hardening |
+| [06 — RL Router](docs/06-rl-router.md) | LinUCB bandit, arms, reward signal |
+| [Agent Roles & Workers](docs/agent-roles-and-workers.md) | Specialist mapping, dispatch, node lifecycle |
+| [Canonical Package Map](docs/canonical-package-map.md) | Importable namespaces and canonical paths |
+| [Repo Layout](docs/repo-layout.md) | On-disk directory structure |
+| [API Reference](docs/api.md) | WebSocket, REST, A2A Bus, batch inference |
+| [Architecture Deep-Dive](docs/architecture.md) | Subsystem details and data flow |
 
 Always run `pytest` before submitting changes.
+

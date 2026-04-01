@@ -29,6 +29,7 @@ class PlannerAgentWorker:
     def __init__(self, model_name: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
+        self.bus = A2ABus()
         self.system_prompt = ""
         self._load_prompt()
         self._running = False

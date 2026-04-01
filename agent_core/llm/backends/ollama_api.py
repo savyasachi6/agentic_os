@@ -26,6 +26,19 @@ class OllamaBackend(LLMBackend):
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url.rstrip("/")
 
+    async def validate_models(self, models: List[str]):
+        """Check if all required models are pulled (Phase 83 Hardening)."""
+        http_client = _get_client()
+        try:
+            resp = await http_client.get(f"{self.base_url}/api/tags", timeout=10.0)
+            if resp.status_code == 200:
+                available = [m["name"] for m in resp.json().get("models", [])]
+                for model in models:
+                    if model not in available:
+                        logger.warning(f"[OllamaBackend] Model '{model}' is NOT pulled. Hybrid search or generation will fail.")
+        except Exception as e:
+            logger.error(f"[OllamaBackend] Could not validate models: {e}")
+
     async def generate_batch(
         self,
         messages_batch: List[List[Dict[str, str]]],
@@ -117,7 +130,7 @@ class OllamaBackend(LLMBackend):
         for r in results:
             if isinstance(r, Exception):
                 logger.error("[OllamaBackend] Batch item failed: %s", r)
-                processed.append(f"[Error: {r}]")
+                raise r  # Propagate the error instead of swallowing it as a string
             else:
                 processed.append(str(r))
         return processed

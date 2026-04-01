@@ -16,7 +16,18 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     Parses a ReAct response block looking for `Action: <agent_type>(<goal>)`
     or a JSON block like `{"action": "...", "content": "..."}`.
     """
-    # 1. Try JSON parsing
+    # 1. Triple-quote respond_direct (Phase 102 Hardening)
+    # This is the highest priority for final results.
+    # Matches: Action: respond_direct(message="""\n...\n""")
+    tq_match = re.search(
+        r'Action:\s*respond_direct\s*\(\s*message\s*=\s*"""(.*?)"""\s*\)',
+        response_text,
+        re.DOTALL
+    )
+    if tq_match:
+        return "respond_direct", tq_match.group(1).strip()
+
+    # 2. Try JSON parsing
     try:
         if response_text.strip().startswith("{") and response_text.strip().endswith("}"):
             data = json.loads(response_text)
@@ -27,9 +38,13 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     except Exception:
         pass
 
-    # 2. Traditional ReAct parsing
+    # 3. Traditional ReAct parsing
     header_match = re.search(r"Action:\s*([a-zA-Z0-9_]+)", response_text)
     if not header_match:
+        # No Action: line found. Try "Final Answer:" as a last resort.
+        fb = re.search(r'(?:Final Answer:)\s*(.*)', response_text, re.IGNORECASE | re.DOTALL)
+        if fb:
+            return "respond", fb.group(1).strip()
         return None
     
     action_type = header_match.group(1).strip()
@@ -65,9 +80,9 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
         
     payload = remaining[m_bracket.start() + 1 : end_pos].strip()
     
-    # 3. Cleanup: Strip common prefixes like message="..." or content="..."
+    # 4. Cleanup: Strip common prefixes like message="..." or content="..."
     # This ensures respond_direct(message="Hello") returns "Hello" instead of 'message="Hello"'
-    prefixes = ['message=', 'content=', 'payload=', 'goal=', 'task=', 'query=', 'command=']
+    prefixes = ['message=', 'content=', 'payload=', 'goal=', 'task=', 'query=', 'command=', 'answer=']
     for prefix in prefixes:
         if payload.lower().startswith(prefix):
             inner = payload[len(prefix):].strip()
@@ -78,12 +93,6 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
                 payload = inner
             break
 
-    # 4. Phase 11 Fallback: Regex for 'Final Answer' or 'answer='
-    # If the LLM just gave a direct answer without formal ReAct tokens
-    fb_match = re.search(r"(?:Final Answer:|answer=)\s*[:\"']*(.*?)(?:[\"']|$)", response_text, re.IGNORECASE | re.DOTALL)
-    if fb_match:
-        return "respond", fb_match.group(1).strip()
-
     return action_type, payload
 
 def parse_thought(response_text: str) -> str:
@@ -92,9 +101,16 @@ def parse_thought(response_text: str) -> str:
     Harden: Only capture as a 'thought' if an 'Action:' block follows it, 
     otherwise it's likely the final answer itself.
     """
-    match = re.search(r"Thought:\s*(.*?)(?=\nAction:)", response_text, re.DOTALL)
+    # 1. Flexible lookahead for Action: (case insensitive, optional newline)
+    match = re.search(r"Thought:\s*(.*?)(?=\s*Action:)", response_text, re.IGNORECASE | re.DOTALL)
     if match:
         return match.group(1).strip()
+    
+    # 2. If no Action: found, it might be a direct answer. 
+    # Do NOT treat the whole thing as a thought if it lacks the Thought: prefix.
+    if response_text.strip().lower().startswith("thought:"):
+        return response_text.strip()[8:].strip()
+    
     return ""
 
 def strip_reasoning_markers(text: str) -> str:
@@ -102,8 +118,39 @@ def strip_reasoning_markers(text: str) -> str:
     Strips 'Thought:' and 'Action:' prefixes/blocks from a final response 
     to provide a clean output to the user.
     """
-    # Remove everything after and including the first Action: (if it's a final response, we don't want the action block)
-    text = re.sub(r"\n?Action:\s*.*", "", text, flags=re.DOTALL).strip()
-    # Remove Thought: prefix but keep the content if it's the only thing left
-    text = re.sub(r"^Thought:\s*", "", text, flags=re.IGNORECASE).strip()
-    return text
+    # Priority: extract respond_direct payload if present
+    tq = re.search(
+        r'Action:\s*respond_direct\s*\(\s*message\s*=\s*"""(.*?)"""\s*\)',
+        text,
+        re.DOTALL
+    )
+    if tq:
+        return tq.group(1).strip()
+
+    # Remove tool Action: lines only — NOT with re.DOTALL
+    text = re.sub(r'\nAction:\s*(?!respond_direct)[^\n]*', '', text)
+    # Remove Thought: prefix lines
+    text = re.sub(r'(?m)^Thought:\s*', '', text)
+    return text.strip()
+
+def normalize_thought(thought_text: Optional[str]) -> str:
+    """
+    Robustly clean internal model turn markers and normalize whitespace.
+    Strips variants like **[Turn 1/4]**, [Turn 1 / 4], Thought: [Turn 1/4], etc.
+    """
+    if not thought_text:
+        return ""
+    
+    import re as _re
+    text = thought_text
+    
+    # 1. Multi-line/Inline repeated turn marker stripping (Power Regex)
+    # Handles: bolding, spacing, brackets, and case-insensitivity any location (Global)
+    # Matches: [Turn 1/5], [Iteration 2 / 10], **Step 1/3**, etc.
+    text = _re.sub(r"(?i)(?:\*\*)?\\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\\]?(?:\*\*)?:?\s*", "", text)
+    
+    # 2. Normalize whitespace (Max two newlines, max one space)
+    text = _re.sub(r"\n{3,}", "\n\n", text)
+    text = _re.sub(r"[ \t]{2,}", " ", text)
+    
+    return text.strip()

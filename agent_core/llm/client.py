@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from agent_core.config import settings
 from .router import LLMRouter
-from .models import Priority
+from .models import Priority, ModelTier
 
 try:
     from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -22,6 +22,12 @@ except ImportError:
     HAS_LANGCHAIN = False
 
 logger = logging.getLogger("agentos.llm.client")
+
+_TIER_MAX_TOKENS = {
+    ModelTier.NANO: 256,
+    ModelTier.FAST: 2048,
+    ModelTier.FULL: 8192,
+}
 
 class LLMClient:
     """
@@ -71,16 +77,26 @@ class LLMClient:
         messages: List[Any],
         session_id: str = "default_session",
         priority: Priority = Priority.NORMAL,
-        stop: Optional[List[str]] = None
+        tier: ModelTier = ModelTier.FULL,
+        stop: Optional[List[str]] = None,
+        max_tokens: Optional[int] = None,
     ) -> str:
         """Asynchronously generate a response via the router."""
         try:
             norm_messages = self._normalize_messages(messages)
+            
+            # Tier logic: 
+            # 1. If tier != FULL, pass model=None so the router resolves it via tier.
+            # 2. If tier == FULL, pass self.model_name explicitly (which defaults to settings.ollama_model).
+            # This ensures that NANO/FAST requests always hit those tiers, but FULL uses the client's default.
+            explicit_model = self.model_name if tier == ModelTier.FULL else None
+            
             return await self.router.submit(
                 messages=norm_messages,
                 session_id=session_id,
-                model=self.model_name,
-                max_tokens=self.max_tokens,
+                model=explicit_model,
+                tier=tier,
+                max_tokens=max_tokens or _TIER_MAX_TOKENS[tier],
                 temperature=self.temperature,
                 priority=priority,
                 stop=stop
@@ -92,7 +108,9 @@ class LLMClient:
     def generate(
         self,
         messages: List[Any],
+        session_id: str = "default_session",
         priority: Priority = Priority.NORMAL,
+        tier: ModelTier = ModelTier.FULL,
         stop: Optional[List[str]] = None
     ) -> str:
         """
@@ -103,9 +121,9 @@ class LLMClient:
             loop = asyncio.get_running_loop()
             import nest_asyncio
             nest_asyncio.apply()
-            return asyncio.run(self.generate_async(messages, priority=priority, stop=stop))
+            return asyncio.run(self.generate_async(messages, session_id=session_id, priority=priority, tier=tier, stop=stop))
         except RuntimeError:
-            return asyncio.run(self.generate_async(messages, priority=priority, stop=stop))
+            return asyncio.run(self.generate_async(messages, session_id=session_id, priority=priority, tier=tier, stop=stop))
 
     async def generate_streaming(
         self,
@@ -134,13 +152,13 @@ class LLMClient:
             logger.error("LLM streaming error: %s", e)
             yield f"\n[LLM Stream Error] {e}"
 
-    def summarize(self, text: str) -> str:
+    def summarize(self, text: str, session_id: str = "default_session") -> str:
         """Produce a concise summary of the given text."""
         messages = [
             {"role": "system", "content": "Concise summary in 2-3 sentences."},
             {"role": "user", "content": text},
         ]
-        return self.generate(messages, priority=Priority.SUMMARIZATION)
+        return self.generate(messages, session_id=session_id, priority=Priority.SUMMARIZATION, tier=ModelTier.NANO)
 
 def get_llm() -> LLMClient:
     """Helper to return the default LLMClient."""

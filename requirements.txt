@@ -5,6 +5,7 @@ pydantic
 pydantic-settings
 psycopg2-binary
 pgvector
+sqlalchemy
 ollama
 httpx
 psutil
@@ -18,7 +19,7 @@ langgraph
 pywin32; platform_system == 'Windows'
 nest-asyncio
 
-# Optional – browser tools (Lightpanda / Playwright CDP)
+# Optional – browser tools (Playwright / CDP)
 # Run: pip install playwright && playwright install
 playwright
 requests
@@ -35,4 +36,6 @@ langgraph>=0.2.0
 bs4
 lxml
 arxiv
+python-json-logger
+duckduckgo-search
 

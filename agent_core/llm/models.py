@@ -1,6 +1,11 @@
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from enum import IntEnum
+from enum import IntEnum, Enum
+
+class ModelTier(str, Enum):
+    NANO = "nano"    # ≤1GB — rewrites, intent checks, summaries
+    FAST = "fast"    # ≤4GB — short RAG, single-turn responses
+    FULL = "full"    # ≤6GB — coordinator, code gen, complex reasoning
 
 class Priority(IntEnum):
     OBSERVER = 1        # Highest priority (e.g. real-time thought)

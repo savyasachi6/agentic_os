@@ -17,6 +17,7 @@ The `sandbox` module is responsible for safely executing agent tool calls (like 
 
 System integrators and security engineers attempting to lock down code execution of LLM agents, specifically those looking to run agent clusters concurrently without memory crosstalk.
 
+
 ## Setup and Installation
 
 ### Prerequisites
@@ -32,6 +33,7 @@ No specific PyPI package yet. Import as a local module:
 # Ensure agentic_os is in your PYTHONPATH
 export PYTHONPATH="${PYTHONPATH}:/path/to/agentic_os"
 ```
+
 
 ### Basic Usage Example
 
@@ -55,50 +57,42 @@ print(res.json())
 manager.shutdown_all()
 ```
 
-## Browser Tools (Lightpanda / Playwright CDP)
+## Browser Tools (Playwright / CDP)
 
-The sandbox exposes four browser-automation tools powered by
-[Lightpanda](https://lightpanda.io) — a headless, CDP-only browser that is
-5‑11× faster than Chrome and uses far less memory.
+The sandbox exposes four browser-automation tools powered by Playwright connecting to any CDP-compatible browser (e.g., Browserless, Chrome, or Chromium).
 
-### Prerequisites
+### Browser Tool Prerequisites
 
-1. **Install Lightpanda** (one of):
+1. **Install a CDP Browser** (one of):
 
     ```powershell
-    # Docker (Recommended for Windows)
-    docker run -d -p 9222:9222 lightpanda/browser
-
-    # npm global CLI (Linux/macOS only)
-    # npm i -g @lightpanda/browser
+    # Docker (Recommended)
+    docker run -d -p 9222:3000 browserless/chrome
     ```
 
-> [!TIP]
-> **Windows Users**: Lightpanda does not yet support native Windows binaries. Use the Docker command above to run the CDP server.
-
-3. **Install the Playwright Python package** (optional dep):
+2. **Install the Playwright Python package** (optional dep):
 
    ```powershell
-   pip install "agentic-os[browser]"
-   # or directly:
    pip install playwright
-   playwright install chromium
+   # Only required if NOT connecting to an external CDP
+   # playwright install chromium
    ```
 
-4. **Set the CDP endpoint** (default is already `ws://127.0.0.1:9222`):
+3. **Set the CDP endpoint** (default is already `ws://127.0.0.1:9222`):
 
    ```powershell
-   $env:LIGHTPANDA_CDP_URL = "ws://127.0.0.1:9222"
+   $env:BROWSER_WS_URL = "ws://127.0.0.1:9222"
    ```
+
 
 ### Available Tools
 
-| Tool name           | Request fields                                      | Returns                              |
-|---------------------|-----------------------------------------------------|--------------------------------------|
-| `browser-navigate`  | `path`/`url`, `content_type` (text\|html)           | `title`, `content`, `truncated`      |
-| `browser-click`     | `path`/`url`, `query`/`selector`                    | `result_url`                         |
-| `browser-evaluate`  | `path`/`url`, `query`/`expression`                  | `value` (serialised JS result)       |
-| `browser-screenshot`| `path`/`url`, `full_page` (bool)                   | `data` (base64 PNG)                  |
+| Tool name            | Request fields                                      | Returns                        |
+| -------------------- | ---------------------------------------------------- | ------------------------------ |
+| `browser-navigate`   | `path`/`url`, `content_type` (text\|html)            | `title`, `content`, `truncated` |
+| `browser-click`      | `path`/`url`, `query`/`selector`                     | `result_url`                   |
+| `browser-evaluate`   | `path`/`url`, `query`/`expression`                   | `value` (serialised JS result)  |
+| `browser-screenshot` | `path`/`url`, `full_page` (bool)                    | `data` (base64 PNG)            |
 
 All tools are **auto-registered** in `TOOL_REGISTRY` when `playwright` is importable.
 If `playwright` is not installed the worker still starts normally; the tools simply
@@ -108,5 +102,4 @@ return a graceful `{"success": false, "error": "playwright is not installed…"}
 
 ```powershell
 curl http://127.0.0.1:9222/json/version
-# Expect: {"Browser":"Lightpanda", "webSocketDebuggerUrl":"..."}
 ```

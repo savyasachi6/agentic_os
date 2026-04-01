@@ -28,14 +28,15 @@ async def verify():
     except Exception as e:
         print(f"Error querying tools table: {e}")
     
-    # Check Lightpanda
-    import httpx
+    # Check Browser
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get("http://localhost:9222/json/version")
-            print(f"Lightpanda alive: YES {r.json()}")
+        r = requests.get("http://localhost:9222/json/version", timeout=2)
+        if r.status_code == 200:
+            print(f"Browser alive: YES {r.json()}")
+        else:
+            print(f"Browser alive: NO status={r.status_code}")
     except Exception as e:
-        print(f"Lightpanda alive: NO {e}")
+        print(f"Browser alive: NO {e}")
     
     await pool.close()
 

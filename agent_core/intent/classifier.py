@@ -13,14 +13,20 @@ logger = logging.getLogger("agentos.intent.classifier")
 
 # --- Keywords and Patterns ---
 CAPABILITY_KEYWORDS = [
-    "what can you do", "what are you", "capabilities", "help me",
-    "how can you help", "what skills", "list skills", "show skills",
-    "available tools", "abilities", "what is indexed", "what are some of the skills",
+    "capabilities", "what can you do", "what are your capabilities", 
+    "available tools", "inventory", "available agents", "how are we processing",
+    "what are you", "what skills", "list skills", "show skills",
+    "what is indexed", "what are some of the skills",
     "tell me about your skills", "list your skills", "project links", "github", "documentation",
     "repo", "where is the code", "links to this project", "github url", "repo url"
 ]
+# Strict patterns that require self-reference to trigger capability query
+SELF_DISCOVERY_PATTERNS = [
+    r"\b(help|how|abilities)\b.*\b(you|your|system|agentic os)\b",
+    r"\b(you|your|system|agentic os)\b.*\b(help|how|abilities)\b",
+]
 CAPABILITY_SINGLE_WORDS = {
-    "menu", "commands", "list"
+    "menu", "commands"
 }
 GREETING_WORDS = {"hi", "hello", "hey", "greetings", "yo", "sup", "hi there", "hello there"}
 
@@ -45,6 +51,27 @@ INDEXED_TOPICS = [
     "hybrid search", "semantic cache", "speculative"
 ]
 
+# Content creation / writing tasks — these can be answered by LLM directly
+CONTENT_CREATION_KEYWORDS = [
+    "write a", "write an", "write me", "draft a", "draft an", "compose",
+    "cold email", "email sequence", "blog post", "landing page",
+    "seo audit", "content strategy", "marketing plan", "social media",
+    "cover letter", "resume", "press release", "newsletter",
+    "product description", "ad copy", "copywriting",
+]
+
+# General knowledge / advice — LLM can answer from its training
+GENERAL_KNOWLEDGE_KEYWORDS = [
+    "what advice", "what would", "how should", "best practices",
+    "pros and cons", "compare", "versus", "vs ", " vs.",
+    "checklist", "framework", "strategy", "methodology",
+    "what metrics", "what are the", "walk me through",
+    "give me", "provide", "suggest", "recommend",
+    "what does a", "as a ", "board meeting", "prep checklist",
+    "financial health", "saas metrics",
+]
+
+
 def classify_intent(message: str) -> Intent:
     """
     Classify the incoming message into an Intent enum.
@@ -55,7 +82,9 @@ def classify_intent(message: str) -> Intent:
     msg = message.strip().lower()
     logger.debug("Classifying intent for msg: '%s'", msg)
     
-    if any(re.search(rf"\b{re.escape(kw)}\b", msg) for kw in CAPABILITY_KEYWORDS) or msg in CAPABILITY_SINGLE_WORDS:
+    if any(re.search(rf"\b{re.escape(kw)}\b", msg) for kw in CAPABILITY_KEYWORDS) or \
+       any(re.search(p, msg) for p in SELF_DISCOVERY_PATTERNS) or \
+       msg in CAPABILITY_SINGLE_WORDS:
         return Intent.CAPABILITY_QUERY
 
     if msg in GREETING_WORDS:
@@ -76,6 +105,14 @@ def classify_intent(message: str) -> Intent:
     if any(topic in msg for topic in INDEXED_TOPICS):
         return Intent.RAG_LOOKUP
 
+    # Content creation tasks — LLM can handle directly
+    if any(kw in msg for kw in CONTENT_CREATION_KEYWORDS):
+        return Intent.LLM_DIRECT
+
+    # General knowledge / advice — LLM can handle directly
+    if any(kw in msg for kw in GENERAL_KNOWLEDGE_KEYWORDS):
+        return Intent.LLM_DIRECT
+
     # Default logic (must be after all keyword matches)
     word_count = len(msg.split())
     
@@ -86,6 +123,10 @@ def classify_intent(message: str) -> Intent:
     # Very short queries (1-2 words) that aren't keywords are SIMPLE_TASK
     if word_count <= 2:
         return Intent.SIMPLE_TASK
+    
+    # Multi-part questions (semicolons, question marks) are complex but still LLM-answerable
+    if msg.count("?") >= 2 or msg.count(". ") >= 2:
+        return Intent.LLM_DIRECT
         
     # Everything else long is a COMPLEX_TASK for the orchestrator
     return Intent.COMPLEX_TASK
@@ -95,7 +136,9 @@ def is_llm_generatable(task: str) -> bool:
     lower = task.lower()
     LLM_TASKS = [
         "outline", "plan", "list", "explain", "describe", "summarize", 
-        "architecture", "patterns", "design", "guide", "tutorial"
+        "architecture", "patterns", "design", "guide", "tutorial",
+        "advice", "opinion", "review", "analyze", "evaluate",
+        "compare", "contrast", "define", "what is", "how to",
     ]
     OS_TASKS = ["run", "execute", "pip", "install", "launch", "delete", "remove"]
     

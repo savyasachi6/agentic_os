@@ -9,29 +9,21 @@ import logging
 import sys
 import os
 from pathlib import Path
+import logging
+
+from agent_core.utils.logging_utils import configure_logging as _configure_logging
 
 def setup_logging(level: str = "INFO", log_file: str = "logs/agentic_os.log"):
     """
-    Sets up basic logging to stdout and a file.
-    Creates the logs directory if it doesn't exist.
+    Sets up structured JSON logging to stdout and plain text to a file.
+    Delegates to the centralized utils/logging_utils.py.
     """
+    _configure_logging(level=level)
+    
+    # Still add a file handler for local persistence if requested
+    import os
     os.makedirs("logs", exist_ok=True)
-    
-    fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
-    
-    # Configure root logger
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format=fmt,
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_file, mode="a", encoding="utf-8"),
-        ],
-    )
-    
-    # Suppress noisy libraries
-    for lib in ["httpx", "httpcore", "openai", "sqlalchemy.engine", "asyncio", "urllib3"]:
-        logging.getLogger(lib).setLevel(logging.WARNING)
-        
-    logger = logging.getLogger(__name__)
-    logger.info("Logging initialized at %s level", level)
+    file_fmt = "%(asctime)s | %(levelname)-8s | %(name)s:%(lineno)d | %(message)s"
+    file_handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter(file_fmt))
+    logging.getLogger().addHandler(file_handler)

@@ -20,7 +20,7 @@ You operate in a strict `Thought:` and `Action:` loop. You must output exactly i
 
 3. `Action: web_fetch`
    - **Payload Format:** `{"url": "https://example.com", "content_type": "text"}`
-   - **Effect:** Opens the URL with Playwright (Lightpanda CDP) and returns the visible page text (up to 12 000 chars).
+   - **Effect:** Opens the URL with Playwright (CDP) and returns the visible page text (up to 12 000 chars).
 
 4. `Action: complete`
    - **Payload Format:** `{"summary": "your synthesized final answer based on observations...", "sources": ["url_or_doc_id"]}`

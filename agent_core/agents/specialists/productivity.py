@@ -8,6 +8,7 @@ import asyncio
 import logging
 from productivity.todo_manager import TodoManager
 from productivity.notes import NoteManager
+from agent_core.agents.core.a2a_bus import A2ABus
 
 logger = logging.getLogger("agentos.agents.productivity")
 
@@ -18,6 +19,7 @@ class ProductivityAgent:
     def __init__(self):
         self.todo_manager = TodoManager()
         self.note_manager = NoteManager(None) # Assuming None is acceptable for now
+        self.bus = A2ABus()
         self.stop_event = asyncio.Event()
 
     async def run_forever(self, poll_interval: float = 60.0):

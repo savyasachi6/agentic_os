@@ -18,33 +18,57 @@ sys.path.append(_ROOT)
 
 from db.connection import get_db_connection, init_db_pool
 
-# Configure the page
-st.set_page_config(
-    page_title="Agentic OS",
-    page_icon="🌌",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# --- Configuration & Styling ---
+def init_page():
+    """Initializes the UI configuration, premium CSS, and session state."""
+    st.set_page_config(
+        page_title="Agentic OS | AI System Console",
+        page_icon="🧬",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    
+    # Premium Blueprint CSS (Phase 7 - Glassmorphism)
+    st.markdown("""
+    <style>
+    [data-testid="stSidebarNav"] {
+        position: sticky; top: 0; background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(10px); z-index: 1000;
+    }
+    .session-item {
+        padding: 12px; margin-bottom: 8px; border-radius: 8px;
+        background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: all 0.2s ease;
+    }
+    .session-item:hover {
+        background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.2);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # Initialize session state keys
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "is_processing" not in st.session_state:
+        st.session_state.is_processing = False
+    if "pending_deletions" not in st.session_state:
+        st.session_state.pending_deletions = set()
 
 # Configuration constants — override via env vars in Docker
 CORE_API_URL = os.environ.get("CORE_API_URL", "http://localhost:8000")
 CORE_WS_URL = os.environ.get("CORE_WS_URL", "ws://localhost:8000/ws")
 
+# ---------------------------------------------------------------------------
+# Global App Logic Initialization
+# ---------------------------------------------------------------------------
 @st.cache_resource
 def init_db():
     init_db_pool()
 
 init_db()
-
-# ---------------------------------------------------------------------------
-# Session State Initialization
-# ---------------------------------------------------------------------------
-if "session_id" not in st.session_state:
-    st.session_state.session_id = str(uuid.uuid4())
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # List of {"role": "...", "content": "...", "type": "..."}
-if "is_processing" not in st.session_state:
-    st.session_state.is_processing = False
+init_page()
 
 # ---------------------------------------------------------------------------
 # Database Utilities for Skill Explorer
@@ -135,6 +159,15 @@ def load_sessions():
     except Exception as e:
         print(f"Failed to load sessions: {e}")
     return []
+
+def delete_session_api(session_id: str):
+    """Call the backend to delete a session."""
+    try:
+        response = requests.delete(f"{CORE_API_URL}/chat/{session_id}", timeout=5)
+        return response.status_code == 200
+    except Exception as e:
+        st.error(f"Delete failed: {e}")
+        return False
 
 def get_router_stats():
     """Fetches bandit diagnostics directly from the mounted RL Router sub-app."""
@@ -277,43 +310,60 @@ with st.sidebar:
     st.title("🌌 Agentic OS")
     st.markdown("---")
     
-    page = st.selectbox("Navigation", ["💬 Terminal", "🧩 Skill Explorer", "🎯 RL Strategy"])
+    page = st.selectbox("Navigation", ["💬 Terminal", "🧩 Skill Explorer", "🎯 RL Strategy (Inactive)"])
     
     st.markdown("---")
     
     if page == "💬 Terminal":
-        st.subheader("Session Management")
+        st.subheader("Sessions")
+        
+        # New Session Button at the top
+        if st.button("➕ New Chat", use_container_width=True, type="primary"):
+            st.session_state.session_id = str(uuid.uuid4())
+            st.session_state.chat_history = []
+            st.rerun()
+            
+        st.markdown("---")
         
         available_sessions = load_sessions()
         
         if available_sessions:
-            session_options = {s["session_id"]: f"{str(s.get('first_message', 'No message'))[:40]}... ({str(s.get('created_at', '')).split(' ')[0]})" for s in available_sessions}
-            
-            selected_session = st.selectbox(
-                "Select Past Session", 
-                options=[""] + list(session_options.keys()),
-                format_func=lambda x: session_options.get(x, "--- Select a session ---"),
-                index=0
-            )
-            
-            session_input = st.text_input("Session ID (or leave blank to use dropdown)", value=selected_session or st.session_state.session_id)
+            for s in available_sessions:
+                s_id = s["session_id"]
+                # Skip if optimistically deleted
+                if s_id in st.session_state.pending_deletions:
+                    continue
+                    
+                first_msg = str(s.get('first_message', 'No message'))[:30]
+                created = str(s.get('created_at', '')).split(' ')[0]
+                is_active = (s_id == st.session_state.session_id)
+                label = f"#{created} - {first_msg}"
+                
+                # Wrap each session item in a div for glassmorphism styling
+                st.markdown(f'<div class="session-item {"active" if is_active else ""}">', unsafe_allow_html=True)
+                col_text, col_del = st.columns([0.80, 0.20])
+                
+                with col_text:
+                    if st.button(label, key=f"btn_{s_id}", use_container_width=True):
+                        st.session_state.session_id = s_id
+                        load_db_history(s_id)
+                        st.rerun()
+                
+                with col_del:
+                    if st.button("🗑️", key=f"del_{s_id}", help="Delete Session", use_container_width=True):
+                        st.session_state.pending_deletions.add(s_id)
+                        st.toast(f"Session marked for deletion.", icon="🗑️")
+                        if delete_session_api(s_id):
+                            if s_id == st.session_state.session_id:
+                                st.session_state.session_id = str(uuid.uuid4())
+                                st.session_state.chat_history = []
+                            st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
         else:
-            session_input = st.text_input("Session ID", value=st.session_state.session_id)
+            st.caption("No historical sessions found.")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Load History", use_container_width=True):
-                if session_input:
-                    st.session_state.session_id = session_input
-                    if load_db_history(session_input):
-                        st.success("History hydrated!")
-                    else:
-                        st.warning("No history found.")
-        with col2:
-            if st.button("New Session", use_container_width=True):
-                st.session_state.session_id = str(uuid.uuid4())
-                st.session_state.chat_history = []
-                st.rerun()
+        st.markdown("---")
+        st.caption(f"Active: `{st.session_state.session_id[:8]}...`")
     
     elif page == "🧩 Skill Explorer": # Skill Explorer Sidebar
         st.subheader("Knowledge Stats")
@@ -325,8 +375,8 @@ with st.sidebar:
         if st.button("🔄 Sync Skills", use_container_width=True):
             with st.spinner("Indexing..."):
                 import subprocess
-                # Run the indexer from core
-                result = subprocess.run([sys.executable, os.path.join(_ROOT, "main.py"), "index"], capture_output=True, text=True)
+                # Run the indexer from agent_core.rag
+                result = subprocess.run([sys.executable, "-m", "agent_core.rag.indexer"], capture_output=True, text=True)
                 if result.returncode == 0:
                     st.success("Synced!")
                     st.rerun()
@@ -453,9 +503,17 @@ elif page == "🧩 Skill Explorer": # Skill Explorer Page
     else:
         st.warning("No skills found.")
 
-elif page == "🎯 RL Strategy":
-    st.header("🎯 RL Strategy Optimizer")
-    st.markdown("Monitor and analyze the **Dynamic Retrieval Depth** policy.")
+elif page == "🎯 RL Strategy (Inactive)":
+    st.header("🎯 Reinforcement Learning Strategy")
+    st.warning("⚠️ Telemetry Service Offline: The RL Router is not currently active in the standard specialist stack.")
+    st.markdown("""
+    This dashboard traditionally displays:
+    - **Exploration vs. Exploitation** weights for specialist routing.
+    - **Reward distributions** per agent role.
+    - **Bandit convergence** metrics.
+    
+    *The RL Strategizer is a dangling feature awaiting telemetry re-integration.*
+    """)
     
     stats = get_router_stats()
     
