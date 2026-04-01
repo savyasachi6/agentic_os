@@ -14,10 +14,22 @@ This document defines the canonical directory structure and namespaces for the A
 | `sandbox` | `sandbox/` | Secure code execution environments. |
 | `voice` | `voice/` | Voice interaction and processing. |
 | `gateway` | `gateway/` | System entry points (CLI, API Server). |
-| `rl_router` | `rl_router/` | Reinforcement Learning-based routing. |
+| `rl_router` | `rl_router/` | Standalone RL-based routing service (`domain/bandit.py`). |
 | `llm_router` | `llm_router/` | Large Language Model-based routing and load balancing. |
 | `lane_queue` | `lane_queue/` | Task queue management. |
 | `ui` | `ui/` | Streamlit and other user interfaces. |
+
+## Core Component Mappings
+
+| Component | Canonical Path | Description |
+|---|---|---|
+| **CognitiveRetriever** | `agent_core/rag/cognitive_retriever.py` | Primary retrieval entry point (MSR + RRF). |
+| **CoordinatorAgent** | `agent_core/agents/core/coordinator.py` | LangGraph orchestrator and `BridgeAgent` host. |
+| **Browser Tools** | `sandbox/browser_tools.py` | Playwright-based `web_search` and `web_fetch`. |
+| **Bandit Engine** | `rl_router/domain/bandit.py` | LinUCB implementation (standalone/disconnected). |
+
+> Last updated: arc_change branch
+
 
 ## Deprecation & Migration Map
 

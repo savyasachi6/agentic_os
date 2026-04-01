@@ -4,28 +4,36 @@ This document maps the logical agents in Agentic OS to their `AgentRole`, A2A to
 
 ## Agent Mapping
 
-| Agent Name | AgentRole | A2A Topic (if used) | Worker Module | Entry Point / Class | Startup Method |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Research** | `AgentRole.RAG` | `research` | `agents/rag_agent.py` | `ResearchAgentWorker` | `worker_manager.py` (via `AgentWorker`) |
-| **Code** | `AgentRole.TOOLS` | `code` | `agents/code_agent.py` | `CodeAgentWorker` | `worker_manager.py` (via `AgentWorker`) |
-| **Capability** | `AgentRole.SCHEMA` | `capability` | `agents/capability_agent.py` | `CapabilityAgentWorker` | `worker_manager.py` (via `AgentWorker`) |
-| **Executor** | `AgentRole.SPECIALIST` | `specialist` | `agents/executor.py` | `ExecutorAgentWorker` | `worker_manager.py` (via `AgentWorker`) |
-| **Planner** | `AgentRole.PLANNER` | `planner` | `agents/planner.py` | `PlannerAgentWorker` | **MISSING** |
-| **Productivity** | `AgentRole.PRODUCTIVITY` | `productivity` | `agents/productivity.py` | `ProductivityAgent` | `worker_manager.py` (via `AgentWorker`) |
-| **Email** | `AgentRole.EMAIL` | `email` | `agents/email_agent.py` | `EmailAgent` | `worker_manager.py` (via `AgentWorker`) |
-| **Memory** | `AgentRole.RAG` | `research` | `agents/rag_agent.py` | `ResearchAgentWorker` | Shared with Research |
-| **RAG** | `AgentRole.RAG` | `research` | `agents/rag_agent.py` | `ResearchAgentWorker` | `worker_manager.py` (via `AgentWorker`) |
+| Agent Role | Specialist File | Entry Point / Class | Description |
+| :--- | :--- | :--- | :--- |
+| `rag` | `agents/rag_agent.py` | `ResearchAgentWorker` | Research, fact-checking, and long-term memory retrieval. |
+| `tools` | `agents/code_agent.py` | `CodeAgentWorker` | General code execution and systems tasks. |
+| `schema` | `agents/capability_agent.py` | `CapabilityAgentWorker` | Fast-path capability queries and skill discovery. |
+| `email` | `agents/email_agent.py` | `EmailAgent` | Email management and notifications. |
+| `productivity` | `agents/productivity.py` | `ProductivityAgent` | Calendar, tasks, and notes management. |
+| `specialist` | `agents/executor.py` | `ExecutorAgentWorker` | Generic specialized task execution. |
+| `planner` | `agents/planner.py` | `PlannerAgentWorker` | High-level strategy and breakdown of complex tasks. |
 
-## Startup Governance
+## Routing & Dispatch
 
-### Worker Manager
+### Logical Intent Routing
+- **`memory` intent**: Currently routes directly to the `rag` worker via the `BridgeAgent` to leverage the `CognitiveRetriever`.
+- **`code_gen` intent**: Routes to the `tools` worker with a code-specific retrieval policy.
 
-Most specialist workers are started by `scripts/worker_manager.py`. It uses the `AgentWorker` class (from `agents/worker.py`) as a poller wrapper around the agent implementations.
+### BridgeAgent & Heartbeats
+The `BridgeAgent` in `coordinator.py` acts as a dispatcher to background workers. Before dispatching a task to the `A2ABus`, it performs a **heartbeat check**:
 
-### Polling vs. Listening
-- **Polling (`AgentWorker`)**: Periodically checks the `TreeStore` (DB) for `PENDING` nodes of a specific role.
+```python
+if self.bus:
+    is_alive = await self.bus.get_heartbeat(self.role.value)
+    if not is_alive:
+        return {"error_type": "offline", "error": "Specialist agent is offline."}
+```
 
-- **Listening (`A2ABus`)**: Many agents (`ResearchAgentWorker`, `ExecutorAgentWorker`, `CapabilityAgentWorker`) have a `run_forever` method that listens to an A2A bus (Redis). However, `worker_manager.py` currently favors the polling wrapper for most roles.
+This ensuring "fail-fast" behavior if a required specialist worker is not running.
 
-## Missing Workers
-- **Planner Agent**: `PlannerAgentWorker` in `agents/planner.py` is not currently instantiated or started by `worker_manager.py`.
+## Worker Patterns
+
+Most specialist workers are started by `scripts/worker_manager.py`. It uses the `AgentWorker` class as a poller wrapper around agent implementations, checking the `TreeStore` for `PENDING` nodes while simultaneously listening for "Fast-Path" notifications on the **A2A Bus** (Redis).
+
+> Last updated: arc_change branch

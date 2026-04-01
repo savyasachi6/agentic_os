@@ -4,22 +4,28 @@
 
 The **RL Router** (`rl_router`) is an independent, local-first service responsible for dynamic RAG depth routing. While the *LLM Router* proxies and batches core reasoning requests, the *RL Router* decides the optimal retrieval strategy for a given user query using a reinforcement learning contextual bandit (LinUCB).
 
-The objective is to balance retrieve correctness, latency cost, and hallucination risk, adapting to the user's workload over time.
+### Integration Status
+> [!IMPORTANT]
+> The `rl_router` service is fully implemented (`bandit.py`, `reward.py`, `drift.py`, `features.py`) but is **NOT currently called** by `coordinator.py` or `CognitiveRetriever`. It runs as a standalone microservice awaiting final wire-up.
+
 
 ## Contextual Bandit Architecture
 
 The router uses a Thread-Safe **LinUCB Contextual Bandit** with safety constraint tracking and exponential decay, integrated with CUSUM drift detection.
 
-### 1. Action Space (8 Arms)
+The bandit explores an 8-arm action space representing combinations of **Retrieval Depth** and **Speculative Drafting**:
 
-The bandit explores an 8-arm action space derived from two orthogonal choices:
+| Arm Index | Retrieval Depth | Speculative Drafting |
+| :--- | :--- | :--- |
+| 0 | 0 (Collapsed) | OFF |
+| 1 | 0 (Collapsed) | ON |
+| 2 | 1 (Standard) | OFF |
+| 3 | 1 (Standard) | ON |
+| 4 | 2 (Multi-hop) | OFF |
+| 5 | 2 (Multi-hop) | ON |
+| 6 | 3 (Fractal) | OFF |
+| 7 | 3 (Fractal) | ON |
 
-- **Retrieval Depth** (0, 1, 2, 3)
-  - `0`: Collapsed Tree lookup (no retrieval tree traversal)
-  - `1`: Standard RAG
-  - `2`: Multi-hop GraphRAG
-  - `3`: Full Fractal RAG Tree
-- **Speculative Drafting** (ON / OFF)
 
 ### 2. Context Features
 
@@ -57,3 +63,12 @@ Acts as an escalation safeguard over the base routing policy ($\pi_1$):
 - **Accept**: The retrieve is valid.
 - **Escalate Depth**: High disagreement in drafted answers demands a deeper retrieval strategy fallback.
 - **Abort**: Critical auditor flags force session cancellation.
+
+## Integration Roadmap
+
+The following integration points are required to wire the RL Router into the production dispatch path:
+
+1.  **Pre-dispatch (Coordinator)**: Before calling a specialist, the coordinator should POST the query and context to `/rl_router/predict` to get the arm decision `(depth, speculative, arm_index)`.
+2.  **Post-response (Coordinator)**: After the specialist finishes, the coordinator should POST the reward signal back to `/rl_router/reward` using the `rl_metadata` already collected in `last_run_metrics`.
+
+> Last updated: arc_change branch

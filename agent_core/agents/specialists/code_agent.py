@@ -131,8 +131,32 @@ class CodeAgentWorker:
                 response_text = await self.llm.generate_async(messages)
                 messages.append({"role": "assistant", "content": response_text})
 
+                # Phase 103: Thought Extraction & Publishing
+                from agent_core.reasoning import parse_thought, normalize_thought
+                thought_text = parse_thought(response_text)
+                if not thought_text and "Thought:" in response_text:
+                    # Fallback for models that skip the newline but have the prefix
+                    thought_text = response_text.split("Action:")[0].replace("Thought:", "").strip()
+
+                if thought_text:
+                    clean_thought = normalize_thought(thought_text)
+                    await self.bus.publish(AgentRole.TOOLS.value, {
+                        "type": "thought",
+                        "content": clean_thought,
+                        "session_id": str(task.chain_id)
+                    })
+
                 action_data = _parse_code_action(response_text)
                 if not action_data:
+                    # Recovery Nudge instead of immediate failure
+                    if i < max_iterations - 1:
+                        logger.warning(f"No action parsed on turn {i+1}. Injecting ReAct format nudge. node_id={task.id}")
+                        messages.append({
+                            "role": "user", 
+                            "content": "Observation: I didn't see an 'Action:' line in your last response. Remember to follow the Thought/Action format exactly for every turn."
+                        })
+                        continue
+                    
                     duration = time.time() - start_time
                     logger.error(f"Parse error. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None

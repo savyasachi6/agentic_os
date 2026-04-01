@@ -66,8 +66,17 @@ class ExecutorAgentWorker:
                 
                 action_data = parse_react_action(response)
                 if not action_data:
+                    # Phase 103: Recovery Nudge for Executor Agent
+                    if i < max_iterations - 1:
+                        logger.warning(f"No action parsed on turn {i+1}. Injecting ReAct format nudge. node_id={task.id}")
+                        messages.append({
+                            "role": "user", 
+                            "content": "Observation: I didn't see an 'Action:' line in your last response. Remember to follow the Thought/Action format exactly for every turn."
+                        })
+                        continue
+
                     duration = time.time() - start_time
-                    logger.info(f"No action parsed. Completing task. node_id={task.id}, duration={duration:.2f}s")
+                    logger.info(f"No action parsed after retries. Completing task. node_id={task.id}, duration={duration:.2f}s")
                     assert task.id is not None
                     await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"message": response})
                     return

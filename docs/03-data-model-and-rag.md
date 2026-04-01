@@ -11,25 +11,29 @@ Agentic OS relies on PostgreSQL with the `pgvector` extension for all semantic a
 - **`skill`**: Functional instructions and prompt fragments used by the Skills engine.
 - **`command`**: Durable execution records for the Lane Queue.
 
-## The Resilient RAG Pipeline
+## Cognitive Retrieval Pipeline
 
-Located primarily in `memory/agent_rag/`, the pipeline ensures high-fidelity retrieval.
+Located in `agent_core/rag/cognitive_retriever.py`, the pipeline ensures high-fidelity retrieval using an intent-aware, multi-layered approach.
 
-### 1. Ingestion
+### 1. Depth Policy (`_DEPTH_POLICY`)
+The retriever maps query intent to a specific strategy `(top_k, layers)`:
+- `WEB_SEARCH` / `MATH` → `top_k=0` (skip retrieval)
+- `CODE_GEN` → `top_k=5`, skills only
+- `RAG_LOOKUP` / `CONTENT` → `top_k=10`, all layers
+- `COMPLEX_TASK` → `top_k=20`, all layers
 
-Documents are ingested, cleaned of noise, and chunked using the `skills` indexer logic. Embeddings are generated using local models like `nomic-embed-text`.
+Note: `override_top_k` allows the RL router to inject depth dynamically once wired.
 
-### 2. Hybrid Retrieval
+### 2. Multi-Layer Retrieval (MSR)
+Retrieval is bifurcated into three distinct layers:
+- **M (Memory)**: Vector search over past thoughts and observations in the current session.
+- **S (Skills)**: `pgvector` search against the `skill_registry`.
+- **R (Relational)**: Recursive SQL CTE walk via `skill_relations` and `entity_relations` to find connected knowledge hops.
 
-A combination of:
+### 3. RRF Fusion & Reranking
+Results from all layers are combined using **Reciprocal Rank Fusion (RRF)**:
+$score(d) = \sum_{s \in sources} \frac{1}{k + rank_s(d)}$
 
-- **Vector Search**: Semantic similarity via `pgvector`.
-- **Relational Search**: Traversing internal links within documents.
-- **Lexical Search**: Traditional keyword matching for exact terms (e.g., error codes).
+A **Recency Multiplier** (1.25x) is applied to chunks from skills or topics referenced recently in the session to ensure temporal relevance.
 
-### 3. Validation
-
-To prevent hallucinations, the **Validation Engine** performs:
-
-- **Fact Checking**: Cross-referencing response claims against the retrieved chunks.
-- **Safety Filtering**: Ensuring the output follows system instructions.
+> Last updated: arc_change branch

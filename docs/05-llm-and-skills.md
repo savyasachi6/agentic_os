@@ -13,25 +13,30 @@ The LLM is the "engine" of the appliance. Agentic OS treats it as a stateless re
 
 To solve the "one-query-at-a-kind" bottleneck of local GPUs, the router groups independent agent requests into micro-batches, increasing system throughput by up to 5x.
 
-## The Skills Engine
+### ReAct Reasoning Loop
 
-Located in `skills/`, this system provides the "High-Level Intelligence" beyond core reasoning.
+Specialist workers (e.g., RAG, Code) operate using a strict **ReAct** (Reasoning + Acting) loop. Every turn must follow this format:
 
-### Reasoning Recipes (`SKILL.md`)
+```text
+Thought: <internal reasoning about the next step>
+Action: <tool_name>(<arguments>)
+```
 
-Skills are not just function definitions. They are structured Markdown files containing:
+The loop continues until the agent produces the final required action:
+`Action: respond_direct(message=""" <final answer> """)`
 
-- **System Instructions**: Specific constraints for a domain.
-- **Examples**: Few-shot prompts to guide the LLM.
-- **Tool Mapping**: Which tools are most effective for this skill.
+### Valid Tool Actions
+The following core actions are available to the RAG specialist:
+- `hybrid_search(query: str)`: Unified search across MSR layers.
+- `web_search(query: str)`: Real-time search via DuckDuckGo/Playwright.
+- `web_fetch(url: str)`: Full-page content extraction.
+- `respond_direct(message: str)`: Final answer delivery to the user.
 
-### Dynamic Context Injection
+### Dynamic Context & Injections
+- **Skill Retrieval**: Relevant skill fragments are injected based on query intent.
+- **Runtime Injections**: The token `{{TODAY}}` is automatically replaced with the current ISO date in the system prompt at runtime to ensure temporal awareness.
 
-Instead of a single massive system prompt, the agent *retrieves* the relevant skills for the current turn.
-
-1. **Introspection**: Agent analyzes the query.
-2. **Lookup**: Skills engine returns the `k` most relevant skill fragments.
-3. **Synthesis**: `core` assembles the final prompt for the LLM.
+> Last updated: arc_change branch
 
 ---
 See `core/docs/components/llm_router.md` for internal routing logic.

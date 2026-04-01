@@ -243,9 +243,18 @@ class CapabilityAgentWorker:
                     if sql:
                         action_data = ("sql_query", sql)
                     else:
-                        # Harden: Fallback to direct response if no Action was found
+                        # Recovery Nudge for Capability Agent
+                        if i < max_iterations - 1:
+                            logger.warning(f"No action parsed on turn {i+1}. Injecting ReAct format nudge. node_id={task.id}")
+                            messages.append({
+                                "role": "user", 
+                                "content": "Observation: I didn't see an 'Action:' line in your last response. Remember to follow the Thought/Action format exactly for every turn."
+                            })
+                            continue
+                            
+                        # Harden: Fallback to direct response if no Action was found and max turns reached
                         from agent_core.reasoning import strip_reasoning_markers
-                        logger.info(f"No Action block found for capability query. Using direct response. node_id={task.id}")
+                        logger.info(f"No Action block found for capability query after retries. Using direct response. node_id={task.id}")
                         cleaned = strip_reasoning_markers(response_text)
                         await self.tree_store.update_node_status_async(task.id, NodeStatus.DONE, result={"response": cleaned, "message": cleaned})
                         return
