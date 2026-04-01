@@ -300,7 +300,8 @@ class ResearchAgentWorker:
                         
                         # Resilience wrap for DB/VectorStore access
                         try:
-                            chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
+                            # CognitiveRetriever now returns (context, skills, strategy) in Phase 5
+                            chunks_text, retrieved_skills, strategy = await self.retriever.retrieve_context(
                                 query=p.get("query", query_goal),
                                 session_id=session_id,
                                 intent=task.payload.get("intent")
@@ -308,7 +309,7 @@ class ResearchAgentWorker:
                         except Exception as hse:
                             logger.warning(f"Hybrid search failed (likely DB restart): {hse}. Retrying in 2s...")
                             await asyncio.sleep(2.0)
-                            chunks_text, retrieved_skills = await self.retriever.retrieve_context_with_meta(
+                            chunks_text, retrieved_skills, strategy = await self.retriever.retrieve_context(
                                 query=p.get("query", query_goal),
                                 session_id=session_id,
                                 intent=task.payload.get("intent")
@@ -327,11 +328,11 @@ class ResearchAgentWorker:
                         else:
                             obs = f"[CONTEXT_GROUNDING]\nThe following information was retrieved from the brain for this task:\n\n{chunks_text}"
                         
-                        # Update RL metadata with local depth info (duck-typing for telemetry)
-                        depth_meta = self.retriever.get_depth(task.payload.get("intent"))
+                        # Update RL metadata with dynamic strategy info (Phase 5)
                         rl_meta.update({
-                            "top_k": depth_meta["top_k"],
-                            "depth": depth_meta["depth"],
+                            "top_k": strategy.get("k", 10),
+                            "depth": strategy.get("depth", 1), # strategy now contains k/hybrid/etc.
+                            "arm_index": strategy.get("name", "unknown")
                         })
                         
                         messages.append({"role": "system", "content": obs})

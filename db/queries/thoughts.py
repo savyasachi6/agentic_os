@@ -112,3 +112,11 @@ def get_last_compacted_turn(session_id: str) -> int:
                 (session_id,)
             )
             return cur.fetchone()[0]
+
+def delete_session(session_id: str):
+    """Permanently delete all thoughts and summaries for a session."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM thoughts WHERE session_id = %s", (session_id,))
+            cur.execute("DELETE FROM session_summaries WHERE session_id = %s", (session_id,))
+        conn.commit()

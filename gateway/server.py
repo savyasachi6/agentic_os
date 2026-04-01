@@ -49,6 +49,14 @@ _sessions: dict[str, CoordinatorAgent] = {}
 @app.on_event("startup")
 async def startup():
     # Note: DB Migration/Init is handled by entry points or externally
+    # Phase 6: Query Registry Bootstrapping Audit
+    from db.query_registry import QueryRegistry
+    try:
+        QueryRegistry.audit_all()
+    except Exception as e:
+        print(f"[FATAL] Query Registry Audit Failed: {e}")
+        # In production, we might want to sys.exit(1) here if data integrity is critical
+    
     # Start the centralized LLM Router
     router = LLMRouter.get_instance()
     router.start()
@@ -176,10 +184,21 @@ async def chat_post(req: ChatRequest, auth_data: dict = Depends(KeycloakManager.
 
 @app.get("/chat/sessions")
 async def get_all_sessions():
-    """Retrieve all available chat sessions."""
+    """Retrieve all available chat sessions, ordered by most recent."""
     vs = VectorStore()
     sessions = await vs.get_all_sessions_async()
+    # Sort by created_at DESC locally for the session list
+    sessions.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {"status": "success", "sessions": sessions}
+
+@app.delete("/chat/{session_id}")
+async def delete_session(session_id: str):
+    """Permanently delete a session and all its associated data."""
+    vs = VectorStore()
+    await vs.delete_session_async(session_id)
+    if session_id in _sessions:
+        del _sessions[session_id]
+    return {"status": "success", "message": f"Session {session_id} deleted."}
 
 
 @app.get("/chat/{session_id}/history")
@@ -188,7 +207,6 @@ async def get_chat_history(session_id: str):
     vs = VectorStore()
     history = await vs.get_session_history_async(session_id)
     return {"status": "success", "session_id": session_id, "history": history}
-
 
 # ---------------------------------------------------------------------------
 # Feedback

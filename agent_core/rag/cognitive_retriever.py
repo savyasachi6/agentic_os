@@ -19,25 +19,16 @@ import logging
 import math
 from typing import Any, Dict, List, Optional
 from collections import defaultdict
+import numpy as np
+
+from agent_core.rag.retrieval_policy import RetrievalArm, STRATEGY_MAP, map_intent_to_context
+from rl_router.domain.bandit import LinUCBBandit
 
 logger = logging.getLogger("agentos.rag.cognitive")
 
+
 # Intent → (top_k, layers)
-# layers: M=memory, S=skills, R=relational, W=web_only
-_DEPTH_POLICY: Dict[str, tuple] = {
-    "web_search":    (0,  "W"),
-    "greeting":      (0,  ""),
-    "math":          (0,  ""),
-    "code_gen":      (5,  "S"),     # skills only, code type
-    "capability_query": (5, "S"),
-    "rag_lookup":    (10, "MSR"),
-    "content":       (10, "MSR"),
-    "complex_task":  (20, "MSR"),
-    "llm_direct":    (0,  ""),
-    "execution":     (5,  "S"),
-    "filesystem":    (5,  "S"),
-}
-_DEFAULT_POLICY = (5, "MS")
+# Deprecated: Strategy is now determined by the Contextual Bandit in RetrievalPolicy.
 
 
 class CognitiveRetriever:
@@ -68,66 +59,107 @@ class CognitiveRetriever:
         from agent_core.llm.client import LLMClient
         self._rewrite_llm = LLMClient()
 
+        # Initialize Bandit (Phase 2 Cleanup)
+        try:
+            from rl_router.api.dependencies import get_bandit
+            self.bandit = get_bandit()
+        except Exception as e:
+            logger.warning(f"Failed to load bandit from dependencies: {e}. Falling back to default LinUCB.")
+            self.bandit = LinUCBBandit(n_arms=8, d=7)
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     async def retrieve_context(
-        self,
-        query: str,
+        self, 
+        query: str, 
         session_id: Optional[str] = None,
         intent: Optional[str] = None,
-        override_top_k: Optional[int] = None,
-    ) -> str:
+        override_top_k: Optional[int] = None
+    ) -> Tuple[str, List[str], Dict[str, Any]]:
         """
-        Main entry point. Returns a formatted context string for the LLM.
+        Multi-Armed Bandit driven retrieval.
+        Returns (formatted_context_string, List[skill_names_retrieved], strategy_meta).
         """
-        context, _ = await self.retrieve_context_with_meta(
-            query=query,
-            session_id=session_id,
-            intent=intent,
-            override_top_k=override_top_k
-        )
-        return context
-
-    async def retrieve_context_with_meta(
-        self,
-        query: str,
-        session_id: Optional[str] = None,
-        intent: Optional[str] = None,
-        override_top_k: Optional[int] = None,
-    ) -> tuple[str, List[str]]:
-        """
-        Returns (formatted_context_string, List[skill_names_retrieved]).
-        """
-        intent_key = (intent or "").lower()
-        top_k, layers = _DEPTH_POLICY.get(intent_key, _DEFAULT_POLICY)
+        intent_key = (intent or "general").lower()
+        
+        # 1. Bandit Arm Selection
+        # Build context: [Intent_OneHot(5), q_len_norm, c_len_norm, s_depth_norm, entropy_norm]
+        session_ctx = await self._get_session_context(session_id) if session_id else {}
+        turn_count = session_ctx.get("turn_count", 0)
+        
+        context_vec = map_intent_to_context(intent_key, query, turn_count)
+        
+        # Select Arm (Contextual Bandit)
+        # Ensure bandit dimension matches (d=9)
+        if self.bandit.d != len(context_vec):
+            logger.info(f"Re-initializing bandit to match dimension {len(context_vec)}")
+            self.bandit.d = len(context_vec)
+            self.bandit.hard_reset()
+            
+        arm_idx, _, is_exploration = self.bandit.select_arm(context_vec)
+        strategy = STRATEGY_MAP.get(arm_idx, STRATEGY_MAP[RetrievalArm.SHALLOW_SEMANTIC])
+        
+        # 2. Bifurcated Parameters (Phase 5 Blueprint)
+        # context_k: final window for LLM
+        # candidate_k: broad recall for RRF/Reranking
+        context_k = strategy.get("k", 10)
+        candidate_k = max(context_k * 5, 20) if strategy.get("hybrid") else context_k
+        
+        layers = "MSR" # Default layers
+        if strategy.get("use_kg"): layers += "R"
+        if strategy.get("recency"): layers += "T" # Pseudo-flag for recency bias
+        if intent_key == "web_search": context_k, layers = 0, "W"
 
         if override_top_k is not None:
-            top_k = override_top_k
+            context_k = override_top_k
+            candidate_k = max(context_k * 5, 20)
 
         # Fast exit — no retrieval needed
-        if top_k == 0 or not layers:
+        if context_k == 0:
             return "", []
 
-        # 1. Query Rewriting (Contextualization)
-        session_ctx = await self._get_session_context(session_id) if session_id else {}
+        # 3. Query Rewriting (Contextualization)
         rewritten_query = await self._rewrite_query(query, session_ctx)
 
-        # 2. Parallel retrieval based on layer policy
-        results = await self._execute_layers(rewritten_query, query, session_id, top_k, layers, intent_key)
+        # 4. Parallel retrieval (Candidate Generation Phase)
+        import time
+        t0 = time.time()
+        # Fetch broad candidate pool using candidate_k
+        results = await self._execute_layers(rewritten_query, query, session_id, candidate_k, layers, intent_key)
+        latency_ms = int((time.time() - t0) * 1000)
 
-        # 3. Contextual Window Expansion (Adjacent chunks)
+        # 5. Log Retrieval Event (for Bandit Feedback)
+        try:
+            from db.queries.events import log_retrieval_event
+            chunk_ids = [r.get("chunk_id") for r in results if r.get("chunk_id")]
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, 
+                log_retrieval_event, 
+                session_id or "global", 
+                query, 
+                strategy.get("name", str(arm_idx)), 
+                context_k, 
+                chunk_ids, 
+                latency_ms
+            )
+        except Exception as le:
+            logger.debug(f"Failed to log retrieval event: {le}")
+
+        # 6. Contextual Window Expansion (Adjacent chunks)
         results = await self._expand_with_neighbors(results)
 
-        # 4. Inject recent session episodes as prefix context
+        # 7. Inject recent session episodes as prefix context
         episode_prefix = await self._get_session_episodes(session_id) if session_id else ""
 
         if not results:
             return episode_prefix, []
 
-        # 5. RRF Fusion scoring and rerank
-        reranked = self._fuse_and_rerank(results, session_ctx)[:top_k]
+        # 8. RRF Fusion and Context Assembly (Precision Phase)
+        # Truncate to context_k after RRF
+        reranked = self._fuse_and_rerank(results, session_ctx)[:context_k]
 
         # Extract skill names for metadata
         retrieved_skills = list(set([
@@ -150,7 +182,7 @@ class CognitiveRetriever:
                 f"[{source} - {i}] rrf_score={score:.4f}{rel_tag}\n{res.get('content', '')}"
             )
 
-        return "\n\n".join(blocks), retrieved_skills
+        return "\n\n".join(blocks), retrieved_skills, strategy
 
     async def retrieve_context_async(self, query: str, session_id: Optional[str] = None) -> str:
         """Duck-typing for HybridRetriever compatibility."""
@@ -257,16 +289,7 @@ class CognitiveRetriever:
     # Depth policy exposure
     # ------------------------------------------------------------------
 
-    def get_depth(self, intent: Optional[str] = None) -> Dict[str, Any]:
-        intent_key = (intent or "").lower()
-        top_k, layers = _DEPTH_POLICY.get(intent_key, _DEFAULT_POLICY)
-        return {
-            "top_k": top_k,
-            "layers": layers,
-            "intent": intent_key,
-            "depth": {0: 0, 5: 1, 10: 2, 20: 3}.get(top_k, 1),
-            "speculative": False,
-        }
+    # get_depth removed in Phase 5: Telemetry is now dynamic from retrieve_context
 
     # ------------------------------------------------------------------
     # Internal: Session context / Episodes

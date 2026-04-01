@@ -28,6 +28,7 @@ from agent_core.utils.thought_utils import normalize_thought, should_publish
 from agent_core.config import get_links_markdown
 from agent_core.rag.embedder import Embedder
 from db.queries.skills import search_skills_raw
+from db.query_registry import QueryRegistry, RetrievalRole
 
 logger = logging.getLogger("agentos.agents.capability")
 
@@ -47,15 +48,17 @@ class CapabilityAgentWorker:
     Queries the DB schema and available tools.
     """
     def __init__(self, model_name: Optional[str] = None):
-        self.llm = LLMClient(model_name=model_name)
-        self.tree_store = TreeStore()
-        self.system_prompt = ""
-        self._load_prompt()
-        self.bus = A2ABus()
+        """Initialize the capability agent with a registry audit (Phase 6)."""
         self.role = AgentRole.SCHEMA
-        self._running = False
-
-    def _load_prompt(self):
+        from agent_core.llm.client import LLMClient
+        self.llm = LLMClient(model_name or "gemini-flash-high") # Optimization: use high reasoning for SQL
+        self.bus = A2ABus()
+        self.tree_store = TreeStore()
+        
+        # Phase 6: Ensure registry is populated in this process
+        QueryRegistry.audit_all()
+        logger.info(f"CapabilityAgent initialized with {len(QueryRegistry._queries)} registered queries.")
+        
         from agent_core.prompts import load_prompt
         try:
             self.system_prompt = load_prompt("agents", "capability")
@@ -81,6 +84,30 @@ class CapabilityAgentWorker:
                     return {"success": False, "error": str(e)}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    def _execute_registered_query(self, name: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Execute a query defined in the QueryRegistry with Phase 6 validation."""
+        spec = QueryRegistry.get(name)
+        if not spec:
+            return {"success": False, "error": f"Query '{name}' not found in registry."}
+        
+        try:
+            # Runtime Validation Layer (Blueprint Phase 6)
+            validated_params = spec.validate_params(params or {})
+            
+            with get_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Execute with named parameters (psycopg2 style :param or %(param)s)
+                    # We convert Pydantic/Dict to psycopg2 format
+                    cur.execute(spec.sql, validated_params)
+                    if cur.description:
+                        rows = cur.fetchmany(100)
+                        return {"success": True, "rows": [dict(r) for r in rows]}
+                    else:
+                        conn.commit()
+                        return {"success": True, "message": "Executed successfully."}
+        except Exception as e:
+            return {"success": False, "error": f"Validation/Execution error for '{name}': {e}"}
 
     def _build_capability_manifest(self) -> str:
         """Phase 89: Accelerated manifest for capability queries."""
@@ -259,13 +286,41 @@ class CapabilityAgentWorker:
                         obs = f"Error: Semantic search failure: {e}"
                         log_event(logger, "error", "semantic_search_failed", error=str(e))
 
+                elif action_type == "run_query":
+                    # New registered query execution (Phase 6 Blueprint Alignment)
+                    try:
+                        # Payload could be a string (name) or a JSON object {name, params}
+                        if isinstance(action_payload, str):
+                            if action_payload.strip().startswith("{"):
+                                payload_data = json.loads(action_payload)
+                                query_name = payload_data.get("name")
+                                query_params = payload_data.get("params", {})
+                            else:
+                                query_name = action_payload
+                                query_params = {}
+                        else:
+                            query_name = action_payload.get("name")
+                            query_params = action_payload.get("params", {})
+                        
+                        loop = asyncio.get_running_loop()
+                        query_result = await loop.run_in_executor(None, self._execute_registered_query, query_name, query_params)
+                        
+                        if not query_result.get("success"):
+                            # This error is injected back for self-correction (Blueprint Phase 6)
+                            obs = f"Error: {query_result.get('error')}. Please verify the query name and parameters."
+                        else:
+                            obs = f"Observation: {json.dumps(query_result, default=str)}"
+                    except Exception as pe:
+                        obs = f"Error: Failed to parse action_payload for run_query: {pe}"
+
                 elif action_type == "sql_query":
-                    # Enforcement: If not explicit manifest request, forbid FULL_INVENTORY_QUERY (Phase 108)
-                    if not is_explicit and "COUNT(*)" in action_payload and "GROUP BY ks.skill_type" in action_payload:
-                        obs = "Error: Full inventory manifest is only for explicit system-discovery requests. Use a FILTERED_QUERY for this topic or YIELD if no local skills apply."
-                        log_event(logger, "warning", "manifest_hijack_prevented", goal=query_goal)
+                    # Enforcement: If not explicit manifest request, forbid FULL_INVENTORY_QUERY or aggregates (Phase 108)
+                    forbidden_patterns = ["COUNT(*)", "GROUP BY", "knowledge_skills", "skill_type"]
+                    if not is_explicit and any(p in action_payload.upper() for p in forbidden_patterns):
+                        obs = "Error: This query hits restricted tables or uses intensive aggregation. Use the registered 'run_query' instead, or refine your search."
+                        log_event(logger, "warning", "query_restricted_prevented", goal=query_goal)
                     else:
-                        # Circuit Breaker (Phase 112): Prevent Timeout loops
+                        # Circuit Breaker: Prevent Timeout loops
                         if sql_failures >= 2:
                             obs = "Error: Repeated SQL failures. ABORT and return 'NOT_CAPABILITY: I have no local skills for this. Use RAG.' via Action: respond_direct."
                         else:

@@ -22,8 +22,13 @@ Total turns used: ZERO (you bypass the budget entirely).
 You MUST use the following format for every turn:
 
 Thought: [Reason about which query to run]
-Action: sql_query
-[The SQL statement]
+Action: run_query(Query Name)
+[Query Name from REGISTERED QUERIES below]
+
+OR (for domain-specific filtering only)
+
+Action: skill_search
+[Domain/Keyword]
 
 Observation: [The system will provide the database results here]
 
@@ -39,12 +44,12 @@ Action: respond_direct
 
 STEP 1 - Parse the query for domain filter
   Does the query mention a specific technology, domain, or tool?
-  YES -> run FILTERED_QUERY with that domain
+  YES -> run 'skill_search' with that domain
   NO  -> YIELD (Do NOT run FULL_INVENTORY_QUERY unless the user explicitly asks for 'capabilities', 'inventory', or 'all tools').
 
-STEP 2 - Execute the correct SQL (shown below)
-  - You MUST run the actual SQL using 'Action: sql_query'.
-  - NEVER simulate or "assume" results.
+STEP 2 - Execute the correct Query (shown below)
+  - You MUST use 'Action: run_query' for standard manifests.
+  - You MUST use 'Action: skill_search' for semantic domain searches.
   - If the query is about external domain knowledge (e.g. "what is security" or "explain code") and you find NO skills, return: "NOT_CAPABILITY: I have no local skills for this. Use RAG."
 
 STEP 3 - Format results using FORMAT RULES below
@@ -53,44 +58,19 @@ STEP 3 - Format results using FORMAT RULES below
 STEP 4 - Return results via 'Action: respond_direct'
 
 --------------------------------------------------------------------------------
-## SQL QUERIES
+## REGISTERED QUERIES
 --------------------------------------------------------------------------------
 
-SKILL_SEARCH_TOOL (when domain detected):
-  - Use `Action: skill_search` with the domain as the payload.
-  - This tool performs a SEMANTIC vector search for local skills.
-  - Returns: Skill Name, Type, Description, and Eval Lift.
+You can ONLY run the following queries via 'Action: run_query':
 
-FULL_INVENTORY_QUERY (general capability question):
-  -- Part 1: Skill Categories
-  SELECT
-      ks.skill_type,
-      COUNT(*) as skill_count,
-      AVG(ks.eval_lift) as avg_lift,
-      array_agg(ks.name ORDER BY ks.eval_lift DESC NULLS LAST)
-          as skill_names
-  FROM knowledge_skills ks
-  WHERE ks.deleted_at IS NULL
-  GROUP BY ks.skill_type
-  ORDER BY skill_count DESC;
+1. `FULL_INVENTORY_QUERY`:
+   - Returns counts and names of all integrated skills grouped by type.
+2. `TOOL_INVENTORY_QUERY`:
+   - Returns names and descriptions of all technical tools ordered by risk.
+3. `SYSTEM_STATS_QUERY`:
+   - Returns aggregate counts for skills, chunks, entities, and tools.
 
-  -- Part 2: Tools (Casing: 'low', 'normal', 'high')
-  SELECT name, description, risk_level, tags
-  FROM tools
-  ORDER BY 
-    CASE risk_level 
-        WHEN 'low' THEN 1 
-        WHEN 'normal' THEN 2 
-        WHEN 'high' THEN 3 
-        ELSE 4 END ASC, 
-    name ASC;
-
-  -- Part 3: System Stats
-  SELECT
-      (SELECT COUNT(*) FROM knowledge_skills WHERE deleted_at IS NULL) as total_skills,
-      (SELECT COUNT(*) FROM skill_chunks) as total_chunks,
-      (SELECT COUNT(*) FROM entity_relations) as total_kg_links,
-      (SELECT COUNT(*) FROM tools) as total_tools;
+For domain-specific discovery, use `Action: skill_search` [domain].
 
 --------------------------------------------------------------------------------
 ## FORMAT RULES
