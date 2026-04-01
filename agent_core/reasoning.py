@@ -103,9 +103,16 @@ def parse_thought(response_text: str) -> str:
     Harden: Only capture as a 'thought' if an 'Action:' block follows it, 
     otherwise it's likely the final answer itself.
     """
-    match = re.search(r"Thought:\s*(.*?)(?=\nAction:)", response_text, re.DOTALL)
+    # 1. Flexible lookahead for Action: (case insensitive, optional newline)
+    match = re.search(r"Thought:\s*(.*?)(?=\s*Action:)", response_text, re.IGNORECASE | re.DOTALL)
     if match:
         return match.group(1).strip()
+    
+    # 2. If no Action: found, it might be a direct answer. 
+    # Do NOT treat the whole thing as a thought if it lacks the Thought: prefix.
+    if response_text.strip().lower().startswith("thought:"):
+        return response_text.strip()[8:].strip()
+    
     return ""
 
 def strip_reasoning_markers(text: str) -> str:
@@ -129,7 +136,7 @@ def strip_reasoning_markers(text: str) -> str:
     return text.strip()
 def normalize_thought(thought_text: Optional[str]) -> str:
     """
-    Phase 89: Robustly clean internal model turn markers and normalize whitespace.
+    Phase 89/103: Robustly clean internal model turn markers and normalize whitespace.
     Strips variants like **[Turn 1/4]**, [Turn 1 / 4], Thought: [Turn 1/4], etc.
     """
     if not thought_text:
@@ -138,14 +145,12 @@ def normalize_thought(thought_text: Optional[str]) -> str:
     import re as _re
     text = thought_text
     
-    # 1. Multi-line repeated turn marker stripping (Power Regex)
-    # Handles: bolding, spacing, brackets, and case-insensitivity at start of string or newlines
-    text = _re.sub(r"(?im)^\s*(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*", "", text)
-    
-    # 2. Inline global turn marker stripping (Backup for models that inject mid-sentence)
+    # 1. Multi-line/Inline repeated turn marker stripping (Power Regex)
+    # Handles: bolding, spacing, brackets, and case-insensitivity any location (Global)
+    # Matches: [Turn 1/5], [Iteration 2 / 10], **Step 1/3**, etc.
     text = _re.sub(r"(?i)(?:\*\*)?\[?\s*(?:turn|iteration|step)\s+\d+\s*/\s*\d+\s*\]?(?:\*\*)?:?\s*", "", text)
-
-    # 3. Normalize whitespace (Max two newlines, max one space)
+    
+    # 2. Normalize whitespace (Max two newlines, max one space)
     text = _re.sub(r"\n{3,}", "\n\n", text)
     text = _re.sub(r"[ \t]{2,}", " ", text)
     

@@ -208,18 +208,18 @@ class ResearchAgentWorker:
                 if not hasattr(self, "_last_published_thought"):
                     self._last_published_thought = ""
 
-                if thought_text and should_publish(thought_text, self._last_published_thought):
+                if thought_text:
                     clean_thought = normalize_thought(thought_text)
-                    # Do NOT add turn_label — normalize_thought already removed markers
-                    await self.bus.publish(self.role.value, {
-                        "type": "thought",
-                        "content": clean_thought,
-                        "session_id": session_id
-                    })
-                    self._last_published_thought = clean_thought
-                elif thought_text:
-                    log_event(logger, "debug", "thought_skipped", 
-                              node_id=task.id, turn=i+1)
+                    if should_publish(clean_thought, self._last_published_thought):
+                        await self.bus.publish(self.role.value, {
+                            "type": "thought",
+                            "content": clean_thought,
+                            "session_id": session_id
+                        })
+                        self._last_published_thought = clean_thought
+                    else:
+                        log_event(logger, "debug", "thought_skipped_duplicate", 
+                                  node_id=task.id, turn=i+1)
 
                 # Fixing [Continuing research...] placeholder becoming a result
                 if not response_text or response_text.strip() == "":
@@ -250,8 +250,16 @@ class ResearchAgentWorker:
                 except Exception as e:
                     logger.error(f"Failed to log assistant thought: {e}")
                 
+                # Phase 103: Support clarifying nudge if model fails to 'act'
                 action_data = parse_react_action(response_text)
-                
+                if not action_data and i < max_iterations - 1:
+                    logger.warning(f"No action parsed on turn {i+1}. Injecting ReAct format nudge. node_id={task.id}")
+                    messages.append({
+                        "role": "user", 
+                        "content": "Observation: I didn't see an 'Action:' line in your last response. Remember to follow the Thought/Action format exactly for every turn."
+                    })
+                    continue
+
                 rl_meta = task.payload.get("rl_metadata", {})
 
                 if not action_data:
