@@ -2,7 +2,7 @@
 core/config.py
 ==============
 Application settings loaded from environment variables.
-All config access goes through this module — never call
+All config access goes through this module \u2014 never call
 os.getenv() directly in agent or tool files.
 Raises EnvironmentError at startup if required vars are missing.
 """
@@ -51,12 +51,12 @@ class Settings:
     ollama_model_fast: str
     ollama_model_full: str
     embed_model: str
-    browser_ws_url: str
     log_level: str
     admin_secret: str
     api_token: str
     openrouter_api_key: str
     openrouter_base_url: str
+    online: bool
     
     # --- Keycloak ---
     keycloak_url: str
@@ -139,37 +139,53 @@ def load_settings() -> Settings:
     """Load settings from environment variables with validation."""
     load_dotenv()
     
-    # Resolve DB password via secret files or env
-    pw = resolve_secret("POSTGRES_PASSWORD", "password")
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    db = os.getenv("POSTGRES_DB", "agent_os")
-    user = os.getenv("POSTGRES_USER", "agent")
+    # Identify mode (ONLINE toggle is the single source of truth)
+    is_online = os.getenv("ONLINE", "false").lower() == "true"
     
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        db_url = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
+    # Resolve backend: prioritize toggle defaults, then explicit env override
+    backend = os.getenv("ROUTER_BACKEND")
+    if not backend:
+        backend = "openai" if is_online else "ollama"
 
-    # Resolve Redis details (Phase 85 Container Alignment)
+    # Resolve DB & Redis
+    pw = resolve_secret("POSTGRES_PASSWORD", "password")
+    db_h = os.getenv("POSTGRES_HOST", "localhost")
+    db_p = os.getenv("POSTGRES_PORT", "5432")
+    db_n = os.getenv("POSTGRES_DB", "agent_os")
+    db_u = os.getenv("POSTGRES_USER", "agent")
+    db_url = os.getenv("DATABASE_URL") or f"postgresql://{db_u}:{pw}@{db_h}:{db_p}/{db_n}"
+
     redis_h = os.getenv("REDIS_HOST", os.getenv("REDIS__HOST", "redis"))
     redis_p = os.getenv("REDIS_PORT", "6379")
     redis_db = os.getenv("REDIS_DB", "0")
-    
-    redis_url = os.getenv("REDIS_URL")
-    if not redis_url:
-        # Default to the container name 'redis' instead of loopback
-        redis_url = f"redis://{redis_h}:{redis_p}/{redis_db}"
+    redis_url = os.getenv("REDIS_URL") or f"redis://{redis_h}:{redis_p}/{redis_db}"
 
-    settings = Settings(
-        database_url     = db_url,
-        redis_url        = redis_url,
-        ollama_base_url  = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
-        ollama_model     = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "deepseek/deepseek-r1:free")),
-        ollama_model_nano = os.getenv("OLLAMA_MODEL_NANO", "google/gemma-2-9b-it:free"),
-        ollama_model_fast = os.getenv("OLLAMA_MODEL_FAST", "meta-llama/llama-3-8b-instruct:free"),
-        ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", os.getenv("OLLAMA_MODEL", "deepseek/deepseek-r1:free")),
+    # Determine Models
+    if is_online:
+        # Online Mode Defaults: Cloud-compatible model IDs only
+        def_model = os.getenv("LLM__OPENAI_MODEL", "google/gemini-2.0-flash-001")
+        # In cloud mode, tiers default to Gemini unless explicitly overridden by Cloud-specific vars
+        nano_model = os.getenv("LLM__OPENAI_MODEL_NANO", def_model)
+        fast_model = os.getenv("LLM__OPENAI_MODEL_FAST", def_model)
+    else:
+        # Offline Mode Defaults
+        def_model = os.getenv("OLLAMA_MODEL", "deepseek/deepseek-r1:free")
+        nano_model = os.getenv("OLLAMA_MODEL_NANO", "qwen2.5:0.5b-instruct-q4_K_M")
+        fast_model = os.getenv("OLLAMA_MODEL_FAST", "qwen2.5:1.5b-instruct-q4_K_M")
+
+    return Settings(
+        database_url = db_url,
+        redis_url    = redis_url,
+        online       = is_online,
+        router_backend = backend,
+        
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", os.getenv("OLLAMA_HOST", "http://localhost:11434")),
+        ollama_model    = def_model,
+        ollama_model_nano = nano_model,
+        ollama_model_fast = fast_model,
+        ollama_model_full = os.getenv("OLLAMA_MODEL_FULL", def_model),
+        
         embed_model      = os.getenv("EMBED_MODEL", "mxbai-embed-large"),
-        browser_ws_url   = os.getenv("BROWSER_WS_URL", os.getenv("LIGHTPANDA_WS_URL", "ws://localhost:9222")),
         log_level        = os.getenv("LOG_LEVEL", "INFO"),
         admin_secret     = resolve_secret("ADMIN_SECRET", "change-me-immediately"),
         api_token        = resolve_secret("API_TOKEN", "change-me-immediately"),
@@ -182,47 +198,26 @@ def load_settings() -> Settings:
         chunk_min_tokens = int(os.getenv("CHUNK_MIN_TOKENS", "100")),
         chunk_max_tokens = int(os.getenv("CHUNK_MAX_TOKENS", "250")),
         retrieval_top_k  = int(os.getenv("RETRIEVAL_TOP_K", "4")),
-        
+        router_batch_size = int(os.getenv("ROUTER_BATCH_SIZE", "8")),
+        router_interval_ms = int(os.getenv("ROUTER_INTERVAL_MS", "50")),
+
         mcp_servers = {
-            "filesystem": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-filesystem C:\\Users\\savya"
-            },
-            "memory": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-memory"
-            },
-            "postgres": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-postgres"
-            },
-            "github": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-github"
-            },
-            "fetch": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-fetch"
-            },
+            "filesystem": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-filesystem C:\\Users\\savya"},
+            "memory": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-memory"},
+            "postgres": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-postgres"},
+            "github": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-github"},
+            "fetch": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-fetch"},
             "brave": {
                 "transport": "stdio",
                 "command": "npx @modelcontextprotocol/server-brave-search",
                 "env": {"BRAVE_API_KEY": os.getenv("BRAVE_API_KEY", "")},
-                "description": "Web search via Brave — for news, current events, web facts",
+                "description": "Web search via Brave \u2014 for news, current events, web facts",
                 "fallback_for": ["news", "today", "latest", "current", "weather"]
             },
-            "puppeteer": {
-                "transport": "stdio",
-                "command": "npx @modelcontextprotocol/server-puppeteer"
-            },
+            "puppeteer": {"transport": "stdio", "command": "npx @modelcontextprotocol/server-puppeteer"},
         },
-        high_risk_keywords = [
-            "rm ", "sudo", "pip install", "train", "launch",
-            "delete", "format", "chmod", "kill", "reboot",
-            "drop table", "deploy", "npm install", "apt"
-        ]
+        high_risk_keywords = ["rm ", "sudo", "pip install", "train", "launch", "delete", "format", "chmod", "kill", "reboot", "drop table", "deploy", "npm install", "apt"]
     )
-    return settings
 
 settings = load_settings()
 
@@ -236,7 +231,7 @@ PROJECT_LINKS = {
 
 def get_links_markdown() -> str:
     """Return project links as a structured markdown list."""
-    lines = ["## 🔗 Project Links"]
+    lines = ["## \ud83d\udd17 Project Links"]
     for name, url in PROJECT_LINKS.items():
         lines.append(f"- **{name}**: {url}")
     return "\n".join(lines)

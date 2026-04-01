@@ -12,6 +12,7 @@ import json
 import asyncio
 import subprocess
 from agent_core.agents.core.a2a_bus import A2ABus
+from agent_core.reasoning import parse_react_action as _parse_code_action
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
@@ -33,29 +34,7 @@ def _is_safe_command(cmd: str) -> bool:
     c = cmd.strip().lower()
     return not any(c.startswith(b.lower()) or b.lower() in c for b in _BANNED_COMMANDS)
 
-def _parse_code_action(response_text: str) -> Optional[Tuple[str, str]]:
-    """Extended balanced-paren parser for code actions."""
-    header_match = re.search(r"Action:\s*([a-zA-Z0-9_]+)\(", response_text)
-    if not header_match:
-        return None
-
-    action_type = header_match.group(1).strip()
-    start = header_match.end()
-    depth = 1
-    idx = start
-    while idx < len(response_text) and depth > 0:
-        ch = response_text[idx]
-        if ch == '(':
-            depth += 1
-        elif ch == ')':
-            depth -= 1
-        idx += 1
-
-    if depth != 0:
-        return None
-
-    payload = response_text[start:idx - 1].strip()
-    return action_type, payload
+    # Using centralized parser from agent_core.reasoning
 
 class CodeAgentWorker:
     """
@@ -66,6 +45,7 @@ class CodeAgentWorker:
     def __init__(self, model_name: Optional[str] = None, workspace_root: Optional[str] = None):
         self.llm = LLMClient(model_name=model_name)
         self.tree_store = TreeStore()
+        self.bus = A2ABus()
         # self.cache = FractalCache()
         self.workspace_root = Path(workspace_root or os.getcwd()).resolve()
         self.system_prompt: str = ""

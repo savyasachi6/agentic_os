@@ -17,7 +17,7 @@ import asyncio
 import json
 import logging
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from collections import defaultdict
 import numpy as np
 
@@ -118,7 +118,7 @@ class CognitiveRetriever:
 
         # Fast exit — no retrieval needed
         if context_k == 0:
-            return "", []
+            return "", [], strategy
 
         # 3. Query Rewriting (Contextualization)
         rewritten_query = await self._rewrite_query(query, session_ctx)
@@ -155,7 +155,7 @@ class CognitiveRetriever:
         episode_prefix = await self._get_session_episodes(session_id) if session_id else ""
 
         if not results:
-            return episode_prefix, []
+            return episode_prefix, [], strategy
 
         # 8. RRF Fusion and Context Assembly (Precision Phase)
         # Truncate to context_k after RRF
@@ -428,7 +428,10 @@ class CognitiveRetriever:
         try:
             from db.queries.skills import search_skills_raw
             query_vec, _ = await self.embedder.generate_embedding_async(query)
-            hits = search_skills_raw(query_vec, limit=top_k, skill_type=skill_type_filter)
+            
+            loop = asyncio.get_running_loop()
+            hits = await loop.run_in_executor(None, search_skills_raw, query_vec, top_k, skill_type_filter)
+            
             return [
                 {
                     "chunk_id": s.get("chunk_id"),

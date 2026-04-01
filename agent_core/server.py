@@ -192,6 +192,20 @@ async def get_chat_history(session_id: str):
         return {"status": "error", "message": str(e)}
 
 
+@app.delete("/chat/{session_id}")
+async def delete_chat_session(session_id: str):
+    """Permanently delete a chat session and its history from pgvector."""
+    try:
+        vs = VectorStore()
+        await vs.delete_session_async(session_id)
+        # Clear from memory cache if present
+        if session_id in _sessions:
+            del _sessions[session_id]
+        return {"status": "success", "message": f"Session {session_id} deleted."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 # WebSocket chat
 # ---------------------------------------------------------------------------
 @app.websocket("/ws")

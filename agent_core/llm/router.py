@@ -115,6 +115,10 @@ class LLMRouter:
             self._stop_event.clear()
             self._task = asyncio.create_task(self._batch_loop())
             print(f"[LLMRouter] Started with batch_interval={self._batch_interval * 1000.0}ms, max_batch={self._max_batch_size}")
+            
+            # Async validation task (Phase 83 Hardening)
+            if hasattr(self.backend, "validate_models"):
+                 asyncio.create_task(self.backend.validate_models(list(self.tier_models.values())))
 
     def stop(self):
         """Stop the background routing task."""

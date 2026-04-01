@@ -336,12 +336,12 @@ with st.sidebar:
                     
                 first_msg = str(s.get('first_message', 'No message'))[:30]
                 created = str(s.get('created_at', '')).split(' ')[0]
+                is_active = (s_id == st.session_state.session_id)
+                label = f"#{created} - {first_msg}"
                 
-                # Highlight active session
-                is_active = s_id == st.session_state.session_id
-                label = f"**{first_msg}...**\n_{created}_" if not is_active else f"👉 **{first_msg}...**\n_{created}_"
-                
-                col_text, col_del = st.columns([0.78, 0.22])
+                # Wrap each session item in a div for glassmorphism styling
+                st.markdown(f'<div class="session-item {"active" if is_active else ""}">', unsafe_allow_html=True)
+                col_text, col_del = st.columns([0.80, 0.20])
                 
                 with col_text:
                     if st.button(label, key=f"btn_{s_id}", use_container_width=True):
@@ -350,19 +350,15 @@ with st.sidebar:
                         st.rerun()
                 
                 with col_del:
-                    if st.button("🗑️\n ", key=f"del_{s_id}", help="Delete Session", use_container_width=True):
-                        # Optimistic Delete (Phase 7)
+                    if st.button("🗑️", key=f"del_{s_id}", help="Delete Session", use_container_width=True):
                         st.session_state.pending_deletions.add(s_id)
-                        st.toast(f"Session marked for deletion. [Undo?]", icon="🗑️")
-                        
-                        # We trigger a background task to actually delete after 5s
-                        # In Streamlit, we can't easily spawn background threads with undos, 
-                        # so we'll just delete immediately but show the toast.
+                        st.toast(f"Session marked for deletion.", icon="🗑️")
                         if delete_session_api(s_id):
                             if s_id == st.session_state.session_id:
                                 st.session_state.session_id = str(uuid.uuid4())
                                 st.session_state.chat_history = []
                             st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.caption("No historical sessions found.")
         

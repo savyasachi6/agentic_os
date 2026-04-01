@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U agent -d agent_os" ]
       interval: 5s
@@ -31,13 +31,6 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
-    networks:
-      - agentos-net
-
-  browser:
-    image: browserless/chrome:latest
-    ports:
-      - "9222:3000"
     networks:
       - agentos-net
 
@@ -72,8 +65,6 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      BROWSER_WS_URL: ws://browser:3000
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
       TOOLS_API_URL: http://tools-api:9101
       LLM_MODEL: qwen3-vl:8b
       EMBED_MODEL: mxbai-embed-large
@@ -135,8 +126,6 @@ services:
       PYTHONUNBUFFERED: "1"
       LLM_MODEL: qwen3-vl:8b
       OLLAMA_HOST: http://host.docker.internal:11434
-      BROWSER_WS_URL: ws://browser:3000
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     volumes:
       - .:/app
     secrets:
@@ -167,7 +156,7 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: agent
-      KC_DB_PASSWORD_FILE: /run/secrets/db_password
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-password}
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
     ports:

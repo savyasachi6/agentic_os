@@ -51,7 +51,7 @@ class CapabilityAgentWorker:
         """Initialize the capability agent with a registry audit (Phase 6)."""
         self.role = AgentRole.SCHEMA
         from agent_core.llm.client import LLMClient
-        self.llm = LLMClient(model_name or "gemini-flash-high") # Optimization: use high reasoning for SQL
+        self.llm = LLMClient(model_name) # Uses default from settings if None
         self.bus = A2ABus()
         self.tree_store = TreeStore()
         
@@ -67,7 +67,7 @@ class CapabilityAgentWorker:
             self.system_prompt = "You are the CapabilityAgent (SQL). Discover tools and schema."
 
     def _execute_query(self, query: str) -> Dict[str, Any]:
-        """Raw driver code to run the query safely."""
+        """Raw driver code to run the query safely. Should be called via run_in_executor."""
         try:
             with get_db_connection() as conn:
                 try:
@@ -276,7 +276,8 @@ class CapabilityAgentWorker:
                         if is_degraded:
                             obs = "Error: Embedding engine offline. Cannot perform semantic search."
                         else:
-                            skills = search_skills_raw(query_vec, limit=10)
+                            loop = asyncio.get_running_loop()
+                            skills = await loop.run_in_executor(None, search_skills_raw, query_vec, 10)
                             if not skills:
                                 obs = "Observation: No local skills found matching this domain. Use RAG for external knowledge."
                             else:

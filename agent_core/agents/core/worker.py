@@ -91,11 +91,12 @@ class AgentWorker:
                 task = await self.tree_store.dequeue_task_async(self.role, node_id=target_node_id)
                 
                 if task is None:
-                    # If we had a target_node_id but it vanished (claimed by someone else), 
-                    # we should probably do a quick poll anyway.
+                    # Bug 4b: Blind fallback created phantom second attempts.
+                    # Only do blind poll if there was NO specific dispatch target.
                     if target_node_id:
-                        task = await self.tree_store.dequeue_task_async(self.role)
+                        continue # Target was claimed or vanished, move on.
                     
+                    task = await self.tree_store.dequeue_task_async(self.role)
                     if task is None:
                         continue
 

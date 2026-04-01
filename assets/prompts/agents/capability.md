@@ -108,7 +108,7 @@ FOR FULL INVENTORY:
 🟡 NORMAL RISK
 - `{tool_name}` - {description}
 
-🔴 HIGH RISK (requires approval)
+🔴 HIGH RISK
 - `{tool_name}` - {description}
 
 ---

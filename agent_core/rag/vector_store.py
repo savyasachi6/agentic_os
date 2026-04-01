@@ -80,5 +80,8 @@ class VectorStore:
     async def delete_session_async(self, session_id: str):
         from db.queries.thoughts import delete_session
         import asyncio
-        loop = asyncio.get_runing_loop() if hasattr(asyncio, "get_running_loop") else asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, delete_session, session_id)

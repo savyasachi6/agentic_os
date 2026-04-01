@@ -28,7 +28,9 @@ from core.message_bus import A2ABus
 from db.connection import init_db_pool
 
 # Sandbox tools re-enabled (Phase 72)
-from sandbox.browser_tools import handle_browser_navigate, ToolCallRequest, PLAYWRIGHT_AVAILABLE
+import httpx
+from bs4 import BeautifulSoup
+
 
 logger = logging.getLogger("agentos.agents.rag")
 
@@ -354,28 +356,40 @@ class ResearchAgentWorker:
                         except Exception as e:
                             obs = f"Observation: web_search error: {e}"
                 elif action_type == "web_fetch":
-                    if not PLAYWRIGHT_AVAILABLE:
-                        obs = "Observation: web_fetch unavailable (playwright missing)."
+                    url = self._clean_model_url(p.get("url"))
+                    if not url:
+                        obs = "Observation: Error: No URL provided for web_fetch."
+                    elif not url.startswith(("http://", "https://")):
+                        obs = f"Observation: Error: Invalid URL protocol in '{url}'."
                     else:
-                        url = self._clean_model_url(p.get("url"))
-                        if not url:
-                            obs = "Observation: Error: No URL provided for web_fetch."
-                        elif not url.startswith(("http://", "https://")):
-                            obs = f"Observation: Error: Invalid URL protocol in '{url}'."
-                        else:
-                            try:
-                                log_event(logger, "info", "browser_fetch_start", 
-                                          node_id=task.id, session_id=session_id, url=url)
-                                req = ToolCallRequest(path=url, args={})
-                                # Phase 98: handle_browser_navigate is now async
-                                response = await handle_browser_navigate(req)
-                                if response.success:
-                                    res = response.result
-                                    obs = f"Observation: Success [URL: {res['url']}]\nTitle: {res['title']}\nContent: {res['content']}"
-                                else:
-                                    obs = f"Observation: web_fetch failed: {response.error}"
-                            except Exception as e:
-                                obs = f"Observation: web_fetch error: {e}"
+                        try:
+                            log_event(logger, "info", "web_fetch_start", 
+                                      node_id=task.id, session_id=session_id, url=url)
+                            # Phase 105: Use httpx for lightweight headless fetching
+                            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                                resp = await client.get(url, headers={"User-Agent": "AgentOS/1.0"})
+                                resp.raise_for_status()
+                                
+                                html = resp.text
+                                soup = BeautifulSoup(html, "html.parser")
+                                
+                                # Remove script and style elements
+                                for script_or_style in soup(["script", "style", "header", "footer", "nav"]):
+                                    script_or_style.decompose()
+                                    
+                                # Get clean text
+                                text = soup.get_text(separator="\n")
+                                lines = (line.strip() for line in text.splitlines())
+                                chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                                clean_text = "\n".join(chunk for chunk in chunks if chunk)
+                                
+                                title = soup.title.string.strip() if soup.title else "No Title Found"
+                                if len(clean_text) > 10_000:
+                                    clean_text = clean_text[:10_000] + "\n... [truncated]"
+                                    
+                                obs = f"Observation: Success [URL: {url}]\nTitle: {title}\nContent: {clean_text}"
+                        except Exception as e:
+                            obs = f"Observation: web_fetch error: {e}"
                 else:
                     obs = f"Observation: Unknown action {action_type}"
                 

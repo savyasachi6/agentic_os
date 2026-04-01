@@ -53,9 +53,10 @@ class OpenAIBackend(LLMBackend):
         )
         async def fetch(messages: List[Dict[str, str]]) -> str:
             headers = {
-                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             
             # OpenRouter specific headers for better discoverability and priority
             if "openrouter.ai" in self.base_url:
@@ -72,9 +73,10 @@ class OpenAIBackend(LLMBackend):
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
-                "stop": stop,
                 "stream": use_stream
             }
+            if stop:
+                payload["stop"] = stop
 
             try:
                 if use_stream:

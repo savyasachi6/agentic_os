@@ -37,4 +37,5 @@ bs4
 lxml
 arxiv
 python-json-logger
+duckduckgo-search
 
