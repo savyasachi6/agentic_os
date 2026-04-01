@@ -200,39 +200,49 @@ class WebSearchAction(BaseAction):
     query: str = Field(default="", description="Search query")
     max_results: int = Field(default=5, description="Max results to return")
 
-    async def _do_search(self) -> str:
-        """Phase 104: Use DDGS for lightweight containerless search."""
+    def _do_search_sync(self) -> list:
+        """
+        Run DDGS.text() synchronously.
+        MUST be called via run_in_executor — never called directly from async code,
+        as DDGS is a blocking generator that will stall the event loop.
+        """
         results = []
-        try:
-            # Phase 105: Use DDGS context manager for thread-safe/async-safe searching
-            with DDGS() as ddgs:
-                ddgs_gen = ddgs.text(self.query, max_results=self.max_results)
-                for r in ddgs_gen:
-                    results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
-            
-            if not results:
-                return "WEB_SEARCH_EMPTY\nNo results returned for this query."
-            
-            return "WEB_SEARCH_RESULTS\n" + "\n\n".join(results)
-        except Exception as e:
-            raise RuntimeError(f"DuckDuckGo search failed: {e}")
+        with DDGS() as ddgs:
+            for r in ddgs.text(self.query, max_results=self.max_results):
+                results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
+        return results
 
     async def run_async(self) -> str:
-        """Phase 103: First-class async tool with resilience."""
+        """
+        Async-safe web search. DDGS is a blocking library, so the sync call
+        is offloaded to a thread executor to avoid stalling the event loop.
+        """
         try:
-            return await retry_async(
-                self._do_search,
-                max_attempts=3,
-                base_delay=1.0,
-                cap_delay=10.0,
-                label="ddg_web_search",
+            loop = asyncio.get_event_loop()
+            # Run blocking DDGS call in a thread pool with a 20s hard timeout
+            results: list = await asyncio.wait_for(
+                loop.run_in_executor(None, self._do_search_sync),
+                timeout=20.0,
+            )
+
+            if not results:
+                return (
+                    "Observation: web_search returned no results for this query. "
+                    "The topic may be too recent, too local, or blocked by DuckDuckGo. "
+                    "Try rephrasing or using web_fetch with a known URL."
+                )
+
+            return "Observation: web_search results:\n\n" + "\n\n".join(results)
+
+        except asyncio.TimeoutError:
+            return (
+                "Observation: web_search timed out after 20s. "
+                "DuckDuckGo may be rate-limiting this host. Try again shortly or use web_fetch."
             )
         except Exception as exc:
-            # Normalize failures to structured observations
             return (
-                "WEB_SEARCH_ERROR\n"
-                f"type=ddg_failure\n"
-                f"detail={type(exc).__name__}: {exc}"
+                f"Observation: web_search failed — {type(exc).__name__}: {exc}. "
+                "Try rephrasing the query or using web_fetch with a direct URL."
             )
 
     def run(self) -> str:

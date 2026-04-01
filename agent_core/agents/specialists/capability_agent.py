@@ -110,27 +110,30 @@ class CapabilityAgentWorker:
             return {"success": False, "error": f"Validation/Execution error for '{name}': {e}"}
 
     def _build_capability_manifest(self) -> str:
-        """Phase 89: Accelerated manifest for capability queries."""
+        """Return a factual manifest based on real DB counts. No invented numbers."""
         try:
             with get_db_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT COUNT(*) as count FROM knowledge_skills")
+                    cur.execute("SELECT COUNT(*) as count FROM knowledge_skills WHERE deleted_at IS NULL")
                     skill_count = cur.fetchone()['count']
-                    # SQL Column Guard: replace 'category' with 'skill_type'
-                    cur.execute("SELECT count(DISTINCT skill_type) as count FROM knowledge_skills")
+                    cur.execute("SELECT COUNT(DISTINCT skill_type) as count FROM knowledge_skills WHERE deleted_at IS NULL")
                     cat_count = cur.fetchone()['count']
             
-            res = f"I am your Agentic OS, equipped with **{skill_count} specialized skills** across **{cat_count} types**.\n\n"
-            res += "### 🛠️ Core Toolsets\n"
-            res += "- **Autonomous Research**: Multimodal RAG with semantic search over your local brain.\n"
-            res += "- **SQL Engine**: Direct database introspection and capability mapping.\n"
-            res += "- **Web Sandbox**: Live web search and browser manipulation via Playwright.\n"
-            res += "- **Safe Execution**: Sandboxed Python environment for technical and data tasks.\n\n"
-            res += "Use 'Sync Skills' in the UI to refresh my knowledge base."
-            return res
+            if skill_count == 0:
+                return (
+                    "The knowledge base currently has **0 indexed skills**.\n"
+                    "Use 'Sync Skills' in the UI to index your documents.\n\n"
+                    "Built-in tools: `hybrid_search`, `web_search`, `web_fetch`, `respond_direct`."
+                )
+            
+            return (
+                f"The knowledge base has **{skill_count} indexed skills** across **{cat_count} skill type(s)**.\n"
+                "Use `Action: run_query(FULL_INVENTORY_QUERY)` to see the breakdown by type.\n"
+                "Use `Action: run_query(TOOL_INVENTORY_QUERY)` to list registered tools."
+            )
         except Exception as e:
             log_event(logger, "warning", "manifest_failure", error=str(e))
-            return "I am equipped for RAG, SQL Discovery, Web Search, and Code execution. I can help you search your knowledge base or interact with external tools."
+            return f"Capability manifest unavailable — DB error: {e}. Cannot report skill counts."
 
     async def _process_task(self, task: Node):
         from agent_core.reasoning import parse_react_action
@@ -316,10 +319,14 @@ class CapabilityAgentWorker:
                         query_result = await loop.run_in_executor(None, self._execute_registered_query, query_name, query_params)
                         
                         if not query_result.get("success"):
-                            # This error is injected back for self-correction (Blueprint Phase 6)
-                            obs = f"Error: {query_result.get('error')}. Please verify the query name and parameters."
+                            # Error is injected back for self-correction (Blueprint Phase 6)
+                            obs = f"Observation: Query '{query_name}' failed — {query_result.get('error')}. Do NOT invent results. Report the error to the user."
                         else:
-                            obs = f"Observation: {json.dumps(query_result, default=str)}"
+                            rows = query_result.get("rows", [])
+                            if not rows:
+                                obs = f"Observation: Query '{query_name}' returned 0 rows. The database table is empty or no data matches the criteria. Do NOT invent data."
+                            else:
+                                obs = f"Observation: Query '{query_name}' returned {len(rows)} row(s):\n{json.dumps(rows, default=str)}"
                     except Exception as pe:
                         obs = f"Error: Failed to parse action_payload for run_query: {pe}"
 

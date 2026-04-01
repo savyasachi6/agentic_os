@@ -4,61 +4,91 @@ The Agent OS Appliance is a modular, local-first AI system designed to run compl
 
 ## System Overview
 
-The appliance is structured as a coordinated set of specialized subsystems, each acting as a distinct "bounded context" with its own API and data persistence rules.
+The appliance is structured as a coordinated set of specialized subsystems. The **LangGraph-based CoordinatorAgent** is the central reasoning hub; all specialist work happens in isolated background processes connected via a **Redis A2A Bus**.
 
 ```mermaid
 graph TD
-    User(("User")) -->|WebSocket/API| Core["Agent OS Core (LangGraph)"]
-    Core -->|BridgeAgent| Bus["A2A Bus (Redis)"]
-    Bus -->|Dispatch| Workers["Specialist Workers"]
-    Core -->|Cognitive Retrieval| Memory["Memory & RAG"]
-    Memory -->|Vector Search| pgvector[("Postgres + pgvector")]
-    Workers -->|Process CMD| Sandbox["Tool Sandbox"]
-    Workers -->|Reasoning| LLM["LLM Router"]
-    LLM -->|Batched Inference| Ollama["Ollama/Local LLM"]
-    Sandbox -->|Restricted Ops| FS["Filesystem/System"]
+    User((User)) -->|WebSocket/REST| GW[Gateway\ngateway/server.py]
+    GW --> Core[CoordinatorAgent\nagent_core/agents/core/coordinator.py]
+    Core -->|LangGraph Graph| CG[coordinator_graph.py]
+    Core -->|BridgeAgent| Bus[(Redis A2A Bus\na2a_bus.py)]
+    Bus -->|Dispatch + Heartbeat| Workers[Specialist Workers\nagent_core/agents/specialists/]
+    Core -->|Cognitive Retrieval| CR[CognitiveRetriever\nagent_core/rag/cognitive_retriever.py]
+    CR -->|MSR + Bandit| PG[(Postgres + pgvector)]
+    Workers -->|ReAct Loop| LLM[LLMRouter\nagent_core/llm/router.py]
+    LLM -->|Primary| Ollama[Ollama / LlamaCPP / OpenRouter]
+    LLM -->|Fallback| FallbackOllama[Ollama Fallback]
+    Workers --> CR
+    UI[Streamlit UI\nui/app.py] --> GW
 ```
 
 ## Core Subsystems
 
-### 1. [Agent Core](agents/core/)
+### 1. CoordinatorAgent (`agent_core/agents/core/coordinator.py`)
 
 The central orchestration and communication layer.
 
-- **CoordinatorAgent**: Orchestrates the ReAct loop via LangGraph and `BridgeAgent`.
-- **TreeStore**: Asynchronous execution tree for cross-process task persistence.
-- **BridgeAgent**: Dispatcher that manages the lifecycle of specialist tasks: `BridgeAgent` → `A2ABus` → `AgentWorker`.
-- **Heartbeat Monitoring**: Specialist worker health check in `BridgeAgent.execute()` before dispatch.
+- **Intent Classification**: Calls `agent_core/intent/classifier.py:classify_intent()` → `Intent` enum.
+- **LangGraph Orchestration**: Executes `agent_core/graph/coordinator_graph.py` — a typed `StateGraph` over `AgentState`.
+- **BridgeAgent**: Inner class that dispatches tasks to specialists via `TreeStore` + `A2ABus`. Performs a Redis **heartbeat check** before dispatch — fails fast if the worker is offline.
+- **RL Metadata**: Collects `rl_metadata` (arm_index, top_k, depth) across turns for future bandit reward reporting.
+- **Thought Streaming**: Subscribes to all specialist `thought` events on the A2A Bus and forwards them to the client via `status_callback`.
 
-### 2. [Memory & RAG](agent_core/rag/)
+### 2. Memory & Retrieval (`agent_core/rag/`)
 
 The long-term storage and knowledge retrieval engine.
 
-- **CognitiveRetriever**: Single in-process component replacing `HybridRetriever`.
-- **MSR Architecture**: Multi-layered search: **M**emory (thoughts), **S**kills (registry), **R**elational (recursive CTE walk).
-- **RRF Fusion**: Reciprocal Rank Fusion of results with a recency multiplier.
+- **CognitiveRetriever** (`cognitive_retriever.py`): Single in-process component replacing `HybridRetriever`. Called by specialist workers (not the coordinator directly).
+- **Bandit Strategy Selection**: Uses an embedded `LinUCBBandit` (8-arm) to pick the optimal retrieval strategy based on intent features (dimension-9 context vector).
+- **MSR Layers**: Parallel **M**emory (thoughts), **S**kills (pgvector), **R**elational (recursive CTE walk over `skill_relations` / `entity_relations`).
+- **RRF Fusion**: Reciprocal Rank Fusion across layers + 1.25× recency multiplier.
+- **Neighbor Expansion**: Fetches ±1 adjacent `skill_chunks` for each matched skill result.
+- **Query Rewriting**: LLM-assisted rewrite at `ModelTier.NANO` when session context exists.
 
-### 3. [Specialists](agents/)
+### 3. Specialists (`agent_core/agents/specialists/`)
 
-Autonomous workers that perform specific domain tasks.
+Autonomous background workers performing specific domain tasks over the ReAct loop.
 
-- **Agent Roles**: Specialized workers for `rag`, `tools`, `schema`, `email`, `productivity`, `specialist`, and `planner`.
-- **ReAct Loop**: Workers use a strict `Thought: / Action:` format.
-- **Integration**: The `rl_router` service exists but is currently a standalone component NOT wired into the coordinator dispatch path.
+| Role | Class | File |
+|---|---|---|
+| `rag` | `ResearchAgentWorker` | `rag_agent.py` |
+| `tools` | `CodeAgentWorker` | `code_agent.py` |
+| `schema` | `CapabilityAgentWorker` | `capability_agent.py` |
+| `email` | `EmailAgent` | `email_agent.py` |
+| `planner` | `PlannerAgentWorker` | `planner.py` |
+| `specialist` | `ExecutorAgentWorker` | `executor.py` |
+| `productivity` | `ProductivityAgent` | `productivity.py` |
+
+Each worker: (1) listens on the A2A Bus, (2) runs a `Thought: / Action:` ReAct loop, (3) updates `NodeStatus` in the `TreeStore`.
+
+### 4. LLM Router (`agent_core/llm/router.py`)
+
+Priority-sorted micro-batching router.
+
+- **Backends**: Ollama (default), LlamaCPP, OpenAI/OpenRouter — selected via `ROUTER_BACKEND` env var.
+- **Failover**: Cloud backend failures (401/429) trigger automatic failover to local Ollama with a 5-minute cooldown.
+- **Model Tiers**: `NANO` (rewriting), `FAST` (summaries), `FULL` (reasoning). `NANO` requests get priority elevation.
+
+### 5. RL Router (`rl_router/`)
+
+**Standalone** microservice — currently embedded in `CognitiveRetriever` as an in-process `LinUCBBandit`. See [`06-rl-router.md`](06-rl-router.md) for details.
 
 ## Data Flow: Reasoning Loop
 
-1. **Input**: User sends a message via WebSocket/API.
-2. **Context Retrieval**: Coordinator asks RAG specialist for relevant knowledge.
-3. **Reasoning Turn**: Coordinator sends a batched request to the LLM.
-4. **Action**: If the LLM proposes a tool call, Coordinator enqueues it in the TreeStore and notifies the specialist via A2ABus.
-5. **Worker Execution**: The specialist (e.g., Code Agent) processes the task and updates its status.
-6. **Observation**: Coordinator monitors status, logs result, and proceeds until a Final Answer.
+1. **Input**: User sends a message via WebSocket → `gateway/server.py`.
+2. **Classification**: `CoordinatorAgent` classifies intent via `IntentClassifier`.
+3. **LangGraph**: `coordinator_graph.py` determines which specialist to call.
+4. **Dispatch**: `BridgeAgent` checks heartbeat, creates a `Node` in TreeStore, publishes to A2A Bus.
+5. **Worker Execution**: Specialist runs its ReAct loop (retrieval → LLM → tools), updates `NodeStatus.DONE`.
+6. **Observation**: `BridgeAgent` polls the TreeStore and returns the node result.
+7. **Final Answer**: Coordinator extracts `final_response` from `AgentState` and streams it to the client.
 
 ## Security Model
 
-- **Identity**: Services authenticate internally via mTLS or shared JWT secrets.
-- **Tool Policing**: Every tool call is audited and checked against a task-specific policy.
-- **Isolation**: Shell and filesystem commands run in ephemeral subprocesses or containers via the Sandbox.
+- **Identity**: Services authenticate via JWT tokens (gateway enforces auth).
+- **Tool Policing**: Tool calls are audited against a task-specific risk policy (`RiskLevel.LOW/NORMAL/HIGH`).
+- **Isolation**: Shell and filesystem commands run within the `sandbox/` execution environment.
+- **Fail-Fast Dispatch**: Coordinator never blocks on offline specialists — heartbeat check before dispatch ensures immediate error responses instead of 600s timeouts.
 
-> Last updated: arc_change branch
+> Last updated: arc_change branch — verified against source
+
