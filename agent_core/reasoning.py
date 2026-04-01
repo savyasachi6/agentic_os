@@ -19,7 +19,11 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     # 1. Triple-quote respond_direct (Phase 102 Hardening)
     # This is the highest priority for final results.
     # Matches: Action: respond_direct(message="""\n...\n""")
-    tq_match = re.search(r"Action:\s*respond_direct\s*\(\s*message\s*=\s*\"\"\"(.*?)\"\"\"\s*\)", response_text, re.DOTALL)
+    tq_match = re.search(
+        r'Action:\s*respond_direct\s*\(\s*message\s*=\s*"""(.*?)"""\s*\)',
+        response_text,
+        re.DOTALL
+    )
     if tq_match:
         return "respond_direct", tq_match.group(1).strip()
 
@@ -109,11 +113,20 @@ def strip_reasoning_markers(text: str) -> str:
     Strips 'Thought:' and 'Action:' prefixes/blocks from a final response 
     to provide a clean output to the user.
     """
-    # Remove everything after and including the first Action: (if it's a final response, we don't want the action block)
-    text = re.sub(r"\n?Action:\s*.*", "", text, flags=re.DOTALL).strip()
-    # Remove Thought: prefix but keep the content if it's the only thing left
-    text = re.sub(r"^Thought:\s*", "", text, flags=re.IGNORECASE).strip()
-    return text
+    # Priority: extract respond_direct payload if present
+    tq = re.search(
+        r'Action:\s*respond_direct\s*\(\s*message\s*=\s*"""(.*?)"""\s*\)',
+        text,
+        re.DOTALL
+    )
+    if tq:
+        return tq.group(1).strip()
+
+    # Remove tool Action: lines only — NOT with re.DOTALL
+    text = re.sub(r'\nAction:\s*(?!respond_direct)[^\n]*', '', text)
+    # Remove Thought: prefix lines
+    text = re.sub(r'(?m)^Thought:\s*', '', text)
+    return text.strip()
 def normalize_thought(thought_text: Optional[str]) -> str:
     """
     Phase 89: Robustly clean internal model turn markers and normalize whitespace.

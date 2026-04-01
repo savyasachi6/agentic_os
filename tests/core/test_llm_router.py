@@ -2,8 +2,8 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-from agent_core.llm_router.router import LLMRouter
-from agent_core.llm_router.models import LLMRequest
+from agent_core.llm.router import LLMRouter
+from agent_core.llm.models import LLMRequest
 
 def test_llm_router_singleton():
     """Verify that get_instance returns a singleton."""

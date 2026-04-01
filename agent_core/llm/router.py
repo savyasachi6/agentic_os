@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 logger = logging.getLogger("agentos.llm.router")
 
 from agent_core.config import settings
-from .backends import LLMBackend, OllamaBackend, LlamaCPPBackend
+from .backends import LLMBackend, OllamaBackend, LlamaCPPBackend, OpenAIBackend
 
 from .models import LLMRequest, LLMResponse, BatchGroup, Priority, ModelTier
 
@@ -61,23 +61,25 @@ class LLMRouter:
         # Determine backend based on configuration
         backend_type = getattr(settings, "router_backend", "ollama")
         if backend_type == "llama-cpp":
-            from .backends import LlamaCPPBackend
             print(f"[LLMRouter] Configuring Native Llama-CPP backend with {getattr(settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')}")
             self.backend: LLMBackend = LlamaCPPBackend(
                 model_path=getattr(settings, 'llama_cpp_model_path', 'models/qwen3-vl-8b.gguf')
             )
         elif backend_type in ["openai", "openrouter"]:
-            from .backends import OpenAIBackend
             print(f"[LLMRouter] Configuring High-Fidelity Remote Backend ({backend_type})")
             self.backend: LLMBackend = OpenAIBackend(
                 base_url=settings.openrouter_base_url,
                 api_key=settings.openrouter_api_key
             )
         else:
-            from .backends import OllamaBackend
             self.backend: LLMBackend = OllamaBackend(
                 base_url=getattr(settings, "ollama_base_url", "http://localhost:11434")
             )
+        
+        # Initialize fallback backend (Ollama) regardless of primary (Phase 102 Hardening)
+        self.fallback_backend: LLMBackend = OllamaBackend(
+            base_url=getattr(settings, "ollama_base_url", "http://localhost:11434")
+        )
         
         self.batch_manager = BatchManager(
             batch_interval_ms=int(self._batch_interval * 1000), 
@@ -86,6 +88,8 @@ class LLMRouter:
         self.pending_futures: Dict[str, asyncio.Future] = {}
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
+        self._last_cloud_error_time = 0.0
+        self._cloud_cooldown_seconds = 300.0 # 5 minute cooldown on 401/429
 
         # Tier → model configuration
         self.tier_models = {
@@ -217,19 +221,55 @@ class LLMRouter:
         for key, group in groups.items():
             messages_batch = [req.messages for req in group.requests]
             
+            # Currently taking the temperature and stop sequences from the first request in group
+            temp = group.requests[0].temperature if group.requests else 0.7
+            stop_seqs = group.requests[0].stop if group.requests else None
+            
+            # Check circuit breaker (Phase 102 Hardening)
+            is_cloud = isinstance(self.backend, OpenAIBackend)
+            current_backend = self.backend
+            
+            if is_cloud and (time.time() - self._last_cloud_error_time) < self._cloud_cooldown_seconds:
+                logger.warning("[LLMRouter] Cloud backend is in cooldown. Falling back to Ollama.")
+                current_backend = self.fallback_backend
+                # Override models for the fallback backend
+                group_model = settings.ollama_model # Use default local model
+            else:
+                group_model = group.model
+
             try:
-                # Send to backend
-                # Currently taking the temperature and stop sequences from the first request in group
-                temp = group.requests[0].temperature if group.requests else 0.7
-                stop_seqs = group.requests[0].stop if group.requests else None
-                
-                results = await self.backend.generate_batch(
-                    messages_batch=messages_batch, 
-                    model=group.model, 
-                    max_tokens=group.max_tokens,
-                    temperature=temp,
-                    stop=stop_seqs
-                )
+                try:
+                    results = await current_backend.generate_batch(
+                        messages_batch=messages_batch, 
+                        model=group_model, 
+                        max_tokens=group.max_tokens,
+                        temperature=temp,
+                        stop=stop_seqs
+                    )
+                except Exception as e:
+                    # Detect fatal cloud errors (401, 429)
+                    err_str = str(e).lower()
+                    is_fatal_cloud = any(x in err_str for x in ["401", "unauthorized", "429", "rate limit", "insufficient_quota", "quota_exceeded"])
+                    
+                    if is_cloud and current_backend != self.fallback_backend:
+                        logger.error(f"[LLMRouter] Cloud backend failed: {e}. Attempting failover to Ollama.")
+                        if is_fatal_cloud:
+                            self._last_cloud_error_time = time.time()
+                        
+                        try:
+                            # Immediate retry with local fallback
+                            results = await self.fallback_backend.generate_batch(
+                                messages_batch=messages_batch,
+                                model=settings.ollama_model,
+                                max_tokens=group.max_tokens,
+                                temperature=temp,
+                                stop=stop_seqs
+                            )
+                        except Exception as fe:
+                            logger.error(f"[LLMRouter] Fallback also failed: {fe}")
+                            raise fe
+                    else:
+                        raise e
                 
                 # Demux and resolve futures
                 for idx, req in enumerate(group.requests):

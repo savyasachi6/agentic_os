@@ -176,6 +176,18 @@ class ResearchAgentWorker:
                 thought_text: str = ""
                 response_text: str = ""
                 
+                # Explicit Last Turn Nudge (Phase 87 Alignment)
+                if i == max_iterations - 2:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "You have ONE turn remaining. After receiving the next "
+                            "Observation, you MUST call "
+                            'respond_direct(message=""" ... """) '
+                            "with your complete final answer. Do not call any more tools."
+                        )
+                    })
+
                 try:
                     response_text = await self.llm.generate_async(messages, session_id=session_id)
                 except Exception as exc:
@@ -198,10 +210,10 @@ class ResearchAgentWorker:
 
                 if thought_text and should_publish(thought_text, self._last_published_thought):
                     clean_thought = normalize_thought(thought_text)
-                    turn_label = f"**[Turn {i+1}/{max_iterations}]**\n\n"
+                    # Do NOT add turn_label — normalize_thought already removed markers
                     await self.bus.publish(self.role.value, {
                         "type": "thought",
-                        "content": turn_label + clean_thought,
+                        "content": clean_thought,
                         "session_id": session_id
                     })
                     self._last_published_thought = clean_thought
@@ -209,22 +221,21 @@ class ResearchAgentWorker:
                     log_event(logger, "debug", "thought_skipped", 
                               node_id=task.id, turn=i+1)
 
-                # Explicit Last Turn Nudge (Phase 87 Alignment)
-                if i == max_iterations - 1:
-                     messages.append({
-                         "role": "user", 
-                         "content": "CRITICAL: This is your LAST TURN. Based on the tools called so far, provide a final BEST-EFFORT response to the query. Do not call any more tools."
-                     })
-
+                # Fixing [Continuing research...] placeholder becoming a result
                 if not response_text or response_text.strip() == "":
-                    if thinking_match:
-                        # Model is still thinking, provide a standard shim for continuation
-                        response_text = "[Research reasoning in progress...]"
+                    if i < max_iterations - 1:
+                        logger.warning(
+                            f"LLM returned empty response on turn {i+1}. "
+                            f"Skipping turn. node_id={task.id}"
+                        )
+                        continue   # Skip turn — do NOT append garbage to messages
                     else:
-                        logger.warning(f"LLM returned zero content and zero thinking. Turn {i+1}. node_id={task.id}")
-                        if i == 0:
-                            raise ValueError("LLM returned a completely empty response. Possible timeout or context window issue.")
-                        response_text = "[Continuing research...]"
+                        await self.tree_store.update_node_status_async(
+                            task.id,
+                            NodeStatus.DONE,
+                            result={"message": "I was unable to generate a response for this query. Please try again."}
+                        )
+                        return
 
 
                 messages.append({"role": "assistant", "content": response_text})

@@ -2,7 +2,7 @@
 dev/checkpoints/
 __pycache__/
 *.pyc
-#.env
+.env
 
 # Large model files — store locally, never commit
 dev/models/

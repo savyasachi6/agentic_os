@@ -146,7 +146,7 @@ class OpenAIBackend(LLMBackend):
         for r in results:
             if isinstance(r, Exception):
                 logger.error("[OpenAIBackend] Batch item failed: %s", r)
-                processed.append(f"[Backend Error: {r}]")
+                raise r  # Propagate the error so the LLMRouter can handle failover
             else:
                 processed.append(str(r))
         return processed
