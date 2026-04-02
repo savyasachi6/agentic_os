@@ -9,7 +9,7 @@ import json
 import logging
 import asyncio
 import redis.asyncio as redis
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator, Optional, List
 from agent_core.config import settings
 
 logger = logging.getLogger("agentos.agents.a2a_bus")
@@ -28,6 +28,10 @@ class A2ABus:
             logger.warning(f"A2ABus failed to connect to Redis at {url}: {e}. Falling back to degraded mode.")
             self.r = None
             self._connected = False
+
+    def is_connected(self) -> bool:
+        """Checks if the bus is connected to Redis."""
+        return self._connected and self.r is not None
     
     async def send(self, target_agent: str, payload: Dict[str, Any]):
         """Publishes a message to a specific agent's channel."""
@@ -124,6 +128,32 @@ class A2ABus:
                         logger.error(f"Failed to handle subscription message: {e}")
         except Exception as e:
             logger.warning(f"A2ABus subscription failed for {topic}: {e}")
+    
+    # --- Session History Methods (Migrated from core.message_bus) ---
+
+    async def push_session_turn(self, session_id: str, turn: Dict[str, Any], max_turns: int = 20):
+        """Append a completed turn to the session history list in Redis."""
+        if not self.is_connected():
+            return
+        key = f"session:{session_id}:turns"
+        try:
+            await self.r.rpush(key, json.dumps(turn))
+            await self.r.ltrim(key, -max_turns, -1)  # keep last N turns only
+            await self.r.expire(key, 86400)           # TTL: 24 hours
+        except Exception as e:
+            logger.warning(f"push_session_turn failed: {e}")
+
+    async def get_session_turns(self, session_id: str, last_n: int = 5) -> List[Dict]:
+        """Fetch last N turns for a session."""
+        if not self.is_connected():
+            return []
+        key = f"session:{session_id}:turns"
+        try:
+            raw = await self.r.lrange(key, -last_n, -1)
+            return [json.loads(r) for r in raw]
+        except Exception as e:
+            logger.warning(f"get_session_turns failed: {e}")
+            return []
 
     async def close(self):
         """Closes the Redis connection."""

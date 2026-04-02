@@ -190,7 +190,32 @@ async def execute_node(state: AgentState) -> AgentState:
 
     if bridge:
         try:
-            result = await bridge.execute({"query": action_goal}, chain_id=chain_id)
+            # Fetch recent history for specialist context (Phase 115 Bugfix)
+            try:
+                from agent_core.agents.core.a2a_bus import A2ABus
+                bus = A2ABus()
+                session_id = state.get("session_id") or str(chain_id)
+                history = await bus.get_session_turns(session_id, last_n=10)
+            except Exception as he:
+                logger.debug(f"Failed to fetch history for specialist: {he}")
+                history = []
+
+            # Phase 116: Cross-Session Semantic Memory Fetch
+            try:
+                from agent_core.rag.vector_store import VectorStore
+                vs = VectorStore()
+                # Search across ALL sessions (session_id=None) for semantically similar turns
+                v_results, _ = vs.search_thoughts(action_goal, limit=3)
+                vector_memory = [{"content": m["content"], "session_id": m["session_id"]} for m in v_results]
+            except Exception as ve:
+                logger.debug(f"Failed to fetch vector memory: {ve}")
+                vector_memory = []
+
+            result = await bridge.execute({
+                "query": action_goal, 
+                "history": history,
+                "vector_memory": vector_memory # Phase 116 Injection
+            }, chain_id=chain_id)
             # Extract a clean human-readable answer from the specialist result dict.
             # Keys tried in priority order: answer, response, output, content, result.
             clean_answer = (
@@ -295,7 +320,7 @@ async def respond_node(state: AgentState) -> AgentState:
     
     # Store this turn in Redis session history for future retrieval context
     try:
-        from core.message_bus import A2ABus
+        from agent_core.agents.core.a2a_bus import A2ABus
         from langchain_core.messages import HumanMessage
         bus = A2ABus()
         
@@ -304,12 +329,15 @@ async def respond_node(state: AgentState) -> AgentState:
             ""
         )
         
-        await bus.push_session_turn(str(state.get("chain_id", "")), {
-            "user_msg": last_human[:200],
-            "assistant_summary": direct[:200],
+        # Use session_id instead of chain_id for persistent history (Phase 115 Bugfix)
+        session_id = state.get("session_id") or str(state.get("chain_id", ""))
+        await bus.push_session_turn(session_id, {
+            "user_msg": last_human[:2000],
+            "assistant_summary": direct[:2000],
             "skills_used": [state.get("action_name")] if state.get("action_name") else [],
             "intent": state.get("intent", ""),
         })
+
     except Exception as e:
         logger.debug(f"Failed to record session turn: {e}")
 

@@ -29,6 +29,7 @@ CAPABILITY_SINGLE_WORDS = {
     "menu", "commands"
 }
 GREETING_WORDS = {"hi", "hello", "hey", "greetings", "yo", "sup", "hi there", "hello there"}
+AFFIRMATION_WORDS = {"yes", "no", "do it", "go ahead", "proceed", "sure", "yep", "nope", "okay", "ok"}
 
 WEB_ONLY_KEYWORDS = [
     "news", "today", "latest", "breaking", "current events",
@@ -89,6 +90,9 @@ def classify_intent(message: str) -> Intent:
 
     if msg in GREETING_WORDS:
         return Intent.GREETING
+
+    if msg in AFFIRMATION_WORDS or "yes" in msg or "do it" in msg:
+        return Intent.LLM_DIRECT
 
     if any(kw in msg for kw in CODE_KEYWORDS):
         return Intent.CODE_GEN

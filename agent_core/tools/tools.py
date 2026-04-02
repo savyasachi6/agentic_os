@@ -223,32 +223,59 @@ class WebSearchAction(BaseAction):
 
     def _do_search_sync(self) -> list:
         """
-        Run DDGS search synchronously in a thread (never call from async directly).
-
-        Strategy:
-          - News-intent queries  -> ddgs.news()  (datestamped headlines from real outlets)
-          - General queries      -> ddgs.text()  (web pages)
-          - If primary returns nothing, falls back to the other method.
+        Run DDGS search synchronously in a thread (never call from async directly) with retry logic.
+        Hardened for DuckDuckGo API variations (url/href, body/snippet).
         """
-        results = []
-        with DDGS() as ddgs:
-            if self._is_news_query():
-                # ddgs.news() returns {title, url, body, date, source}
-                for r in ddgs.news(self.query, max_results=self.max_results):
-                    date = r.get("date", "")
-                    source = r.get("source", "")
-                    meta = f" [{source}, {date}]" if (source or date) else ""
-                    results.append(
-                        f"### {r['title']}{meta}\nURL: {r['url']}\n{r.get('body', '')}"
-                    )
-                # Fallback: text() if news() returned nothing
-                if not results:
-                    for r in ddgs.text(self.query, max_results=self.max_results):
-                        results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
-            else:
-                for r in ddgs.text(self.query, max_results=self.max_results):
-                    results.append(f"### {r['title']}\nURL: {r['href']}\n{r['body']}")
-        return results
+        import time
+        max_retries = 3
+        backoff = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                results = []
+                from duckduckgo_search import DDGS
+                ddgs = DDGS()
+                
+                if self._is_news_query():
+                    # 1. News search
+                    news_results = ddgs.news(self.query, max_results=self.max_results)
+                    if news_results:
+                        for r in news_results:
+                            date = r.get("date", "")
+                            source = r.get("source", "")
+                            meta = f" [{source}, {date}]" if (source or date) else ""
+                            body = r.get('body', '') or r.get('snippet', '')
+                            url = r.get('url', '') or r.get('href', '')
+                            results.append(f"### {r.get('title', '')}{meta}\nURL: {url}\n{body}")
+                    
+                    # 2. Fallback to text if news() returned nothing
+                    if not results:
+                        text_results = ddgs.text(self.query, max_results=self.max_results)
+                        if text_results:
+                            for r in text_results:
+                                body = r.get('body', '') or r.get('snippet', '')
+                                url = r.get('href', '') or r.get('url', '')
+                                results.append(f"### {r.get('title', '')}\nURL: {url}\n{body}")
+                else:
+                    # 3. Standard Text search
+                    text_results = ddgs.text(self.query, max_results=self.max_results)
+                    if text_results:
+                        for r in text_results:
+                            body = r.get('body', '') or r.get('snippet', '')
+                            url = r.get('href', '') or r.get('url', '')
+                            results.append(f"### {r.get('title', '')}\nURL: {url}\n{body}")
+                
+                if results or attempt == max_retries - 1:
+                    return results
+                    
+            except Exception as e:
+                # If we have retries left, wait and try again
+                if attempt < max_retries - 1:
+                    time.sleep(backoff)
+                    backoff *= 2.0
+                else:
+                    return [f"WEB_SEARCH_ERROR: {str(e)}. The search provider may be rate-limiting access. Try rephrasing."]
+        return []
 
     async def run_async(self) -> str:
         """
@@ -264,9 +291,9 @@ class WebSearchAction(BaseAction):
 
             if not results:
                 return (
-                    "Observation: web_search returned no results for this query. "
-                    "The topic may be too recent, too local, or blocked by DuckDuckGo. "
-                    "Try rephrasing or using web_fetch with a known URL."
+                    "Observation: SEARCH YIELDED 0 RESULTS. This is rarely true for such a topic. "
+                    "PROBABLE CAUSE: Your search query is likely too long, contains too many unrelated topics, or has conversational filler. "
+                    "ACTION: RE-DISTILL the query into the 2-3 CORE NOUNS (e.g. 'Git worktree practices') and retry the web_search immediately. Do NOT conclude that information does not exist."
                 )
 
             return "Observation: web_search results:\n\n" + "\n\n".join(results)

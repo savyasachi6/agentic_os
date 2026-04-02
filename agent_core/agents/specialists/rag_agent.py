@@ -24,7 +24,7 @@ from agent_core.utils.logging_utils import log_event
 from agent_core.utils.thought_utils import normalize_thought, should_publish
 # RAG logic
 from agent_core.rag.cognitive_retriever import CognitiveRetriever
-from core.message_bus import A2ABus
+from agent_core.agents.core.a2a_bus import A2ABus
 from db.connection import init_db_pool
 
 # Sandbox tools re-enabled (Phase 72)
@@ -77,20 +77,42 @@ class ResearchAgentWorker:
         query_goal = task.payload.get("query") or task.payload.get("goal") or task.content or "Unknown Goal"
         session_id = str(task.chain_id)
         
-        # 2. Dynamic Date Injection (Phase 94)
+        # 2. Dynamic Date Injection (Simplified Phase 94)
         current_date_str = datetime.now().strftime("%B %d, %Y")
-        system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
-        # Handle legacy {current_date} placeholder if present
-        system_prompt = system_prompt.replace("{current_date}", current_date_str)
-        
+        system_prompt = self.system_prompt
+        for placeholder in ["{{TODAY}}", "{current_date}"]:
+            system_prompt = system_prompt.replace(placeholder, current_date_str)
         if "Today is" not in system_prompt:
             system_prompt = f"Today is {current_date_str}.\n\n" + system_prompt
+        
+        # 3. Build Message History (Phase 115/116: Cross-Session & Contextual Memory)
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Part A: Semantic memories (from ANY previous session)
+        vector_history = task.payload.get("vector_memory", [])
+        if vector_history:
+            mem_formatted = "Relevant memories from previous chat sessions:\n"
+            for mem in vector_history:
+                m_content = mem.get("content", "")
+                m_sess = mem.get("session_id", "past")
+                if m_content: mem_formatted += f"[{m_sess}]: {m_content}\n"
+            messages.append({"role": "user", "content": mem_formatted.strip()})
 
-        # 3. Build Message History
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Task Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
-        ]
+        # Part B: Recent turns (current session context)
+        history_list = task.payload.get("history", [])
+        if history_list:
+            history_formatted = "Recent Conversation History (current session):\n"
+            for turn in history_list:
+                user_msg = turn.get("user_msg", "")
+                asst_msg = turn.get("assistant_summary", "")
+                if user_msg: history_formatted += f"User: {user_msg}\n"
+                if asst_msg: history_formatted += f"Assistant: {asst_msg}\n"
+            messages.append({"role": "user", "content": history_formatted.strip()})
+
+        messages.append({
+            "role": "user", 
+            "content": f"Current Task Goal: {query_goal}\n\nFull Payload: {json.dumps(task.payload)}"
+        })
 
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.RAG.value}, goal='{query_goal[:50]}...'")
         
@@ -123,24 +145,6 @@ class ResearchAgentWorker:
                 log_event(logger, "info", "research_turn_start", 
                           node_id=task.id, session_id=session_id, turn=i+1, max_turns=max_iterations)
                 loop = asyncio.get_running_loop()
-
-                # Log original user goal as a 'user' thought for memory retrieval
-                try:
-                    query_goal = task.payload.get("goal", task.payload.get("query", ""))
-                    if query_goal:
-                        _uq_emb, _ = await self.retriever.embedder.generate_embedding_async(query_goal[:500])
-                        from db.queries.thoughts import log_thought
-                        from db.connection import get_db_connection
-                        
-                        # Resilience wrap: detect if DB is down and wait/retry once
-                        try:
-                            await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
-                        except Exception as dbe:
-                            logger.warning(f"Initial thought log failed (likely DB restart): {dbe}. Retrying in 2s...")
-                            await asyncio.sleep(2.0)
-                            await loop.run_in_executor(None, log_thought, session_id, "user", query_goal[:500], _uq_emb)
-                except Exception as e:
-                    logger.error(f"Failed to log user query thought: {e}")
 
                 # Check for session history compaction (Gap 5 Closure)
                 try:
@@ -209,14 +213,16 @@ class ResearchAgentWorker:
                     self._last_published_thought = ""
 
                 if thought_text:
-                    clean_thought = normalize_thought(thought_text)
-                    if should_publish(clean_thought, self._last_published_thought):
+                    from agent_core.utils.thought_utils import get_thought_delta
+                    delta = get_thought_delta(thought_text, self._last_published_thought)
+                    if delta:
                         await self.bus.publish(self.role.value, {
                             "type": "thought",
-                            "content": clean_thought,
+                            "content": delta,
                             "session_id": session_id
                         })
-                        self._last_published_thought = clean_thought
+                        # Update the state with the FULL normalized version for the next delta check
+                        self._last_published_thought = normalize_thought(thought_text)
                     else:
                         log_event(logger, "debug", "thought_skipped_duplicate", 
                                   node_id=task.id, turn=i+1)
@@ -239,16 +245,6 @@ class ResearchAgentWorker:
 
 
                 messages.append({"role": "assistant", "content": response_text})
-                
-                # Fix Break 4: Persist thought for future memory retrieval
-                try:
-                    from db.queries.thoughts import log_thought
-                    # Reuse already-instantiated embedder from self.retriever
-                    loop = asyncio.get_running_loop()
-                    _emb_val, _ = await self.retriever.embedder.generate_embedding_async(response_text[:500])
-                    await loop.run_in_executor(None, log_thought, session_id, "assistant", response_text[:500], _emb_val)
-                except Exception as e:
-                    logger.error(f"Failed to log assistant thought: {e}")
                 
                 # Phase 103: Support clarifying nudge if model fails to 'act'
                 action_data = parse_react_action(response_text)
@@ -338,7 +334,7 @@ class ResearchAgentWorker:
                         
                         # Push retrieval metadata back to session so future turns know which skills were consulted
                         await self.bus.push_session_turn(session_id, {
-                            "user_msg": p.get("query", query_goal)[:200],
+                            "user_msg": p.get("query", query_goal)[:1000],
                             "skills_used": retrieved_skills,
                             "intent": task.payload.get("intent", ""),
                             "turn_type": "retrieval",

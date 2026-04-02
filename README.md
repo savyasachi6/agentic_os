@@ -81,11 +81,11 @@ graph TD
 | `agent_core/agents/specialists/` | All specialist worker implementations |
 | `agent_core/rag/` | CognitiveRetriever, Embedder, VectorStore, RAGStore, RetrievalPolicy |
 | `agent_core/llm/` | LLMRouter, LLMClient, Model tiers, Backends |
+| `assets/prompts/` | System prompts for all agents (coordinator, RAG, code, etc.) |
 | `gateway/` | FastAPI entry point |
 | `db/` | TreeStore, models, queries |
 | `rl_router/` | Standalone RL service (LinUCB, rewards, drift, refinement) |
 | `ui/` | Streamlit frontend |
-| `prompts/` | System prompts for all agents |
 | `infra/` | Docker, `.env` templates |
 | `tests/` | Unit and integration tests |
 

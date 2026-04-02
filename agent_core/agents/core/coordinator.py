@@ -192,9 +192,39 @@ class CoordinatorAgent:
         # Guard instantiation
         guard = AgentCallGuard(max_per_agent=2, max_total=8)
 
+        # Fetch recent session history for Coordinator context (Phase 115)
+        history_messages = []
+        try:
+            turns = await self.bus.get_session_turns(self.session_id, last_n=15)
+            for turn in turns:
+                u = turn.get("user_msg", "")
+                a = turn.get("assistant_summary", "")
+                if u: history_messages.append(HumanMessage(content=u))
+                if a: history_messages.append(AIMessage(content=a))
+        except Exception as he:
+            logger.debug(f"Failed to fetch coordinator history: {he}")
+
+        # --- NEW CODE: Fetch History if Memory is Empty (Phase 115 Restoration) ---
+        if not self.state.get("messages"):
+            try:
+                from agent_core.rag.vector_store import VectorStore
+                vs = VectorStore()
+                history = await vs.get_session_history_async(self.session_id)
+                for turn in history:
+                    if turn["role"] == "user":
+                        self.state["messages"].append(HumanMessage(content=turn["content"]))
+                    elif turn["role"] == "assistant":
+                        self.state["messages"].append(AIMessage(content=turn["content"]))
+            except Exception as e:
+                logger.error(f"Failed to load session history from Postgres: {e}")
+
+        # Append current user message
+        self.state["messages"].append(HumanMessage(content=message))
+        # --------------------------------------------------
+
         # LangGraph-based Orchestration (Pattern 4)
         initial_state: AgentState = {
-            "messages": [HumanMessage(content=message)],
+            "messages": list(self.state["messages"]),
             "plan": [],
             "relational_context": {},
             "last_action_status": "pending",
@@ -211,6 +241,7 @@ class CoordinatorAgent:
             "final_response": "",
             "system_prompt": self.system_prompt,
             "chain_id": chain_id,
+            "session_id": self.session_id, # Persistent UUID link (Phase 115 Bugfix)
             "agents": self.agents,
             "llm": self.llm,
             "guard": guard,
@@ -256,7 +287,23 @@ class CoordinatorAgent:
 
 
             # Return final_response from graph
-            return final_state.get("final_response") or "Error: Coordinator produced no response."
+            final_response = final_state.get("final_response") or "Error: Coordinator produced no response."
+            
+            # --- NEW CODE: Append to Memory and Save to DB (Full Text Phase 11 & 115 Recovery) ---
+            self.state["messages"].append(AIMessage(content=final_response))
+            
+            try:
+                from agent_core.rag.vector_store import VectorStore
+                vs = VectorStore()
+                loop = asyncio.get_running_loop()
+                # Centralized saving of full text (no truncation)
+                await loop.run_in_executor(None, vs.log_thought, self.session_id, "user", message)
+                await loop.run_in_executor(None, vs.log_thought, self.session_id, "assistant", final_response)
+            except Exception as dbe:
+                logger.error(f"Failed to save messages to DB: {dbe}")
+            # -------------------------------------------------
+            
+            return final_response
             
         except Exception as e:
             logger.exception("Graph execution error: %s", e)

@@ -11,6 +11,25 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger("agentos.core.reasoning")
 
+# Patterns that indicate the LLM echoed template/placeholder text instead of
+# generating a real answer. If the payload matches any of these (case-insensitive),
+# the parse is rejected so the coordinator falls through to fallback handling.
+_PLACEHOLDER_PATTERNS = {
+    "[your complete answer]",
+    "[your answer]",
+    "[your answer here]",
+    "[your complete answer here]",
+    "<write your full answer here>",
+    "write your full, detailed answer here — never leave this blank or use placeholder text",
+    "write your answer here",
+    "your actual, complete answer text goes here",
+}
+
+def _is_placeholder(text: str) -> bool:
+    """Return True if text is a known prompt-template placeholder."""
+    stripped = text.strip().lower()
+    return stripped in _PLACEHOLDER_PATTERNS or stripped == ""
+
 def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     """
     Parses a ReAct response block looking for `Action: <agent_type>(<goal>)`
@@ -52,26 +71,35 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     # Simple balanced paren/brace extraction
     start_pos = header_match.end()
     remaining = response_text[start_pos:]
-    m_bracket = re.search(r"[\(\{\[]", remaining)
     
+    # 3. Extract Payload (balanced brackets with quote-awareness)
+    m_bracket = re.search(r"\(", remaining)
     if not m_bracket:
         return None
         
-    bracket = m_bracket.group(0)
-    # Balanced bracket extraction for the payload
-    # Find the matching closing bracket
-    stack = []
+    stack = 1
     end_pos = -1
-    for i, char in enumerate(remaining):
-        if char in "({[":
-            stack.append(char)
-        elif char in ")}]":
-            if not stack: continue
-            top = stack.pop()
-            if (top == "(" and char == ")") or \
-               (top == "{" and char == "}") or \
-               (top == "[" and char == "]"):
-                if not stack:
+    in_quote = None  # Tracks if we are inside "..." or '...'
+    
+    for i in range(m_bracket.start() + 1, len(remaining)):
+        char = remaining[i]
+        
+        # Handle Quotes
+        if char in ('"', "'"):
+            if not in_quote:
+                in_quote = char
+            elif in_quote == char:
+                # Basic check for escaped quote: \" (though LLMs rarely use it)
+                if i > 0 and remaining[i-1] != "\\":
+                    in_quote = None
+        
+        # Only track brackets if NOT inside a quote
+        if not in_quote:
+            if char == "(":
+                stack += 1
+            elif char == ")":
+                stack -= 1
+                if stack == 0:
                     end_pos = i
                     break
     
@@ -92,6 +120,11 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
             else:
                 payload = inner
             break
+
+    # 5. Placeholder guard: reject literal template text
+    if _is_placeholder(payload):
+        logger.warning("Rejected placeholder payload from LLM: %s", payload[:80])
+        return None
 
     return action_type, payload
 

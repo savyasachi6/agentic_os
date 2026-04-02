@@ -27,7 +27,7 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
             if session_id:
                 cur.execute(
                     """
-                    SELECT role, content, 1 - (embedding <=> %s::vector) AS score
+                    SELECT role, content, session_id, 1 - (embedding <=> %s::vector) AS score
                     FROM thoughts 
                     WHERE session_id = %s
                       AND 1 - (embedding <=> %s::vector) > 0.55
@@ -38,7 +38,7 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
             else:
                 cur.execute(
                     """
-                    SELECT role, content, 1 - (embedding <=> %s::vector) AS score 
+                    SELECT role, content, session_id, 1 - (embedding <=> %s::vector) AS score 
                     FROM thoughts 
                     WHERE 1 - (embedding <=> %s::vector) > 0.55
                     ORDER BY score DESC LIMIT %s
@@ -46,7 +46,7 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
                     (query_vec, query_vec, limit)
                 )
             rows = cur.fetchall()
-            return [{"role": r[0], "content": r[1], "score": r[2]} for r in rows]
+            return [{"role": r[0], "content": r[1], "session_id": r[2], "score": r[3]} for r in rows]
 
 def store_session_summary(session_id: str, summary: str, embedding: List[float], turn_start: int, turn_end: int):
     """Store a compacted session summary."""

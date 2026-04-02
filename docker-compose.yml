@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: agent_os
       POSTGRES_USER: agent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U agent -d agent_os" ]
       interval: 5s
@@ -21,6 +21,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
+    secrets:
+      - db_password
 
   redis:
     image: redis:7-alpine
@@ -156,7 +158,7 @@ services:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: agent
-      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      KC_DB_PASSWORD: agent_os_pw
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
     ports:

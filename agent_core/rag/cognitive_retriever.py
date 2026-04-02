@@ -120,8 +120,8 @@ class CognitiveRetriever:
         if context_k == 0:
             return "", [], strategy
 
-        # 3. Query Rewriting (Contextualization)
-        rewritten_query = await self._rewrite_query(query, session_ctx)
+        # 3. Query Rewriting (Contextualization & Distillation)
+        rewritten_query = await self._rewrite_query(query, session_ctx, intent_key)
 
         # 4. Parallel retrieval (Candidate Generation Phase)
         import time
@@ -192,14 +192,41 @@ class CognitiveRetriever:
     # Internal: Query Rewriting
     # ------------------------------------------------------------------
 
-    async def _rewrite_query(self, query: str, session_ctx: Dict) -> str:
+    async def _rewrite_query(self, query: str, session_ctx: Dict, intent: Optional[str] = None) -> str:
         """
-        Use the LLM to rewrite the query into a self-contained retrieval statement.
-        Only fires if session context exists — otherwise returns query unchanged.
+        1. Contextualize: If session history exists, merge it into the query.
+        2. Distill: If the query is too long OR intent is web_search, extract ONLY search keywords.
         """
         prior = session_ctx.get("prior_topics", [])
-        if not prior or len(query.split()) > 20:
-            # Long queries are already specific — don't rewrite
+        is_web = (intent == "web_search")
+        word_count = len(query.split())
+        
+        # Phase 105: Search Distillation (De-conversationalizing)
+        # If it's a long multi-part query, we MUST distill search terms regardless of history.
+        if is_web or word_count > 15:
+            distill_prompt = (
+                f"Extract the CORE technical intent for a search engine. "
+                f"If the message contains multiple unrelated topics, pick the MOST complex one to search first. "
+                f"Distill into 3-5 concise keywords (e.g., 'Git worktree practices' OR 'PostgreSQL RLS schema'). "
+                f"Remove all conversational filler. Return ONLY the keywords.\n\n"
+                f"Message: {query}"
+            )
+            try:
+                from agent_core.llm.models import ModelTier
+                distilled = await self._rewrite_llm.generate_async(
+                    [{"role": "user", "content": distill_prompt}],
+                    max_tokens=30,
+                    tier=ModelTier.NANO
+                )
+                dt = distilled.strip().replace('"', '').replace("'", "")
+                if dt:
+                    logger.debug(f"Query distilled: '{query}' -> '{dt}'")
+                    return dt
+            except Exception as e:
+                logger.debug(f"Distillation failed: {e}")
+
+        # Phase 87: Contextual Rewriting (for short conversational follow-ups)
+        if not prior or word_count > 15:
             return query
         
         context_str = "; ".join(prior[-2:])
@@ -297,15 +324,15 @@ class CognitiveRetriever:
 
     async def _get_session_context(self, session_id: str) -> Dict[str, Any]:
         try:
-            from core.message_bus import A2ABus
+            from agent_core.agents.core.a2a_bus import A2ABus
             bus = A2ABus()
             if not bus.is_connected():
                 return {}
-            turns = await bus.get_session_turns(session_id, last_n=5)
+            turns = await bus.get_session_turns(session_id, last_n=15)
             topics, skills_referenced = [], []
             for turn in turns:
                 msg = turn.get("user_msg", "") or turn.get("query", "")
-                if msg: topics.append(msg[:100])
+                if msg: topics.append(msg)
                 skills_used = turn.get("skills_used", [])
                 if isinstance(skills_used, list):
                     skills_referenced.extend(skills_used)
