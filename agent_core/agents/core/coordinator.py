@@ -114,7 +114,9 @@ class CoordinatorAgent:
             "session_id": self.session_id,
             "user_id": None,
             "user_roles": [],
-            "messages": []
+            "messages": [],
+            "last_specialist_goal": "",
+            "last_specialist_role": ""
         }
         # A2A Bus (Pattern 7)
         self.bus = A2ABus()
@@ -192,6 +194,10 @@ class CoordinatorAgent:
         # Guard instantiation
         guard = AgentCallGuard(max_per_agent=2, max_total=8)
 
+        # --- NEW FIX: Explicitly clear state before loading history (Phase 116 Isolation) ---
+        # This prevents context bleed between sessions if the agent object is reused by the server.
+        self.state["messages"] = []
+        
         # Fetch recent session history for Coordinator context (Phase 115)
         history_messages = []
         try:
@@ -218,13 +224,42 @@ class CoordinatorAgent:
             except Exception as e:
                 logger.error(f"Failed to load session history from Postgres: {e}")
 
-        # Append current user message
+        # Append current user message to rolling state for turn persistence
         self.state["messages"].append(HumanMessage(content=message))
-        # --------------------------------------------------
+
+        # --- HYBRID MEMORY RETRIEVAL LOGIC (Phase 115 Follow-ups) ---
+        from agent_core.rag.vector_store import VectorStore
+        vs = VectorStore()
+        
+        memory_context = ""
+        try:
+            # Search past thoughts for this session (threshold > 0.55 built-in to SQL helper)
+            past_thoughts = await vs.search_thoughts_async(message, self.session_id, limit=3)
+            
+            if past_thoughts:
+                context_lines = []
+                for t in past_thoughts:
+                    # Filter for high-confidence matches to avoid irrelevant context injection
+                    if t.get("score", 0) > 0.65:
+                        context_lines.append(f"[{t['role']}]: {t['content']}")
+                
+                if context_lines:
+                    memory_context = (
+                        "\n\n--- RELEVANT PREVIOUS CONVERSATION CONTEXT ---\n"
+                        "Use this context if the user's request is a follow-up to previous answers:\n"
+                        + "\n".join(context_lines)
+                        + "\n--------------------------------------------\n"
+                    )
+        except Exception as e:
+            logger.warning(f"Hybrid memory retrieval failed: {e}")
+
+        # Construct enriched message with retrieved context for the reasoning graph
+        enriched_message = message + memory_context
+        # -------------------------------------------------------------
 
         # LangGraph-based Orchestration (Pattern 4)
         initial_state: AgentState = {
-            "messages": list(self.state["messages"]),
+            "messages": list(self.state["messages"][:-1]) + [HumanMessage(content=enriched_message)],
             "plan": [],
             "relational_context": {},
             "last_action_status": "pending",
@@ -235,8 +270,8 @@ class CoordinatorAgent:
             "user_id": self.state.get("user_id", ""),
             "intent": intent.value,
             "next_node": "route",
-            "action_name": "",
-            "action_goal": "",
+            "action_name": self.state.get("last_specialist_role", ""),
+            "action_goal": self.state.get("last_specialist_goal", ""),
             "direct_response": "",
             "final_response": "",
             "system_prompt": self.system_prompt,
@@ -265,6 +300,21 @@ class CoordinatorAgent:
         try:
             # Execute the graph flow
             final_state = await self.graph.ainvoke(initial_state)
+            
+            # Phase 5: Goal Preservation & Stickiness Cleanup (Stabilization)
+            final_response = final_state.get("final_response") or ""
+            is_question = "?" in final_response or "Proceed?" in final_response or "Continue?" in final_response
+            
+            if final_state.get("next_node") == "respond" and not is_question:
+                # If we're finishing without a question, clear the goal and active specialist role
+                self.state["last_specialist_goal"] = ""
+                self.state["last_specialist_role"] = ""
+            else:
+                # Still in a loop, midway, or asking a confirmation question: preserve the context
+                self.state["last_specialist_goal"] = final_state.get("action_goal", "")
+                self.state["last_specialist_role"] = final_state.get("action_name", "")
+
+
             
             # Cleanup all subscription tasks
             for t in subscription_tasks:

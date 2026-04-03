@@ -42,4 +42,7 @@ class AgentState(TypedDict):
     step_count: int              # Total ReAct steps (T)
     invalid_call_count: int      # Count of failed/invalid tool calls (γ)
     rl_metadata: Dict[str, Any]  # RL Router decisions (arm, depth, query_hash) for the UI
+    
+    # ── Phase 88: Goal Shield ──────────
+    is_affirmation: bool         # Current user message is "yes/ok/proceed"
 

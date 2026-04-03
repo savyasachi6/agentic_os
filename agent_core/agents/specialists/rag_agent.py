@@ -74,7 +74,13 @@ class ResearchAgentWorker:
         start_time = time.time()
         
         # 1. Initialize Contextual IDs and Goals
-        query_goal = task.payload.get("query") or task.payload.get("goal") or task.content or "Unknown Goal"
+        query_goal = task.payload.get("query") or task.payload.get("goal") or "No Goal"
+        
+        # Bug 4 Fix: Dynamic max iterations based on question count (Phase 118)
+        question_count = query_goal.count("?")
+        max_iterations = task.payload.get("max_turns", max(6, question_count * 2))
+        
+        # SQL Column Guard: explicit prompt injection
         session_id = str(task.chain_id)
         
         # 2. Dynamic Date Injection (Simplified Phase 94)
@@ -109,9 +115,19 @@ class ResearchAgentWorker:
                 if asst_msg: history_formatted += f"Assistant: {asst_msg}\n"
             messages.append({"role": "user", "content": history_formatted.strip()})
 
+        # Today is {date}
+        # 4. Phase 5: Multi-Topic Sequential Research (Hardening)
+        # Ensure the agent breaks down complex queries into steps.
         messages.append({
             "role": "user", 
-            "content": f"Current Task Goal: {query_goal}\n\nFull Payload: {json.dumps(task.payload)}"
+            "content": (
+                f"Full Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}\n\n"
+                "CRITICAL: If this contains multiple topics, answer them ALL sequentially. "
+                "Complete ALL topics before calling respond_direct. Do NOT stop between topics. "
+                "Instead of one massive search, perform a sequence of targeted searches for each topic "
+                "(e.g. Turn 1: Git worktrees, Turn 2: FastAPI CI/CD). Do NOT yield until ALL parts are answered. "
+                "You are allowed to move onto the NEXT topic automatically once identifying information for the current one."
+            )
         })
 
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.RAG.value}, goal='{query_goal[:50]}...'")
@@ -267,7 +283,7 @@ class ResearchAgentWorker:
                         task.id, 
                         NodeStatus.DONE, 
                         result={
-                            "message": strip_reasoning_markers(response_text),
+                            "message": "\n\n" + strip_reasoning_markers(response_text) + "\n\n",
                             "query_hash_rl": rl_meta.get("query_hash_rl"),
                             "arm_index": rl_meta.get("arm_index")
                         }
@@ -292,7 +308,7 @@ class ResearchAgentWorker:
                         task.id, 
                         NodeStatus.DONE, 
                         result={
-                            "message": final_res,
+                            "message": "\n\n" + str(final_res) + "\n\n",
                             "query_hash_rl": rl_meta.get("query_hash_rl"),
                             "arm_index": rl_meta.get("arm_index"),
                             "depth": rl_meta.get("depth")

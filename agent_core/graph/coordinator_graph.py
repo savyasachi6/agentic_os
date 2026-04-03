@@ -22,7 +22,7 @@ from agent_core.graph.state import AgentState
 from agent_core.agent_types import Intent
 from agent_core.guards import AgentCallGuard
 from agent_core.reasoning import parse_react_action
-from agent_core.intent.classifier import classify_intent
+from agent_core.intent.classifier import classify_intent, AFFIRMATION_WORDS
 from agent_core.intent.routing import route_action_to_agent
 from agent_core.llm.client import LLMClient
 
@@ -33,24 +33,24 @@ import re
 def _strip_react_internals(text: str) -> str:
     """Remove Thought:/Action: lines from LLM output before showing to the user.
 
-    The coordinator uses a ReAct format internally (Thought/Action/Observation).
-    If a raw LLM response leaks to the user, this strips the boilerplate so only
-    the useful answer text is shown.
+    Only strips at the start of a line and outside of code blocks to avoid 
+    corrupting examples (Phase 118 Hardening).
     """
     if not text:
         return text
     lines = text.splitlines()
     cleaned = []
-    skip_action = False
+    in_code_block = False
     for line in lines:
         stripped = line.strip()
-        # Suppress Thought: and Action: lines
-        if stripped.startswith("Thought:") or stripped.startswith("Action:"):
-            skip_action = False  # reset; only skip the exact line
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+        
+        if not in_code_block and (stripped.startswith("Thought:") or stripped.startswith("Action:")):
             continue
         cleaned.append(line)
     result = "\n".join(cleaned).strip()
-    return result or text  # never return empty if the whole thing was Thought/Action
+    return result or text
 
 # ─────────────────────────────────────────────
 # Node functions
@@ -66,10 +66,34 @@ def classify_node(state: AgentState) -> AgentState:
         (m.content for m in reversed(messages) if isinstance(m, HumanMessage)),
         "",
     )
+    
+    # Phase 5: Specialist Stickiness (Stabilization)
+    # If a specialist was JUST active, and the user says "ok", "yes", etc., 
+    # we STAY with that specialist rather than re-classifying.
+    msg_clean = last_human.strip().lower().replace(".", "").replace("!", "")
+    is_affirmation = msg_clean in AFFIRMATION_WORDS or (len(msg_clean.split()) <= 2 and "ok" in msg_clean)
+    
     intent = classify_intent(last_human)
+    
+    # Stickiness Logic: Check history for previous specialist
+    sticky_role = None
+    if is_affirmation:
+        for m in reversed(messages):
+            if isinstance(m, AIMessage):
+                # If the AI previously called a specialist (execute node), 
+                # its content might contain "Thought: ... Action: [agent] ..."
+                # However, the respond_node actually records 'skills_used' in the bus.
+                # Here we check the state's previous action_name.
+                sticky_role = state.get("action_name")
+                if sticky_role and sticky_role != "respond":
+                    logger.info(f"Specialist Stickiness triggered: keeping role='{sticky_role}' for affirmation='{msg_clean}'")
+                    break
+    
     return {
         **state,
         "intent": intent.value,
+        "is_affirmation": is_affirmation,
+        "sticky_role": sticky_role, # Track for route_node
         "last_action_status": "pending",
         "step_count": state.get("step_count", 0) + 1,
         "invalid_call_count": state.get("invalid_call_count", 0),
@@ -89,11 +113,16 @@ async def route_node(state: AgentState) -> AgentState:
         "",
     )
 
-    # Fast-path shortcuts — only for simple greetings
-    if len(messages) <= 1:
-        if intent_str == Intent.GREETING.value:
-            return {**state, "next_node": "respond", "direct_response": "Hello! I'm the Agentic OS Coordinator. How can I help you today?"}
-    
+    # Phase 5: Specialist Stickiness Fast-path
+    sticky_role = state.get("sticky_role")
+    if sticky_role and sticky_role != "respond":
+        return {
+            **state,
+            "next_node": "execute",
+            "action_name": sticky_role,
+            "action_goal": state.get("action_goal") or last_human
+        }
+
     # All other queries must flow through the ReAct reasoning loop (Phase 105)
     llm = state.get("llm") or LLMClient()
     system_prompt_raw = state.get("system_prompt", "You are the Coordinator. Route requests to specialists.")
@@ -128,6 +157,24 @@ async def route_node(state: AgentState) -> AgentState:
 
     action_name, action_goal = action_data
     agent_type = route_action_to_agent(action_name)
+
+    # Phase 88: Goal Shield (Stabilization)
+    # If the user is affirming (yes/ok) and we have a technical goal in cache,
+    # prevent the LLM from overwriting it with the word "yes" AND force the previous agent.
+    is_affirmation = state.get("is_affirmation", False)
+    cached_goal = state.get("action_goal", "")
+    last_specialist = state.get("action_name", "") or "research" # Fallback to research if lost
+    
+    if is_affirmation and cached_goal:
+        if len(action_goal) < 10:
+            logger.info(f"Goal Shield triggered: Restoring cached goal '{cached_goal[:50]}...' instead of '{action_goal}'")
+            action_goal = cached_goal
+        
+        # Phase 117: Routing Guard (Hardening)
+        # If we are staying in the research loop, don't let it switch to 'capability'
+        if agent_type != last_specialist and last_specialist != "respond":
+            logger.warning(f"Routing Guard triggered: Forcing '{last_specialist}' instead of '{agent_type}' for affirmation.")
+            agent_type = last_specialist
 
     if agent_type == "respond":
         return {
@@ -202,13 +249,18 @@ async def execute_node(state: AgentState) -> AgentState:
 
             # Phase 116: Cross-Session Semantic Memory Fetch
             try:
+                # Phase 117: Context Isolation (Hardening)
+                # User reported 'sideways' behavior due to all-session bleed.
+                # Disable cross-session fetch for targeted RAG tasks.
+                session_id = state.get("session_id") or str(chain_id)
                 from agent_core.rag.vector_store import VectorStore
                 vs = VectorStore()
-                # Search across ALL sessions (session_id=None) for semantically similar turns
-                v_results, _ = vs.search_thoughts(action_goal, limit=3)
+                # Search ONLY this session's thoughts for high-precision context (session_id=session_id)
+                # Phase 118 Hardening: Enforce strict session to prevent cross-session 'example' leak.
+                v_results, _ = vs.search_thoughts(action_goal, session_id=session_id, limit=5, strict_session=True)
                 vector_memory = [{"content": m["content"], "session_id": m["session_id"]} for m in v_results]
             except Exception as ve:
-                logger.debug(f"Failed to fetch vector memory: {ve}")
+                logger.debug(f"Failed to fetch local session memory: {ve}")
                 vector_memory = []
 
             result = await bridge.execute({

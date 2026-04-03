@@ -205,11 +205,14 @@ class CognitiveRetriever:
         # If it's a long multi-part query, we MUST distill search terms regardless of history.
         if is_web or word_count > 15:
             distill_prompt = (
-                f"Extract the CORE technical intent for a search engine. "
-                f"If the message contains multiple unrelated topics, pick the MOST complex one to search first. "
-                f"Distill into 3-5 concise keywords (e.g., 'Git worktree practices' OR 'PostgreSQL RLS schema'). "
-                f"Remove all conversational filler. Return ONLY the keywords.\n\n"
-                f"Message: {query}"
+                "You are an expert technical search query distiller. Your task is to extract "
+                "HIGH-PRECISION search keywords from a complex, multi-topic user request. "
+                "\n\nRules:\n"
+                "1. Extract keywords for ALL detected technical topics (e.g. Git, CI/CD, PostgreSQL).\n"
+                "2. Remove ALL conversational filler ('how to', 'best practices', etc.).\n"
+                "3. Provide 5-10 concise keywords or short phrases, comma-separated.\n"
+                "4. Do NOT pick one topic; cover the ENTIRE goal.\n\n"
+                f"User Request: {query}"
             )
             try:
                 from agent_core.llm.models import ModelTier

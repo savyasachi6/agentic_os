@@ -28,8 +28,8 @@ SELF_DISCOVERY_PATTERNS = [
 CAPABILITY_SINGLE_WORDS = {
     "menu", "commands"
 }
-GREETING_WORDS = {"hi", "hello", "hey", "greetings", "yo", "sup", "hi there", "hello there"}
-AFFIRMATION_WORDS = {"yes", "no", "do it", "go ahead", "proceed", "sure", "yep", "nope", "okay", "ok"}
+GREETING_WORDS = {"hi", "hello", "hey", "greetings", "yo", "sup", "hi there", "hello there", "thanks", "thank you"}
+AFFIRMATION_WORDS = {"yes", "no", "do it", "go ahead", "proceed", "sure", "yep", "nope", "okay", "ok", "perfect", "got it", "acknowledged"}
 
 WEB_ONLY_KEYWORDS = [
     "news", "today", "latest", "breaking", "current events",

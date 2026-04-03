@@ -27,19 +27,12 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
-    "agent_config*",
     "agent_core*",
-    "agent_memory*",
-    "agent_skills*",
-    "rag*",
     "productivity*",
     "sandbox*",
-    "agent_security*",
     "voice*",
     "gateway*",
     "rl_router*",
-    "llm_router*",
-    "lane_queue*",
     "ui*",
 ]
 

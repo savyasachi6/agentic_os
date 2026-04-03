@@ -20,11 +20,12 @@ def log_thought(session_id: str, role: str, content: str, embedding: List[float]
             )
         conn.commit()
 
-def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
+def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, limit: int = 5, strict_session: bool = False) -> List[Dict[str, Any]]:
     """Vector search over thoughts, optionally scoped to a session."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            if session_id:
+            if session_id and strict_session:
+                # Force hard filter for current session only (Phase 118 Hardening)
                 cur.execute(
                     """
                     SELECT role, content, session_id, 1 - (embedding <=> %s::vector) AS score
@@ -34,6 +35,18 @@ def search_thoughts(query_vec: List[float], session_id: Optional[str] = None, li
                     ORDER BY score DESC LIMIT %s
                     """,
                     (query_vec, session_id, query_vec, limit)
+                )
+            elif session_id:
+                # Soft filter (prefer current session, but allows globality if needed - legacy logic)
+                cur.execute(
+                    """
+                    SELECT role, content, session_id, 1 - (embedding <=> %s::vector) AS score
+                    FROM thoughts 
+                    WHERE (session_id = %s OR 1 - (embedding <=> %s::vector) > 0.70)
+                      AND 1 - (embedding <=> %s::vector) > 0.55
+                    ORDER BY score DESC LIMIT %s
+                    """,
+                    (query_vec, session_id, query_vec, query_vec, limit)
                 )
             else:
                 cur.execute(

@@ -35,16 +35,19 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
     Parses a ReAct response block looking for `Action: <agent_type>(<goal>)`
     or a JSON block like `{"action": "...", "content": "..."}`.
     """
-    # 1. Triple-quote respond_direct (Phase 102 Hardening)
-    # This is the highest priority for final results.
+    # 1. Broad respond_direct extraction (Phase 116 Hardening)
+    # This handles triple-quotes ("""), single-quotes ("), and different parameter names (message/content/answer).
     # Matches: Action: respond_direct(message="""\n...\n""")
-    tq_match = re.search(
-        r'Action:\s*respond_direct\s*\(\s*message\s*=\s*"""(.*?)"""\s*\)',
+    # Matches: Action: respond_direct(content="Hello world")
+    rd_match = re.search(
+        r'Action:\s*respond_direct\s*\(\s*(?:message|content|answer)\s*=\s*(?:"""|\"|\')(.*?)(?:"""|\"|\')\s*\)',
         response_text,
         re.DOTALL
     )
-    if tq_match:
-        return "respond_direct", tq_match.group(1).strip()
+    if rd_match:
+        payload = rd_match.group(1).strip()
+        # Decode and return immediately (highest priority)
+        return "respond_direct", payload.replace('\\n', '\n').replace('\\t', '\t')
 
     # 2. Try JSON parsing
     try:
@@ -120,6 +123,12 @@ def parse_react_action(response_text: str) -> Optional[Tuple[str, str]]:
             else:
                 payload = inner
             break
+        
+    # --- NEW FIX: Decode escaped newlines (Phase 116 UX Stabilization) ---
+    # Convert literal "\n" strings back to actual newlines so Markdown tables render correctly.
+    # This specifically addresses issues with models like gemma3:4b outputting escaped newlines.
+    payload = payload.replace('\\n', '\n')
+    payload = payload.replace('\\t', '\t')
 
     # 5. Placeholder guard: reject literal template text
     if _is_placeholder(payload):

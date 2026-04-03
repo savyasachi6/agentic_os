@@ -118,3 +118,5 @@ NEVER: Run more than 3 queries per request.
 NEVER: Ask the user clarifying questions.
 NEVER: Return raw JSON or SQL results unformatted.
 NEVER: Show a formatted inventory table if the query returned an error or 0 rows.
+NEVER: Wrap your final response in HTML tags like <details>, <summary>, or <div>. Use pure Markdown only.
+NEVER: Output literal '\n' characters. Use actual carriage returns/newlines for all formatting.

@@ -42,10 +42,10 @@ class VectorStore:
         vec, _ = self.generate_embedding(content)
         log_thought(session_id, role, content, vec)
 
-    def search_thoughts(self, query, session_id=None, limit=5):
+    def search_thoughts(self, query, session_id=None, limit=5, strict_session=False):
         from db.queries.thoughts import search_thoughts
         vec, deg = self.generate_embedding(query)
-        res = search_thoughts(vec, session_id, limit)
+        res = search_thoughts(vec, session_id, limit, strict_session)
         return res, deg
 
     def search_docs(self, query, limit=5):
@@ -53,6 +53,19 @@ class VectorStore:
         vec, deg = self.generate_embedding(query)
         res = search_docs(vec, limit)
         return res, deg
+
+    async def search_thoughts_async(self, query: str, session_id: str, limit: int = 5, strict_session: bool = False):
+        """Async semantic search over current session history for hybrid memory context."""
+        from db.queries.thoughts import search_thoughts
+        import asyncio
+        loop = asyncio.get_running_loop()
+        
+        # Run embedding generation in the executor
+        vec, _ = await loop.run_in_executor(None, self.generate_embedding, query)
+        
+        # Run the search in the executor
+        results = await loop.run_in_executor(None, search_thoughts, vec, session_id, limit, strict_session)
+        return results
 
     def store_session_summary(self, session_id, summary, turn_start, turn_end):
         from db.queries.thoughts import store_session_summary

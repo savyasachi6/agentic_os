@@ -142,6 +142,21 @@ class CapabilityAgentWorker:
         query_goal = task.payload.get("query") or task.payload.get("goal") or "Unknown Goal"
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.SCHEMA.value}, goal='{query_goal[:50]}...'")
         
+        # Phase 5: Research Conflict (Shielding)
+        # Bug 2 Fix: Check for EXPLICIT capability intent first.
+        capability_triggers = ["what can you do", "capabilities", "inventory", "tools", "agent registry", "skills"]
+        is_capability_intent = any(t in query_goal.lower() for t in capability_triggers)
+        
+        if not is_capability_intent:
+            research_keywords = ["research", "search", "best practices", "how to", "worktree", "fastapi", "postgresql", "cicd", "schema", "pgvector"]
+            if any(kw in query_goal.lower() for kw in research_keywords):
+                logger.info(f"CapabilityAgent detected research conflict: {query_goal[:50]}... Yielding to RAG.")
+                await self.tree_store.update_node_status_async(
+                    task.id, NodeStatus.DONE, 
+                    result={"answer": "NOT_CAPABILITY: Goal involves technical research. Yielding to RAG Specialist."}
+                )
+                return
+
         # 0. Dynamic Date Injection (Phase 94)
         current_date_str = datetime.now().strftime("%B %d, %Y")
         system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
@@ -151,7 +166,12 @@ class CapabilityAgentWorker:
         
         messages = [
             {"role": "system", "content": guarded_prompt},
-            {"role": "user", "content": f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
+            {"role": "user", "content": (
+                f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}\n\n"
+                "CRITICAL: If the goal describes technical 'RESEARCH', 'BEST PRACTICES', 'SCHEMA DESIGN', "
+                "or 'SETUP' tasks (e.g. Git, FastAPI, PostgreSQL), do NOT just show inventory or confirm. "
+                "Yield immediately to the RAG Specialist via: Action: respond_direct(message='NOT_CAPABILITY')."
+            )}
         ]
         
         session_id = str(task.chain_id)
@@ -273,6 +293,7 @@ class CapabilityAgentWorker:
                         final_res = action_payload
 
                     duration_ms = int((time.time() - start_time) * 1000)
+
                     log_event(logger, "info", "capability_task_done", 
                               node_id=task.id, session_id=session_id, duration_ms=duration_ms)
                     assert task.id is not None
