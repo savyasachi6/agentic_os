@@ -269,16 +269,25 @@ async def execute_node(state: AgentState) -> AgentState:
                 "vector_memory": vector_memory # Phase 116 Injection
             }, chain_id=chain_id)
             # Extract a clean human-readable answer from the specialist result dict.
-            # Keys tried in priority order: answer, response, output, content, result.
-            clean_answer = (
-                result.get("answer")
-                or result.get("response")
-                or result.get("message")
-                or result.get("output")
-                or result.get("content")
-                or result.get("result")
-            )
-            if clean_answer and "NOT_CAPABILITY" in str(clean_answer):
+            res_obj = result.get("answer") or result.get("response") or result.get("message") or result.get("output") or result.get("content") or result.get("result") or ""
+            
+            # Bug 5 Fix: Formatted Markdown for Structured Results (Dict/List)
+            if isinstance(res_obj, dict):
+                clean_answer = "\n".join(f"**{k}:** {v}" for k, v in res_obj.items())
+            elif isinstance(res_obj, list):
+                if res_obj and isinstance(res_obj[0], dict):
+                    # Table-like list of dicts
+                    keys = list(res_obj[0].keys())
+                    header = "| " + " | ".join(keys) + " |"
+                    sep = "| " + " | ".join(["---"] * len(keys)) + " |"
+                    rows = ["| " + " | ".join(str(r.get(k, "")) for k in keys) + " |" for r in res_obj]
+                    clean_answer = "\n".join([header, sep] + rows)
+                else:
+                    clean_answer = "\n".join(f"- {str(item)}" for item in res_obj)
+            else:
+                clean_answer = str(res_obj)
+
+            if clean_answer and "NOT_CAPABILITY" in clean_answer.upper():
                 # Yield detected (Phase 113): Specialist signaled it can't handle this.
                 # Do NOT go to respond. Instead, go back to route so LLM can re-route.
                 obs = f"Observation: {clean_answer}"

@@ -162,16 +162,19 @@ class CapabilityAgentWorker:
         system_prompt = self.system_prompt.replace("{{TODAY}}", current_date_str)
         
         # SQL Column Guard: explicit prompt injection
-        guarded_prompt = system_prompt + "\n\nCRITICAL: The table 'knowledge_skills' does NOT have a 'category' column. Use 'skill_type' instead."
+        guarded_prompt = (
+            f"{system_prompt}\n\n"
+            "CRITICAL RULES:\n"
+            "1. The table 'knowledge_skills' does NOT have a 'category' column. Use 'skill_type' instead.\n"
+            "2. If the user's goal describes technical 'RESEARCH', 'BEST PRACTICES', 'SCHEMA DESIGN', or 'SETUP' tasks "
+            "(e.g. Git, FastAPI, PostgreSQL), you MUST yield immediately to the RAG Specialist.\n"
+            "3. To yield, output exactly: Action: respond_direct(answer='NOT_CAPABILITY')\n"
+            "4. NEVER explain why you cannot help. NEVER give a polite refusal. Just output the yield action."
+        )
         
         messages = [
             {"role": "system", "content": guarded_prompt},
-            {"role": "user", "content": (
-                f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}\n\n"
-                "CRITICAL: If the goal describes technical 'RESEARCH', 'BEST PRACTICES', 'SCHEMA DESIGN', "
-                "or 'SETUP' tasks (e.g. Git, FastAPI, PostgreSQL), do NOT just show inventory or confirm. "
-                "Yield immediately to the RAG Specialist via: Action: respond_direct(message='NOT_CAPABILITY')."
-            )}
+            {"role": "user", "content": f"Goal: {query_goal}\n\nPayload: {json.dumps(task.payload)}"}
         ]
         
         session_id = str(task.chain_id)

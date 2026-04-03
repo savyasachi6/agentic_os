@@ -9,6 +9,16 @@ Agentic OS includes a Redis-based heartbeat system to ensure specialists are onl
 - **Check Heartbeat**: The `BridgeAgent` (`agent_core/agents/core/coordinator.py`) calls `bus.get_heartbeat(role)` before every task dispatch — offline specialists are rejected immediately, not after a 600s timeout.
 - **Docker Health**: Individual services use this same check in `docker-compose.yml`.
 
+## Hardened Runtime Features
+
+Agentic OS implements advanced reliability patterns to handle complex, multi-turn technical research without context loss or "Ghost Worker" interruptions.
+
+- **Sticky Specialist Routing**: The Coordinator preserves the active specialist session across turn-based confirmations.
+- **Goal Shield (Phase 88/117)**: An unconditional "Goal Restoration" logic that prevents technical queries from being overwritten by short affirmations (e.g., "yes").
+- **Sequential Research Autonomy**: Specialists (like RAG) can auto-advance through multi-part goals without constant user input.
+- **Context Isolation**: A "Current Session Priority" mode that strictly partitions semantic search, preventing cross-session memory bleed.
+- **Structural Yielding**: Capability agents use `NOT_CAPABILITY` signals to instantly hand off technical research to the RAG specialist.
+
 ## Architecture Overview
 
 ```mermaid

@@ -90,8 +90,8 @@ Put a heading "Agentic OS - Skill Inventory" above the table.
 
 ### For System Stats (from SYSTEM_STATS_QUERY row):
 
-Show the four numbers from the single result row as a bold summary line,
-using the exact values for total_skills, total_chunks, total_kg_links, and total_tools.
+Show the four numbers from the single result row as a single, clean markdown summary line using the exact values:
+**Total Skills: {total_skills}** | Chunks: {total_chunks} | KG Links: {total_kg_links} | Tools: {total_tools}
 
 ### For Tool Inventory (from TOOL_INVENTORY_QUERY rows):
 

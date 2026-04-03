@@ -30,7 +30,10 @@ The central orchestration and communication layer.
 
 - **Intent Classification**: Calls `agent_core/intent/classifier.py:classify_intent()` → `Intent` enum.
 - **LangGraph Orchestration**: Executes `agent_core/graph/coordinator_graph.py` — a typed `StateGraph` over `AgentState`.
-- **BridgeAgent**: Inner class that dispatches tasks to specialists via `TreeStore` + `A2ABus`. Performs a Redis **heartbeat check** before dispatch — fails fast if the worker is offline.
+- **Hardened Routing (Phase 88/117)**: 
+    - **Goal Shield**: Unconditionally restores the technical goal if the user provides a short affirmation (e.g., "yes"), preventing context loss during planning turns.
+    - **Routing Guard**: Forces the active specialist role if the user affirms a plan, preventing the LLM from accidentally switching to the `capability` agent during a research session.
+- **BridgeAgent**: Inner class that dispatches tasks to specialists via `TreeStore` + `A2ABus`. Performs a Redis **heartbeat check** before dispatch.
 - **RL Metadata**: Collects `rl_metadata` (arm_index, top_k, depth) across turns for future bandit reward reporting.
 - **Thought Streaming**: Subscribes to all specialist `thought` events on the A2A Bus and forwards them to the client via `status_callback`.
 

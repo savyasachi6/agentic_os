@@ -21,6 +21,23 @@ This document maps the logical agents in Agentic OS to their `AgentRole`, specia
 
 ---
 
+## Specialist Features & Hardening
+
+### RAG Specialist (`ResearchAgentWorker`)
+The RAG specialist has been hardened for production-grade technical research:
+- **Sequential Autonomy**: Automatically iterates through multi-part goals (e.g., Topic A, then Topic B) without yielding back to the coordinator until the entire set is answered.
+- **Dynamic Turn Budget**: Scalable `max_iterations` based on the query complexity (e.g. 2 turns per detected question).
+- **Recursive Context**: Fetches ±1 adjacent skill chunks for every matched document.
+- **RRF Fusion**: Fuses Memory, Skills, and Relational retrieval layers with recency weighting.
+
+### Capability Specialist (`CapabilityAgentWorker`)
+The Capability agent acts as a high-speed router for internal system tools:
+- **Structural Yielding**: If a goal describes technical "RESEARCH" rather than a tool-inventory request, it yields immediately via the `NOT_CAPABILITY` signal.
+- **No-Confirmation Refusals**: Explicitly forbidden from giving unhelpful human-like refusal dialogue; it must structuraly hand-off to RAG.
+- **Tool Invocation**: Translates LLM `Action: run_query` into direct postgres executions.
+
+---
+
 ## Routing & Dispatch
 
 ### Intent → Agent Mapping (coordinator.py)
@@ -121,4 +138,3 @@ update_node_status(FAILED, result={error: ...})   ← failure
 Specialist workers are started independently — either via Docker containers (see `docker-compose.yml`) or manually. The `scripts/` directory contains helper scripts for development. Each worker blocks on `asyncio.run(worker.run_forever())`.
 
 > Last updated: arc_change branch — verified against source
-

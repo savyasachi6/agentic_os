@@ -92,7 +92,10 @@ class ResearchAgentWorker:
             system_prompt = f"Today is {current_date_str}.\n\n" + system_prompt
         
         # 3. Build Message History (Phase 115/116: Cross-Session & Contextual Memory)
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": f"CRITICAL: The current actual date is {current_date_str}. Disregard any internal training data cutoff dates. All 'today', 'this week', and 'current' queries MUST be evaluated against {current_date_str}."}
+        ]
         
         # Part A: Semantic memories (from ANY previous session)
         vector_history = task.payload.get("vector_memory", [])
@@ -145,7 +148,7 @@ class ResearchAgentWorker:
         clean_goal = query_goal.lower().replace("?", "").replace(".", "").strip()
 
         try:
-            max_iterations = task.payload.get("max_turns", 4)
+            # Bug 2 Fix: Use the dynamic max_iterations set at the top, don't overwrite with 4.
             for i in range(max_iterations):
                 # Check for abandonment (Phase 9 Hardening)
                 current_node = await self.tree_store.get_node_by_id_async(task.id)

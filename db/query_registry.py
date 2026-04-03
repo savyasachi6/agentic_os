@@ -101,7 +101,7 @@ QueryRegistry.register(QuerySpec(
         AVG(ks.eval_lift) as avg_lift,
         array_agg(ks.name ORDER BY ks.eval_lift DESC NULLS LAST) as skill_names
     FROM knowledge_skills ks
-    WHERE ks.deleted_at IS NULL
+    WHERE ks.deleted_at IS NULL AND ks.skill_type != 'system_stats'
     GROUP BY ks.skill_type
     ORDER BY skill_count DESC;
     """
