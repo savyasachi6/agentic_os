@@ -29,7 +29,15 @@ class EmailAgent:
         self._running = False
 
     async def _process_task(self, task_node: Node) -> Dict[str, Any]:
+        from agent_core.guards import CapabilityClawGuard
         payload = task_node.payload or {}
+        user_roles = payload.get("user_roles", [])
+        
+        # Phase 24: Zero-Trust Capability Gating (Claw Pattern)
+        claw_guard = CapabilityClawGuard(user_roles)
+        if not claw_guard.check_permission("email"):
+            return {"error": claw_guard.get_error_message("email")}
+
         action = payload.get("action", "send")
         query_goal = payload.get("query", "")
         

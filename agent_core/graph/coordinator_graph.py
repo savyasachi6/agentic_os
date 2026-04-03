@@ -31,24 +31,43 @@ logger = logging.getLogger("agentos.coordinator_graph")
 import re
 
 def _strip_react_internals(text: str) -> str:
-    """Remove Thought:/Action: lines from LLM output before showing to the user.
-
-    Only strips at the start of a line and outside of code blocks to avoid 
-    corrupting examples (Phase 118 Hardening).
+    """Remove Thought:/Action: and conversational filler from LLM output.
+    Matching 'previous implementation' directness standards (Phase 129).
     """
     if not text:
         return text
+        
+    # Phase 129: Conciseness Guard
+    # Strip common filler prefixes that LLMs use before artifacts.
+    # Python 3.11+ requires global flags (?i) to be at the absolute START (position 0).
+    filler_patterns = [
+        r"(?i)^sure,?\s*(i can help with that|i can do that).*",
+        r"(?i)^okay,?\s*(let me|i will).*",
+        r"(?i)^i understand,?\s*i will.*",
+        r"(?i)^certainly,?\s*.*"
+    ]
+    
     lines = text.splitlines()
     cleaned = []
     in_code_block = False
+    
     for line in lines:
         stripped = line.strip()
         if stripped.startswith("```"):
             in_code_block = not in_code_block
         
-        if not in_code_block and (stripped.startswith("Thought:") or stripped.startswith("Action:")):
-            continue
+        if not in_code_block:
+            # Strip ReAct headers
+            if stripped.startswith("Thought:") or stripped.startswith("Action:"):
+                continue
+            # Strip filler patterns from the very beginning of the response
+            if len(cleaned) == 0:
+                for pat in filler_patterns:
+                    if re.match(pat, stripped):
+                        continue
+        
         cleaned.append(line)
+        
     result = "\n".join(cleaned).strip()
     return result or text
 
@@ -93,34 +112,117 @@ def classify_node(state: AgentState) -> AgentState:
         **state,
         "intent": intent.value,
         "is_affirmation": is_affirmation,
+        "consecutive_affirmations": (state.get("consecutive_affirmations", 0) + 1) if is_affirmation else 0,
         "sticky_role": sticky_role, # Track for route_node
         "last_action_status": "pending",
         "step_count": state.get("step_count", 0) + 1,
         "invalid_call_count": state.get("invalid_call_count", 0),
+        "goal_queue": state.get("goal_queue") or [],
+        "completed_goals": state.get("completed_goals") or [],
+        "coordinator_turn_count": state.get("coordinator_turn_count", 0),
     }
+
+
+async def decompose_node(state: AgentState) -> AgentState:
+    """Phase 17: Split complex queries into a goal queue for iterative processing."""
+    messages = state.get("messages", [])
+    last_human = next((m.content for m in reversed(messages) if isinstance(m, HumanMessage)), "")
+    
+    # Only decompose if it looks like a multi-topic request and isn't already being processed.
+    if len(state.get("goal_queue", [])) > 0 or state.get("is_affirmation"):
+        return {**state, "next_node": "route"}
+
+    # Use a fast model for decomposition
+    llm = state.get("llm") or LLMClient()
+    prompt = (
+        "You are an expert task decomposer for an Agentic OS. "
+        "Analyze the user query and split it into several independent sub-goals. "
+        "Each sub-goal should be a clear technical request. "
+        "Respond with a JSON list and ONLY the JSON list (e.g. ['Explain Postgres', 'Explain Git']).\n\n"
+        f"User Query: {last_human}"
+    )
+    
+    try:
+        from agent_core.llm.models import ModelTier
+        response = await llm.generate_async([{"role": "user", "content": prompt}], tier=ModelTier.NANO)
+        # Handle cases where LLM might include code blocks
+        clean_json = response.replace("```json", "").replace("```", "").strip()
+        goals = json.loads(clean_json)
+        if isinstance(goals, list) and len(goals) > 0:
+            logger.info(f"Decomposed query into {len(goals)} goals (Atomic-First): {goals}")
+            return {**state, "goal_queue": goals, "next_node": "route"}
+    except Exception as e:
+        logger.warning(f"LLM decomposition failed, falling back to heuristic: {e}")
+        
+    # Phase 18: Heuristic Fallback Decomposer
+    # Split by common question markers if LLM JSON failed
+    import re
+    # Split by ?, \n, or bullet points
+    parts = re.split(r"\?\s*|\n+|(?<=[a-z0-9])\.\s+", last_human)
+    heuristic_goals = [p.strip() for p in parts if len(p.strip()) > 15]
+    
+    if len(heuristic_goals) > 1:
+        logger.info(f"Heuristic decomposition into {len(heuristic_goals)} goals: {heuristic_goals}")
+        return {**state, "goal_queue": heuristic_goals, "next_node": "route"}
+        
+    return {**state, "next_node": "route"}
 
 
 async def route_node(state: AgentState) -> AgentState:
     """
-    Route: decide if the coordinator LLM needs to call a specialist
-    or if this is a direct response (greeting, capability query, etc.)
+    Route: decide if the coordinator LLM needs to call a specialist.
+    Includes Phase 21 Budget Rails and Phase 20 Context Chaining.
     """
     intent_str = state.get("intent", "")
     messages = state.get("messages", [])
     
+    # Phase 21: Infinite Loop Protection (Budget Rail)
+    # Recursion Limit hit 10,000 Turns... now we cap it at 15.
+    turns = state.get("coordinator_turn_count", 0) + 1
+    logger.debug(f"Coordinator Turn {turns}/15. Intent: {intent_str}")
+
     last_human = next(
         (m.content for m in reversed(messages) if isinstance(m, HumanMessage)),
         "",
     )
 
+    # Phase 17/20: Goal Queue & Context Chaining Processing
+    queue = state.get("goal_queue", [])
+    completed = state.get("completed_goals", [])
+    if queue:
+        current_goal = queue[0]
+        part_info = f"[PART {len(completed) + 1} OF {len(queue) + len(completed)}]"
+        
+        # Phase 20: Context Chaining
+        chain_context = ""
+        if completed:
+            chain_context = "\n\n[CONTEXT_FROM_PREVIOUS_PARTS]:\n"
+            for item in completed[-2:]:
+                chain_context += f"- Goal: {item['goal']}\n- Findings: {item['result'][:200]}...\n"
+        
+        return {
+            **state,
+            "next_node": "execute",
+            "action_name": "research",
+            "action_goal": f"{part_info} {current_goal}{chain_context}\n\n[MULTI_TOPIC_SEQUENCING]: Focus strictly on THIS part. Use the context above to maintain continuity.",
+            "coordinator_turn_count": turns
+        }
+
     # Phase 5: Specialist Stickiness Fast-path
     sticky_role = state.get("sticky_role")
     if sticky_role and sticky_role != "respond":
+        goal = state.get("action_goal") or last_human
+        if state.get("consecutive_affirmations", 0) >= 1:
+            goal += (
+                "\n\n[FORCE_DELIVERY]: The user has already approved your plan. "
+                "IMMEDIATELY provide the FINAL technical output (Code, SQL, etc.) NOW."
+            )
+
         return {
             **state,
             "next_node": "execute",
             "action_name": sticky_role,
-            "action_goal": state.get("action_goal") or last_human
+            "action_goal": goal
         }
 
     # All other queries must flow through the ReAct reasoning loop (Phase 105)
@@ -209,7 +311,8 @@ async def execute_node(state: AgentState) -> AgentState:
     agents     = state.get("agents", {})
 
     chain_id   = state.get("chain_id", 0)
-    guard: AgentCallGuard = state.get("guard") or AgentCallGuard(max_per_agent=2, max_total=8)
+    # Phase 23: Budget Increase for Multi-Topic (Large Missions)
+    guard: AgentCallGuard = state.get("guard") or AgentCallGuard(max_per_agent=4, max_total=20)
 
     if guard.exhausted():
         guard.record_invalid() # One last step for budget error
@@ -265,8 +368,10 @@ async def execute_node(state: AgentState) -> AgentState:
 
             result = await bridge.execute({
                 "query": action_goal, 
+                "goal": action_goal,  # Phase 24.1: Sync with BridgeAgent expectations
                 "history": history,
-                "vector_memory": vector_memory # Phase 116 Injection
+                "vector_memory": vector_memory, # Phase 116 Injection
+                "user_roles": state.get("user_roles", []) # Phase 24 RBAC context
             }, chain_id=chain_id)
             # Extract a clean human-readable answer from the specialist result dict.
             res_obj = result.get("answer") or result.get("response") or result.get("message") or result.get("output") or result.get("content") or result.get("result") or ""
@@ -332,14 +437,77 @@ async def execute_node(state: AgentState) -> AgentState:
                         "chain_id": chain_id
                     })
 
+                # Phase 19: Pop-or-Die (Recursion Guard)
+                # We pop at the START of processing the result so that even on 
+                # error or intercept, we don't re-try the SAME failing sub-goal infinitely.
+                queue = list(state.get("goal_queue", []))
+                completed = list(state.get("completed_goals", []))
+                
+                finished_goal = None
+                if queue:
+                    finished_goal = queue.pop(0)
+                    logger.info(f"Goal Completed: {finished_goal[:50]}. Queue remaining: {len(queue)}")
+
+                # Phase 113 Yield Detected (Phase 18 Integration)
+                if clean_answer and "NOT_CAPABILITY" in clean_answer.upper():
+                    obs = f"Observation: {clean_answer}"
+                    new_messages = list(state["messages"]) + [HumanMessage(content=obs)]
+                    log_event(logger, "info", "specialist_yield_intercepted", agent=action_name)
+                    
+                    # Even on yield, we record it as a 'failure' and move on (Phase 19 hardening)
+                    if finished_goal:
+                        completed.append({"goal": finished_goal, "result": "Specialist reported lack of capability."})
+
+                    return {
+                        **state,
+                        "messages": new_messages,
+                        "guard": guard,
+                        "last_action_status": "success",
+                        "next_node": "route" if queue else ("synthesis" if completed else "respond"),
+                        "goal_queue": queue,
+                        "completed_goals": completed,
+                        "step_count": state.get("step_count", 0) + 1,
+                    }
+
+                # Phase 17: Collect sub-goal result (Hardened Phase 18/19)
+                if finished_goal:
+                    completed.append({
+                        "goal": finished_goal,
+                        "result": str(clean_answer)
+                    })
+                    
+                # Phase 19: Hard Loop Count Rail
+                total_steps = state.get("step_count", 0)
+                if total_steps > 30:
+                    logger.error(f"Hard recursion limit reached in coordinator for mission {chain_id}. Finishing.")
+                    return {
+                        **state,
+                        "next_node": "respond",
+                        "direct_response": f"Task terminated: Partial coverage achieved ({len(completed)}/{len(queue)+len(completed)} goals). Step limit exceeded.",
+                        "goal_queue": [], # Clear queue to stop loop
+                        "completed_goals": completed
+                    }
+
+                # Phase 19/22: History Pruning (Bloat Defeat)
+                # Now possible since we removed 'add_messages' in state.py.
+                # All 'findings' are already stored in completed_goals list.
+                # We KEEP ONLY the system prompt (from route_node) and the final technical result.
+                final_history = []
+                if state.get("messages"):
+                    final_history.append(state["messages"][0]) # Initial prompt
+                    final_history.append(AIMessage(content=f"Technical result for {finished_goal or 'task'}: {clean_answer[:1000]}"))
+
                 return {
                     **state,
+                    "messages": final_history, # OVERWRITE (Pruned)
                     "guard": guard,
                     "last_action_status": "success",
-                    "next_node": "respond",
+                    "next_node": "route" if queue else ("synthesis" if completed else "respond"),
                     "direct_response": str(clean_answer),
+                    "goal_queue": queue,
+                    "completed_goals": completed,
                     "retry_count": state.get("retry_count", 0),
-                    "step_count": state.get("step_count", 0) + 1,
+                    "step_count": total_steps + 1,
                     "invalid_call_count": state.get("invalid_call_count", 0),
                     "rl_metadata": new_rl_meta
                 }
@@ -404,6 +572,26 @@ async def respond_node(state: AgentState) -> AgentState:
 
     return {**state, "final_response": direct or "I'm sorry, I couldn't generate a response. Please try again."}
 
+
+async def synthesis_node(state: AgentState) -> AgentState:
+    """Phase 17/22: Combine sub-goal results into the FINAL unified answer."""
+    completed = state.get("completed_goals", [])
+    if not completed:
+        return {**state, "next_node": "respond"}
+        
+    combined_answer = "# Consolidated technical Report\n\n"
+    combined_answer += f"Processed {len(completed)} sub-goals successfully.\n\n"
+    for idx, item in enumerate(completed):
+        combined_answer += f"## Part {idx+1}: {item['goal']}\n\n"
+        combined_answer += f"{item['result']}\n\n---\n\n"
+        
+    return {
+        **state,
+        "direct_response": combined_answer,
+        "final_response": combined_answer,
+        "next_node": "respond"
+    }
+
 # ─────────────────────────────────────────────
 # Router functions
 # ─────────────────────────────────────────────
@@ -425,27 +613,51 @@ def decide_after_execute(state: AgentState) -> str:
 def build_coordinator_graph():
     builder = StateGraph(AgentState)
 
-    builder.add_node("classify", classify_node)
-    builder.add_node("route",    route_node)
-    builder.add_node("execute",  execute_node)
-    builder.add_node("respond",  respond_node)
+    builder.add_node("classify",  classify_node)
+    builder.add_node("decompose", decompose_node)
+    builder.add_node("route",     route_node)
+    builder.add_node("execute",   execute_node)
+    builder.add_node("synthesis", synthesis_node)
+    builder.add_node("respond",   respond_node)
 
     builder.set_entry_point("classify")
-    builder.add_edge("classify", "route")
+    builder.add_edge("classify", "decompose")
+    builder.add_edge("decompose", "route") # decide_after_route logic inside route_node handles sub-goals
 
     builder.add_conditional_edges(
         "route",
         decide_after_route,
         {"execute": "execute", "respond": "respond"},
     )
+    
+    # Conditional logic for iterative looping:
+    # If execute is done, it might go back to route for more goals, or to synthesis.
+    def decide_after_execute_iterative(state: AgentState) -> str:
+        queue = state.get("goal_queue", [])
+        turn_count = state.get("coordinator_turn_count", 0)
+        
+        # Hard Termination Rail (Phase 21)
+        if turn_count >= 15:
+            logger.error(f"HARD TURN BUDGET REACHED (15/15) in coordinator. Terminating orchestration.")
+            return "synthesis" if state.get("completed_goals") else "respond"
+
+        if queue:
+            return "route"
+        if state.get("completed_goals"):
+            return "synthesis"
+        return "respond"
+
     builder.add_conditional_edges(
         "execute",
-        decide_after_execute,
-        {"route": "route", "respond": "respond"},
+        decide_after_execute_iterative,
+        {"route": "route", "synthesis": "synthesis", "respond": "respond"},
     )
+    
+    builder.add_edge("synthesis", "respond")
     builder.add_edge("respond", END)
 
-    return builder.compile()
+    # Phase 19: Set recursion limit to prevent memory-exhausting infinite loops.
+    return builder.compile(checkpointer=None).with_config(recursion_limit=50)
 
 # Singleton
 _COORDINATOR_GRAPH = None

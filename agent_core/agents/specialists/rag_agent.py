@@ -73,6 +73,10 @@ class ResearchAgentWorker:
         import time
         start_time = time.time()
         
+        # Phase 119: Explicit State Reset (Context Isolation)
+        # Prevent cross-turn thought duplication if the worker was reused.
+        self._last_published_thought = ""
+        
         # 1. Initialize Contextual IDs and Goals
         query_goal = task.payload.get("query") or task.payload.get("goal") or "No Goal"
         
@@ -150,6 +154,22 @@ class ResearchAgentWorker:
         try:
             # Bug 2 Fix: Use the dynamic max_iterations set at the top, don't overwrite with 4.
             for i in range(max_iterations):
+                # Phase 130: Reasoning Pruning (Hardened Phase 19/22)
+                # Tighten limit for sub-goals ([PART X OF Y]) vs standalone tasks.
+                limit = 3 if "[PART" in str(query_goal) else 5
+                if i >= limit:
+                    logger.warning(f"Reasoning runaway detected in specialist {self.__class__.__name__} (Turn {i}). Pruning.")
+                    # Keep only turn 1 and last observation for clean re-start of turn 6
+                    messages = [messages[0], messages[-1]]
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"LIMIT EXCEEDED: You have used {limit} reasoning turns. "
+                            "Do NOT perform more searches. Generate the best FINAL answer now "
+                            "using the information you have. Use respond_direct()."
+                        )
+                    })
+
                 # Check for abandonment (Phase 9 Hardening)
                 current_node = await self.tree_store.get_node_by_id_async(task.id)
                 if not current_node or current_node.status not in (NodeStatus.PENDING, NodeStatus.RUNNING):
@@ -298,6 +318,45 @@ class ResearchAgentWorker:
                           node_id=task.id, session_id=session_id, turn=i+1, action_type=action_type)
                 
                 if action_type in ["complete", "done", "respond", "finish", "respond_direct"]:
+                    # Phase 128: Stall Detection (Conciseness Hardening)
+                    # If the agent tries to 'finish' in Turn 1 with just conversational filler, reject.
+                    if i == 0:
+                        content_lower = str(action_payload).lower()
+                        is_filler = any(f in content_lower for f in ["okay", "sure", "i can help", "i will design", "let's start"])
+                        has_technical = any(t in content_lower for t in ["```", "sql", "table", "schema", "code", " - "])
+                        
+                        if is_filler and not has_technical:
+                            logger.warning(f"Planning stall detected in Turn 1 for task {task.id}. Forcing search.")
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    "REJECTION: You attempted to respond with a conversational 'receipt' or 'plan'. "
+                                    "This is PROHIBITED. Do not tell me what you will do. "
+                                    "IMMEDIATELY perform your first search turn (hybrid_search or web_search) or provide the final technical data."
+                                )
+                            })
+                            continue
+
+                    # Phase 122: Executor-Validator Pattern (Self-Correction)
+                    # Phase 131: Validation Suppression (Hardening Phase 19)
+                    # If the draft already has technical substance (Code, Tables), deliver immediately.
+                    has_verified = "verified" in response_text.lower() or "checked" in response_text.lower()
+                    has_technical = any(t in str(action_payload).lower() for t in ["```", "sql", "table", "schema", " - "])
+
+                    if not has_verified and not has_technical and i < max_iterations - 1:
+                        logger.info(f"Validator turn triggered for task {task.id}. Turn {i+1}")
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "VALIDATION STEP: Review your drafted answer above. "
+                                "1. Does it directly address the user's FULL goal? "
+                                "2. Is every technical claim grounded in the retrieved [CONTEXT_GROUNDING]? "
+                                "If the answer is perfect, respond again with 'RESPOND: [Verified] <your_answer>'. "
+                                "If you need more info (e.g. SQL is missing), perform one more search now."
+                            )
+                        })
+                        continue
+
                     try:
                         final_res = json.loads(action_payload) if isinstance(action_payload, str) and action_payload.strip().startswith("{") else action_payload
                     except Exception:

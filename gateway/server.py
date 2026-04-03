@@ -107,7 +107,49 @@ async def embed(req: EmbedRequest):
 @app.get("/health")
 async def health_check():
     """Health check for Docker and status monitoring."""
-    return {"status": "ok", "version": "1.1.0-stabilized"}
+    return {"status": "ok", "version": "1.2.0-stabilized"}
+
+
+# ---------------------------------------------------------------------------
+# A2A Protocol & Discovery (Phase 125)
+# ---------------------------------------------------------------------------
+@app.get("/.well-known/agent-card.json")
+async def get_agent_card():
+    """Discovery endpoint for A2A-compliant agents."""
+    card_path = os.path.join(PROJECT_ROOT, "agent-card.json")
+    if not os.path.exists(card_path):
+        raise HTTPException(status_code=404, detail="Agent Card not found.")
+    with open(card_path, "r") as f:
+        return json.load(f)
+
+
+@app.post("/a2a")
+async def a2a_rpc(request: Request):
+    """JSON-RPC 2.0 entry point for inter-agent communication."""
+    body = await request.json()
+    method = body.get("method")
+    params = body.get("params", {})
+    id = body.get("id")
+    
+    if method == "execute":
+        # Proxy to internal chat logic
+        message = params.get("message", "")
+        session_id = params.get("session_id")
+        
+        agent = CoordinatorAgent(session_id=session_id)
+        response = await agent.run_turn(message)
+        
+        return {
+            "jsonrpc": "2.0",
+            "result": {"response": response, "session_id": agent.session_id},
+            "id": id
+        }
+    
+    return {
+        "jsonrpc": "2.0",
+        "error": {"code": -32601, "message": "Method not found"},
+        "id": id
+    }
 
 
 # ---------------------------------------------------------------------------

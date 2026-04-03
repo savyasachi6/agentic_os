@@ -9,7 +9,7 @@ from langgraph.graph.message import add_messages
 
 class AgentState(TypedDict):
     # ── Conversation ──────────────────────────────────────────────
-    messages: Annotated[List[AnyMessage], add_messages]
+    messages: List[AnyMessage]
 
     # ── Planning ──────────────────────────────────────────────────
     plan: List[str]
@@ -43,6 +43,9 @@ class AgentState(TypedDict):
     invalid_call_count: int      # Count of failed/invalid tool calls (γ)
     rl_metadata: Dict[str, Any]  # RL Router decisions (arm, depth, query_hash) for the UI
     
-    # ── Phase 88: Goal Shield ──────────
-    is_affirmation: bool         # Current user message is "yes/ok/proceed"
+    # ── Phase 17: Multi-Topic Decomposition ──────────
+    goal_queue: List[str]        # Pending sub-tasks to process
+    completed_goals: List[Dict[str, Any]] # Results of finished sub-tasks
+    coordinator_turn_count: int  # Phase 21: Total turns in coordinator to prevent recursion
+    session_id: str              # Persistent UUID for RAG history
 

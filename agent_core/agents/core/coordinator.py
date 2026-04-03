@@ -16,7 +16,7 @@ from agent_core.llm.client import LLMClient
 from db.queries.commands import TreeStore
 from db.models import Node
 from agent_core.agent_types import AgentRole, NodeStatus, NodeType, Intent
-from agent_core.intent.classifier import classify_intent
+from agent_core.intent.classifier import classify_intent, classify_intent_async
 from agent_core.rag.retriever import HybridRetriever as SkillRetriever
 from agent_core.intent.routing import route_action_to_agent
 from agent_core.guards import AgentCallGuard
@@ -188,8 +188,8 @@ class CoordinatorAgent:
         if chain_id is None:
             return "Error: Failed to initialize execution chain."
         
-        # Initial Intent Classification
-        intent = classify_intent(message)
+        # Initial Intent Classification (Phase 124: LLM Augmented)
+        intent = await classify_intent_async(message, llm_client=self.llm)
         
         # Guard instantiation
         guard = AgentCallGuard(max_per_agent=2, max_total=8)
@@ -238,9 +238,32 @@ class CoordinatorAgent:
             
             if past_thoughts:
                 context_lines = []
+                
+                # Phase 121: Semantic Topic Guard (Context Isolation)
+                # Compare keywords between current message and history to detect 'Hard Pivots'.
+                query_lower = message.lower()
+                tech_clusters = {
+                    "db": {"sql", "postgres", "database", "schema", "tables", "query"},
+                    "git": {"git", "worktree", "branch", "commit", "push", "pull", "repo"},
+                    "infra": {"docker", "kubernetes", "aws", "lambda", "terraform", "ci/cd"},
+                    "code": {"python", "javascript", "function", "class", "async", "script"}
+                }
+                
+                # Identify query cluster
+                query_clusters = {cat for cat, words in tech_clusters.items() if any(w in query_lower for w in words)}
+
                 for t in past_thoughts:
                     # Filter for high-confidence matches to avoid irrelevant context injection
                     if t.get("score", 0) > 0.65:
+                        t_content_lower = t["content"].lower()
+                        # Identify memory cluster
+                        mem_clusters = {cat for cat, words in tech_clusters.items() if any(w in t_content_lower for w in words)}
+                        
+                        # Guard: If query is technical and memory is technical but from a DIFFERENT cluster, DISCARD.
+                        if query_clusters and mem_clusters and not (query_clusters & mem_clusters):
+                            logger.info(f"Topic Guard: Discarding memory context due to topic mismatch ({query_clusters} vs {mem_clusters})")
+                            continue
+                            
                         context_lines.append(f"[{t['role']}]: {t['content']}")
                 
                 if context_lines:

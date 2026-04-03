@@ -107,3 +107,42 @@ class AgentCallGuard:
     def summary(self) -> str:
         return f"Total calls: {self._total}/{self.max_total} | " + \
                " | ".join(f"{k}:{v}" for k, v in self._counts.items())
+
+
+class CapabilityClawGuard:
+    """
+    Phase 24: Zero-Trust Capability Gating (Claw Pattern).
+    Ensures that sensitive specialists (Code, Email) only run if the
+    user has the required 'CLAW' role in their JWT/RBAC context.
+    """
+    REQUIRED_CLAWS = {
+        "code": "claw_code",
+        "email": "claw_email",
+        "filesystem": "claw_fs"
+    }
+
+    def __init__(self, user_roles: List[str] = None):
+        self.user_roles = [r.lower() for r in (user_roles or [])]
+        logger.debug(f"CapabilityClawGuard initialized with roles: {self.user_roles}")
+
+    def check_permission(self, agent_name: str) -> bool:
+        """Check if the user has the required 'Claw' role for this agent."""
+        required = self.REQUIRED_CLAWS.get(agent_name.lower())
+        if not required:
+            # Not a restricted specialist (e.g. search, rag)
+            return True
+            
+        if required in self.user_roles:
+            logger.info(f"Capability Claws: Authorized. User has role '{required}' for specialist '{agent_name}'.")
+            return True
+            
+        logger.warning(f"Capability Claws: PERMISSION DENIED. User attempt to use specialist '{agent_name}' without role '{required}'.")
+        return False
+
+    def get_error_message(self, agent_name: str) -> str:
+        required = self.REQUIRED_CLAWS.get(agent_name.lower(), "authorized_role")
+        return (
+            f"Zero-Trust Policy Violation: Permission Denied for {agent_name} specialist. "
+            f"Your account requires the '{required}' role to perform this action. "
+            "Please contact your administrator to request a Capability Claw."
+        )

@@ -1,6 +1,9 @@
 networks:
-  agentos-net:
+  agentos-public:
+    driver: bridge # Phase 26: Public interface for UI/API access
+  agentos-internal:
     driver: bridge
+    internal: true # Phase 26: Air-Gapped Internal Data (No external gateway)
 
 services:
   postgres:
@@ -17,7 +20,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - agentos-net
+      - agentos-internal
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d
@@ -34,7 +37,7 @@ services:
       timeout: 3s
       retries: 5
     networks:
-      - agentos-net
+      - agentos-internal
 
   tools-api:
     build:
@@ -48,10 +51,11 @@ services:
       WORKER_PORT: "9101"
       PYTHONPATH: /sandbox:/sandbox/dev
     volumes:
-      - .:/sandbox
+      - .:/sandbox:ro # Phase 24: Read-Only Source Mount
+      - agentos-data:/data # Isolated Read-Write Data
     command: [ "python", "-u", "-m", "sandbox.worker", "--port", "9101", "--sandbox-id", "docker-tools", "--session-id", "global" ]
     networks:
-      - agentos-net
+      - agentos-internal
 
   agent-core:
     build:
@@ -77,7 +81,8 @@ services:
     secrets:
       - db_password
     volumes:
-      - .:/app
+      - .:/app:ro # Phase 24: Read-Only Source Mount
+      - agentos-data:/data # Isolated Read-Write Data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -88,7 +93,8 @@ services:
     healthcheck:
       test: [ "CMD-SHELL", "curl -f http://localhost:8000/health || exit 1" ]
     networks:
-      - agentos-net
+      - agentos-public
+      - agentos-internal
 
   agent-ui:
     build:
@@ -110,7 +116,8 @@ services:
     secrets:
       - db_password
     networks:
-      - agentos-net
+      - agentos-public
+      - agentos-internal
 
   workers:
     build:
@@ -129,7 +136,8 @@ services:
       LLM_MODEL: qwen3-vl:8b
       OLLAMA_HOST: http://host.docker.internal:11434
     volumes:
-      - .:/app
+      - .:/app:ro # Phase 24: Read-Only Source Mount
+      - agentos-data:/data # Isolated Read-Write Data
     secrets:
       - db_password
     extra_hosts:
@@ -148,7 +156,7 @@ services:
       retries: 5
       start_period: 60s
     networks:
-      - agentos-net
+      - agentos-internal
 
   # Sovereign Identity (Keycloak)
   keycloak:
@@ -174,10 +182,12 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - agentos-net
+      - agentos-public
+      - agentos-internal
 
 volumes:
   pgdata:
+  agentos-data: # Phase 24: Dedicated, isolated RW storage for artifacts/logs.
 
 secrets:
   db_password:

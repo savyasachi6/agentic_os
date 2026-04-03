@@ -114,9 +114,22 @@ class CodeAgentWorker:
 
     # --- Main task processor ---
     async def _process_task(self, task: Node):
+        from agent_core.guards import CapabilityClawGuard
         import time
         start_time = time.time()
-        goal = task.payload.get("query", task.payload.get("goal", "Unknown Goal"))
+        payload = task.payload or {}
+        user_roles = payload.get("user_roles", [])
+        
+        # Phase 24: Zero-Trust Capability Gating (Claw Pattern)
+        claw_guard = CapabilityClawGuard(user_roles)
+        if not claw_guard.check_permission("code"):
+            await self.tree_store.update_node_status_async(
+                task.id, NodeStatus.FAILED,
+                result={"error_type": "permission_denied", "error": claw_guard.get_error_message("code")}
+            )
+            return
+
+        goal = payload.get("query", payload.get("goal", "Unknown Goal"))
         logger.info(f"Task received: node_id={task.id}, role={AgentRole.TOOLS.value}, goal='{goal[:50]}...'")
 
         messages = [

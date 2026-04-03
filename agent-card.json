@@ -1,0 +1,33 @@
+{
+  "name": "Agentic OS",
+  "version": "1.2.0-stabilized",
+  "description": "Multi-agent orchestration framework with hybrid-search RAG and code execution.",
+  "capabilities": [
+    {
+      "name": "research",
+      "description": "Factual research using vector memory and web search.",
+      "role": "RAG"
+    },
+    {
+      "name": "code",
+      "description": "Python code execution and filesystem operations.",
+      "role": "TOOLS"
+    },
+    {
+      "name": "capability",
+      "description": "Discovery of available skills and agent tools.",
+      "role": "SCHEMA"
+    }
+  ],
+  "endpoints": {
+    "chat": "/chat",
+    "ws": "/ws",
+    "health": "/health",
+    "agent_card": "/.well-known/agent-card.json"
+  },
+  "protocol": "A2A v1.0",
+  "auth": {
+    "type": "Keycloak",
+    "issuer": "iam.agentos.internal"
+  }
+}

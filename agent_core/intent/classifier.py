@@ -152,3 +152,52 @@ def is_llm_generatable(task: str) -> bool:
         return False
         
     return any(kw in lower for kw in LLM_TASKS)
+
+async def classify_intent_async(message: str, llm_client=None) -> Intent:
+    """
+    Phase 123: LLM-Augmented Intent Classification.
+    1. Run fast heuristics first.
+    2. If COMPLEX_TASK or ambiguous, use LLM (ModelTier.NANO) to refine.
+    """
+    heuristic_intent = classify_intent(message)
+    
+    # If it's already a high-confidence match (greet, capability), return fast.
+    if heuristic_intent in [Intent.GREETING, Intent.CAPABILITY_QUERY, Intent.FILESYSTEM]:
+        return heuristic_intent
+        
+    if not llm_client:
+        return heuristic_intent
+
+    # Refine COMPLEX_TASK or ambiguous queries
+    try:
+        from agent_core.llm.models import ModelTier
+        prompt = (
+            "You are an expert intent classifier for an Agentic OS. "
+            "Analyze the user message and choose the BEST intent from this list:\n"
+            "- CAPABILITY_QUERY: Asking what you can do/available skills.\n"
+            "- CODE_GEN: Specifically asking for code/scripts.\n"
+            "- WEB_SEARCH: Current events or web-only info.\n"
+            "- FILESYSTEM: Local file/folder operations (ls, dir, find file).\n"
+            "- RAG_LOOKUP: Technical questions about architectures, docs, or indexed topics.\n"
+            "- GREETING: Conversational hello/thanks.\n"
+            "- SIMPLE_TASK: 1-step logic.\n"
+            "- COMPLEX_TASK: Multi-step research or reasoning.\n\n"
+            f"User Message: {message}\n\n"
+            "Respond with ONLY the intent name (e.g. CODE_GEN)."
+        )
+        
+        raw_res = await llm_client.generate_async(
+            [{"role": "user", "content": prompt}],
+            max_tokens=10,
+            tier=ModelTier.NANO
+        )
+        
+        refined = raw_res.strip().upper()
+        for idx, i in enumerate(Intent):
+            if i.value == refined or i.name == refined:
+                logger.info(f"LLM refined intent: {heuristic_intent} -> {i.name}")
+                return i
+    except Exception as e:
+        logger.warning(f"LLM Intent Classification failed: {e}")
+        
+    return heuristic_intent

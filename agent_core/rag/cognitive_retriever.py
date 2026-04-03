@@ -201,9 +201,17 @@ class CognitiveRetriever:
         is_web = (intent == "web_search")
         word_count = len(query.split())
         
+        # Phase 120: Technical Keyword Escape (Context Isolation)
+        # If the query contains high-precision technical terms, it's likely a standalone 
+        # request that should NOT be merged with unrelated history.
+        tech_keywords = {"sql", "postgres", "database", "schema", "aws", "docker", "kubernetes", "api", "rest", "graphql"}
+        query_words = set(query.lower().replace("?", "").replace(".", "").split())
+        has_tech_focus = any(k in query_words for k in tech_keywords)
+
         # Phase 105: Search Distillation (De-conversationalizing)
-        # If it's a long multi-part query, we MUST distill search terms regardless of history.
-        if is_web or word_count > 15:
+        # If it's a long multi-part query OR a technical pivot, we MUST distill search terms 
+        # and ignore history to prevent 'Git Worktree' type hallucinations.
+        if is_web or word_count > 10 or has_tech_focus:
             distill_prompt = (
                 "You are an expert technical search query distiller. Your task is to extract "
                 "HIGH-PRECISION search keywords from a complex, multi-topic user request. "
@@ -211,7 +219,7 @@ class CognitiveRetriever:
                 "1. Extract keywords for ALL detected technical topics (e.g. Git, CI/CD, PostgreSQL).\n"
                 "2. Remove ALL conversational filler ('how to', 'best practices', etc.).\n"
                 "3. Provide 5-10 concise keywords or short phrases, comma-separated.\n"
-                "4. Do NOT pick one topic; cover the ENTIRE goal.\n\n"
+                "4. Do NOT use any prior context if the current query is a hard technical pivot.\n\n"
                 f"User Request: {query}"
             )
             try:
@@ -229,7 +237,8 @@ class CognitiveRetriever:
                 logger.debug(f"Distillation failed: {e}")
 
         # Phase 87: Contextual Rewriting (for short conversational follow-ups)
-        if not prior or word_count > 15:
+        # Increased threshold to 10 words to force distillation earlier.
+        if not prior or word_count > 10:
             return query
         
         context_str = "; ".join(prior[-2:])
