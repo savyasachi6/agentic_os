@@ -149,7 +149,7 @@ For a detailed map, see [docs/repo-layout.md](docs/repo-layout.md) and [docs/can
 | [Canonical Package Map](docs/canonical-package-map.md) | Importable namespaces and canonical paths |
 | [Repo Layout](docs/repo-layout.md) | On-disk directory structure |
 | [API Reference](docs/api.md) | WebSocket, REST, A2A Bus, batch inference |
-| [Architecture Deep-Dive](docs/architecture.md) | Subsystem details and data flow |
+| [Architecture Deep-Dive](docs/02-architecture.md) | Subsystem details and data flow |
 
 Always run `pytest` before submitting changes.
 
